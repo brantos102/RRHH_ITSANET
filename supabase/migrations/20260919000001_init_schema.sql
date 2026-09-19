@@ -685,7 +685,8 @@ revoke all on public.auth_otp from anon, authenticated;
 
 -- Vista con datos mínimos del personal con permiso/vacación vigente.
 -- security_invoker = off (default): la vista filtra por rol y no expone columnas sensibles.
-create or replace view public.v_garita_actividad as
+drop view if exists public.v_garita_actividad;
+create view public.v_garita_actividad as
 select
   r.id              as request_id,
   r.qr_hash,
@@ -711,7 +712,8 @@ where r.estado in ('pendiente_jefe', 'pendiente_rrhh', 'aprobado')
 grant select on public.v_garita_actividad to authenticated;
 
 -- Visitantes actualmente dentro de la planta
-create or replace view public.v_visitantes_dentro as
+drop view if exists public.v_visitantes_dentro;
+create view public.v_visitantes_dentro as
 select v.id, v.cedula, v.nombre, v.empresa, v.motivo_visita,
        v.a_quien_visita_texto, v.ingreso_en
 from public.visitors v

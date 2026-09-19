@@ -31,27 +31,40 @@ on conflict (fecha) do nothing;
 
 -- Usuarios de prueba (cédulas válidas según módulo 10).
 -- Cambia los correos por los reales antes de probar el envío de OTP.
+-- El saldo NO se escribe a mano: se deriva de los períodos anuales (migración 0002).
 with rrhh as (
-  insert into public.users (cedula, nombre, email, telefono, rol, cargo, departamento, dias_vacaciones, fecha_ingreso)
-  values ('0703886002', 'María Vera', 'rrhh@itsanet.test', '0999000001', 'rrhh', 'Analista de RRHH', 'Talento Humano', 15, '2019-03-01')
+  insert into public.users (cedula, nombre, email, telefono, rol, cargo, departamento, fecha_ingreso)
+  values ('0703886002', 'María Vera', 'rrhh@itsanet.test', '0999000001', 'rrhh', 'Analista de RRHH', 'Talento Humano', '2019-03-01')
   on conflict (cedula) do update set nombre = excluded.nombre
   returning id
 ), jefe as (
-  insert into public.users (cedula, nombre, email, telefono, rol, cargo, departamento, dias_vacaciones, fecha_ingreso)
-  values ('1710034065', 'Carlos Moreno', 'jefe@itsanet.test', '0999000002', 'jefe', 'Jefe de Operaciones', 'Operaciones', 22, '2017-06-15')
+  insert into public.users (cedula, nombre, email, telefono, rol, cargo, departamento, fecha_ingreso)
+  values ('1710034065', 'Carlos Moreno', 'jefe@itsanet.test', '0999000002', 'jefe', 'Jefe de Operaciones', 'Operaciones', '2017-06-15')
   on conflict (cedula) do update set nombre = excluded.nombre
   returning id
 )
-insert into public.users (cedula, nombre, email, telefono, rol, cargo, departamento, jefe_id, dias_vacaciones, fecha_ingreso, logros)
+insert into public.users (cedula, nombre, email, telefono, rol, cargo, departamento, jefe_id, fecha_ingreso, logros)
 select * from (
   select '0926687856'::text, 'Ana Suárez', 'empleado@itsanet.test'::citext, '0999000003', 'empleado'::public.user_role,
-         'Asistente Administrativo', 'Operaciones', (select id from jefe), 12.5::numeric, '2021-09-01'::date,
+         'Asistente Administrativo', 'Operaciones', (select id from jefe), '2021-09-01'::date,
          '[{"titulo":"Empleado del mes","fecha":"2026-05-31","detalle":"Marzo 2026"}]'::jsonb
   union all
   select '1713175071', 'Luis Pinto', 'guardia@itsanet.test', '0999000004', 'guardia',
-         'Guardia de Seguridad', 'Seguridad', null, 10, '2022-01-10', '[]'::jsonb
+         'Guardia de Seguridad', 'Seguridad', null, '2022-01-10', '[]'::jsonb
   union all
   select '0602910945', 'Admin Sistema', 'admin@itsanet.test', '0999000005', 'admin',
-         'Administrador', 'TI', null, 15, '2016-01-04', '[]'::jsonb
-) as t(cedula, nombre, email, telefono, rol, cargo, departamento, jefe_id, dias_vacaciones, fecha_ingreso, logros)
+         'Administrador', 'TI', null, '2016-01-04', '[]'::jsonb
+) as t(cedula, nombre, email, telefono, rol, cargo, departamento, jefe_id, fecha_ingreso, logros)
 on conflict (cedula) do nothing;
+
+-- Generar los períodos anuales de vacaciones y caducar los acumulados de más de 3 años
+select public.generar_periodos_vacaciones(id) from public.users;
+select public.caducar_periodos_vencidos();
+
+-- Saldos "reales" de demostración (así se migrarán los 250 empleados desde la planilla).
+-- El tercer parámetro son los fines de semana obligatorios que ya consumió este período.
+select public.cargar_saldo_inicial(id, 12.5, 1) from public.users where cedula = '0926687856';
+select public.cargar_saldo_inicial(id, 18,   0) from public.users where cedula = '1710034065';
+select public.cargar_saldo_inicial(id, 22,   2) from public.users where cedula = '0703886002';
+select public.cargar_saldo_inicial(id, 10,   0) from public.users where cedula = '1713175071';
+select public.cargar_saldo_inicial(id, 15,   0) from public.users where cedula = '0602910945';

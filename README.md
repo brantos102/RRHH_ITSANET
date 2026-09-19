@@ -1,58 +1,97 @@
 # Sistema Integrado de Permisos, Vacaciones y Control de Garita
 
-Stack: **Supabase (PostgreSQL + Auth + Realtime)** · **Python / FastAPI** · **HTML + JS + TailwindCSS**
+Stack: **Supabase (PostgreSQL + Auth + Realtime + Storage)** · **Python / FastAPI** · **HTML + JS + TailwindCSS**
 
 | Sprint | Entregable | Estado |
 |---|---|---|
-| Tarea 1 | Esquema de base de datos y setup de Supabase | ✅ |
+| Tarea 1 | Esquema de base de datos y reglas de negocio Ecuador | ✅ |
 | Tarea 2 | API Backend — Autenticación OTP por cédula (FastAPI) | ⏳ |
-| Tarea 3 | Interfaz del empleado (login + dashboard) | ⏳ |
+| Tarea 3 | Interfaz del empleado (login + dashboard + firma) | ⏳ |
 | Tarea 4 | Flujo de aprobaciones + generación de QR | ⏳ |
 | Tarea 5 | Dashboard de garita (Realtime + escáner QR + visitas) | ⏳ |
 
-## Tarea 1 — Base de datos
+## Base de datos
 
 ```
 supabase/
-├── migrations/20260919000001_init_schema.sql   # esquema completo
-├── seed.sql                                    # feriados Ecuador + usuarios de prueba
-└── tests/smoke_test.sql                        # pruebas de reglas de negocio
+├── migrations/
+│   ├── 20260919000001_init_schema.sql      # tablas, RLS, triggers, Realtime
+│   ├── 20260919000002_reglas_ecuador.sql   # vacaciones, permisos, firmas, adjuntos
+│   └── 20260919000003_storage.sql          # buckets privados de Storage
+├── seed.sql                                # feriados + usuarios de prueba
+└── tests/smoke_test.sql                    # 71 casos de reglas de negocio
 ```
 
 ### Cómo aplicarlo
 
-**Opción A — SQL Editor de Supabase:** pega y ejecuta primero `migrations/20260919000001_init_schema.sql` y luego `seed.sql`.
+**SQL Editor de Supabase:** ejecuta las tres migraciones **en orden**, luego `seed.sql`.
 
-**Opción B — CLI:**
+**CLI:**
 ```bash
 supabase link --project-ref <TU_PROJECT_REF>
 supabase db push
 psql "$SUPABASE_DB_URL" -f supabase/seed.sql
 ```
 
-La migración es **idempotente**: se puede volver a ejecutar sin errores.
+Las migraciones son **idempotentes**: se pueden volver a ejecutar sin errores.
 
-### Qué incluye
+## Reglas de negocio implementadas en la base
 
-- **8 tablas**: `users`, `requests`, `access_logs`, `visitors`, `audit_logs`, `vacation_movements`, `feriados`, `auth_otp`.
-- **Validación de cédula ecuatoriana** (módulo 10) como función SQL y como `CHECK` en `users` y `visitors`.
-- **Regla Ecuador de días**: `permiso` → días hábiles; `vacacion` → días calendario (hábiles + fines de semana), descontando feriados nacionales.
-- **Justificación obligatoria** por `CHECK` cuando los días solicitados superan el saldo (marca `es_adelanto = true`).
-- **Máquina de estados** del flujo secuencial: `pendiente_jefe → pendiente_rrhh → aprobado`; cualquier salto se rechaza a nivel de base de datos.
-- **Emisión automática del QR** (`qr_hash`, `qr_emitido_en`, `qr_expira_en`) y **débito del saldo** al aprobar RRHH; la cancelación devuelve los días.
-- **Trazabilidad**: `audit_logs` (usuario, IP, acción, timestamp, detalle JSON) y `access_logs` (garita).
+### Vacaciones por antigüedad (Art. 69 Código del Trabajo)
+
+15 días por año cumplido; desde el 6to año se suma 1 día por cada año de servicio, con tope configurable (por defecto 15 adicionales = 30 días máximo).
+
+| Año de servicio | 1–5 | 6 | 7 | 10 | 20+ |
+|---|---|---|---|---|---|
+| Días | 15 | 16 | 17 | 20 | 30 |
+
+El saldo **no es un número suelto**: se deriva de `vacation_periods`, un registro por año de servicio con sus días asignados, consumidos y su fecha de caducidad (3 años, Art. 75). El consumo es **FIFO** (se gastan primero los períodos más antiguos, los que están por caducar). `users.dias_vacaciones` es solo una caché que los triggers mantienen sincronizada.
+
+### Dos fines de semana obligatorios por período
+
+De los 15 días, 4 deben ser 2 fines de semana completos. La base bloquea una solicitud de vacaciones que **termine en viernes** o **empiece en lunes** sin incluir el sábado y domingo adyacentes, mientras al empleado le falten fines de semana por consumir. El error incluye el rango corregido, y `previsualizar_solicitud()` lo devuelve al frontend para ofrecer la corrección con un clic.
+
+Una vez consumidos los 2 fines de semana del período, la restricción se levanta sola. RRHH puede saltarla caso por caso con `omitir_regla_fds`.
+
+### Cálculo de días
+
+- **Vacaciones**: días calendario (hábiles + fines de semana), descontando feriados nacionales.
+- **Permisos**: días hábiles, descontando feriados.
+
+### Permisos categorizados
+
+`permission_types` es un catálogo configurable por RRHH (16 tipos precargados según normativa ecuatoriana: cita médica, enfermedad, calamidad doméstica, fallecimiento de familiar, maternidad, paternidad, lactancia, matrimonio, estudios, trámite gubernamental, citación judicial, sufragio, donación de sangre, cuidado de persona con discapacidad, caso fortuito, asunto personal).
+
+Cada tipo define por sí mismo: si exige **adjunto de respaldo**, si exige **justificación**, si exige **firma**, si es **remunerado**, si **descuenta de vacaciones**, y sus topes de días y horas. Agregar o ajustar un tipo es un `UPDATE`, no una migración.
+
+### Adjuntos y firma electrónica
+
+- `request_attachments` + bucket privado `solicitudes/<user_id>/<request_id>/`. Solo JPEG, PNG, WebP, HEIC o PDF, máximo 10 MB.
+- `signatures`: firma registrada del usuario — **dibujada con el mouse**, imagen subida o certificado oficial. Una sola activa por usuario.
+- `request_signatures`: **instantánea** de la firma al momento de firmar. Si el usuario cambia su firma después, las solicitudes ya firmadas conservan la original.
+- La exigencia de adjunto y firma se valida con un **trigger diferido**: el backend inserta solicitud + archivos + firma en una sola transacción y la base rechaza el conjunto incompleto al confirmar.
+
+### Flujo y trazabilidad
+
+- Máquina de estados `pendiente_jefe → pendiente_rrhh → aprobado`: cualquier salto se rechaza en la base, no solo en el backend.
+- Al aprobar RRHH se emite el `qr_hash` con expiración y se descuenta el saldo por períodos.
+- Cancelar una solicitud aprobada devuelve días y fines de semana.
+- `audit_logs` (usuario, IP, acción, timestamp, detalle JSON) + `access_logs` (garita) + `vacation_movements` (ledger del saldo).
+
+### Migrar los 250 empleados
+
+`cargar_saldo_inicial(user_id, saldo_real, fines_semana_ya_consumidos)` genera los períodos históricos del empleado y ajusta el consumo para que el saldo cuadre con el que RRHH ya tiene en planilla. Es la función a usar en la carga masiva inicial.
+
+## Seguridad
+
 - **RLS por rol**: empleado ve lo suyo, jefe ve su equipo, RRHH/admin ven todo, guardia solo lo necesario para la garita.
-- **Realtime** habilitado en `requests`, `access_logs` y `visitors` (`replica identity full`).
-- **Vistas de garita**: `v_garita_actividad` y `v_visitantes_dentro`.
+- `auth_otp` **sin políticas RLS y con privilegios revocados** a `anon`/`authenticated`: solo el backend (service_role). Del OTP se guarda únicamente el hash SHA-256.
+- `anon` no tiene `SELECT` sobre `users`: el login por cédula pasa siempre por el backend.
+- Buckets **privados** con políticas por carpeta: cada quien sube a `<su user_id>/` y solo su jefe y RRHH pueden leerlo.
+- Las vistas de garita filtran por `is_guardia()` internamente, sin exponer columnas sensibles.
 
-### Notas de seguridad
+## Verificación
 
-- `auth_otp` **no tiene políticas RLS y revoca privilegios a `anon`/`authenticated`**: solo el backend FastAPI (service_role) la toca. Del OTP se guarda únicamente el hash.
-- El rol `anon` no tiene `SELECT` sobre `users`: el login por cédula pasa siempre por el backend.
-- Las vistas de garita filtran por `public.is_guardia()` internamente, por lo que no exponen columnas sensibles de `users`.
+`supabase/tests/smoke_test.sql` es **SQL puro**: se pega tal cual en el SQL Editor. Corre **71 casos** (cédula módulo 10, días por antigüedad, períodos y caducidad, regla de fines de semana, flujo de aprobación, QR, consumo y reversa de saldo, descripción de 200 caracteres, permisos categorizados, adjuntos, firmas, auditoría y garita). Crea sus propios datos con correos `@smoke.test` y **los borra al terminar**. Devuelve una tabla con ✅/❌ por caso.
 
-### Verificación
-
-`supabase/tests/smoke_test.sql` es **SQL puro**: se pega y ejecuta tal cual en el SQL Editor de Supabase. Corre 30 casos (validación de cédula, cálculo de días, justificación obligatoria, transiciones de estado, emisión de QR, débito y reversa de saldo, auditoría y registro de garita), crea sus propios datos de prueba con correos `@smoke.test` y **los borra al terminar**. Devuelve una tabla con ✅/❌ por caso.
-
-Aun así, ejecútalo preferentemente en una base de staging: escribe y borra filas reales.
+Ejecútalo preferentemente en staging: escribe y borra filas reales.
