@@ -1,84 +1,248 @@
-\set ON_ERROR_STOP on
-\pset pager off
+-- =====================================================================
+--  SMOKE TEST — Reglas de negocio del esquema
+--
+--  SQL puro: se pega y ejecuta tal cual en el SQL Editor de Supabase
+--  (no usa meta-comandos de psql como \set o \pset).
+--
+--  * Crea sus propios datos de prueba (cédulas 1700000001 / 0900000001,
+--    correos @smoke.test) y los BORRA al terminar.
+--  * No depende de seed.sql ni toca datos reales.
+--  * Al final muestra una tabla con el resultado de cada caso.
+-- =====================================================================
 
--- ===== 1. Validación de cédula (módulo 10) =====
-select 'cedula valida'        as caso, public.es_cedula_valida('0926687856') as esperado_t;
-select 'digito verif malo'    as caso, public.es_cedula_valida('0926687857') as esperado_f;
-select '9 digitos'            as caso, public.es_cedula_valida('092668785')  as esperado_f;
-select 'provincia 99'         as caso, public.es_cedula_valida('9926687856') as esperado_f;
-select 'tercer digito 7'      as caso, public.es_cedula_valida('0976687856') as esperado_f;
-select 'con letras'           as caso, public.es_cedula_valida('09A6687856') as esperado_f;
+drop table if exists _smoke_resultados;
+create temp table _smoke_resultados (
+  n        serial primary key,
+  caso     text,
+  esperado text,
+  obtenido text,
+  ok       boolean
+);
 
--- ===== 2. Cálculo de días (regla Ecuador) =====
-select 'permiso lun-vie (5 habiles)'      as caso, public.calcular_dias('permiso','2026-09-21','2026-09-25')  as dias;
-select 'vacacion lun-dom (7 calendario)'  as caso, public.calcular_dias('vacacion','2026-09-21','2026-09-27') as dias;
-select 'vacacion con feriado 09-oct (6)'  as caso, public.calcular_dias('vacacion','2026-10-05','2026-10-11') as dias;
-select 'permiso con feriado 09-oct (4)'   as caso, public.calcular_dias('permiso','2026-10-05','2026-10-09')  as dias;
+do $smoke$
+declare
+  v_user_id    uuid;
+  v_req_ok     uuid;
+  v_req_excede uuid;
+  v_visit_id   uuid;
+  v_lun        date;
+  v_feriado    date;
+  v_estado     public.request_status;
+  v_dias       numeric;
+  v_adelanto   boolean;
+  v_saldo      numeric;
+  v_qr         uuid;
+  v_bloqueado  boolean;
+  v_txt        text;
+  v_cnt        int;
 
--- ===== 3. Alta de solicitud dentro del saldo =====
-insert into public.requests (user_id, tipo, fecha_inicio, fecha_fin, motivo)
-select id, 'vacacion', '2026-11-09', '2026-11-13', 'Viaje familiar' from public.users where cedula='0926687856';
-
-select 'insert dentro de saldo' as caso, estado, dias_solicitados, saldo_al_solicitar, es_adelanto,
-       jefe_id is not null as jefe_asignado
-from public.requests order by created_at desc limit 1;
-
--- ===== 4. Excede saldo SIN justificación -> debe fallar =====
-do $$
 begin
+  ---------------------------------------------------------------------
+  -- Limpieza previa (por si una corrida anterior quedó a medias)
+  ---------------------------------------------------------------------
+  delete from public.access_logs where observacion like 'SMOKE%';
+  delete from public.visitors     where cedula = '0900000001' and motivo_visita like 'SMOKE%';
+  delete from public.users        where email like '%@smoke.test';
+  delete from public.feriados     where nombre = 'SMOKE feriado';
+
+  ---------------------------------------------------------------------
+  -- 1. Validación de cédula ecuatoriana (módulo 10)
+  ---------------------------------------------------------------------
+  insert into _smoke_resultados (caso, esperado, obtenido) values
+    ('1. Cédula válida',                'true',  public.es_cedula_valida('0926687856')::text),
+    ('2. Dígito verificador incorrecto','false', public.es_cedula_valida('0926687857')::text),
+    ('3. Solo 9 dígitos',               'false', public.es_cedula_valida('092668785')::text),
+    ('4. Provincia inexistente (99)',   'false', public.es_cedula_valida('9926687856')::text),
+    ('5. Tercer dígito > 5',            'false', public.es_cedula_valida('0976687856')::text),
+    ('6. Contiene letras',              'false', public.es_cedula_valida('09A6687856')::text),
+    ('7. Valor nulo',                   'false', coalesce(public.es_cedula_valida(null)::text,'false'));
+
+  ---------------------------------------------------------------------
+  -- 2. Cálculo de días (regla Ecuador) con un feriado de prueba
+  ---------------------------------------------------------------------
+  v_lun     := date_trunc('week', date '2099-07-07')::date;  -- lunes
+  v_feriado := v_lun + 2;                                    -- miércoles feriado
+  insert into public.feriados (fecha, nombre) values (v_feriado, 'SMOKE feriado');
+
+  insert into _smoke_resultados (caso, esperado, obtenido) values
+    ('8. Permiso lun-vie sin feriado = 5 días hábiles',
+     '5', public.calcular_dias('permiso',  v_lun + 7, v_lun + 11)::text),
+    ('9. Vacación lun-dom sin feriado = 7 días calendario',
+     '7', public.calcular_dias('vacacion', v_lun + 7, v_lun + 13)::text),
+    ('10. Permiso lun-vie con feriado = 4',
+     '4', public.calcular_dias('permiso',  v_lun, v_lun + 4)::text),
+    ('11. Vacación lun-dom con feriado = 6',
+     '6', public.calcular_dias('vacacion', v_lun, v_lun + 6)::text),
+    ('12. Fecha fin anterior a inicio = 0',
+     '0', public.calcular_dias('vacacion', v_lun + 5, v_lun)::text);
+
+  ---------------------------------------------------------------------
+  -- 3. Usuario de prueba (saldo 12.5 días)
+  ---------------------------------------------------------------------
+  insert into public.users (cedula, nombre, email, rol, dias_vacaciones, fecha_ingreso)
+  values ('1700000001', 'SMOKE Empleado', 'empleado@smoke.test', 'empleado', 12.5, '2021-01-04')
+  returning id into v_user_id;
+
+  ---------------------------------------------------------------------
+  -- 4. Solicitud dentro del saldo
+  ---------------------------------------------------------------------
   insert into public.requests (user_id, tipo, fecha_inicio, fecha_fin, motivo)
-  select id, 'vacacion', '2026-12-01', '2026-12-31', 'Sin justificar' from public.users where cedula='0926687856';
-  raise exception 'FALLO: se permitió exceder el saldo sin justificación';
-exception when check_violation then
-  raise notice 'OK: bloqueado por justificación obligatoria';
-end$$;
+  values (v_user_id, 'vacacion', v_lun + 7, v_lun + 11, 'SMOKE dentro de saldo')
+  returning id, estado, dias_solicitados, es_adelanto
+    into v_req_ok, v_estado, v_dias, v_adelanto;
 
--- ===== 5. Excede saldo CON justificación -> es_adelanto = true =====
-insert into public.requests (user_id, tipo, fecha_inicio, fecha_fin, motivo, justificacion)
-select id, 'vacacion', '2026-12-01', '2026-12-31', 'Fin de año',
-       'Requiere días adelantados por viaje familiar programado con anticipación.'
-from public.users where cedula='0926687856';
-select 'excede saldo con justificacion' as caso, dias_solicitados, es_adelanto from public.requests
- where fecha_inicio='2026-12-01';
+  insert into _smoke_resultados (caso, esperado, obtenido) values
+    ('13. Estado inicial de la solicitud', 'pendiente_jefe', v_estado::text),
+    ('14. Días calculados por el trigger', '5.00',           v_dias::text),
+    ('15. No se marca como adelanto',      'false',          v_adelanto::text);
 
--- ===== 6. Transición inválida pendiente_jefe -> aprobado =====
-do $$
-declare v_id uuid;
-begin
-  select id into v_id from public.requests where fecha_inicio='2026-11-09';
-  update public.requests set estado='aprobado' where id=v_id;
-  raise exception 'FALLO: se permitió saltar la aprobación del jefe';
-exception when raise_exception then
-  if sqlerrm like 'FALLO%' then raise; end if;
-  raise notice 'OK: transición inválida bloqueada (%)', sqlerrm;
-end$$;
+  ---------------------------------------------------------------------
+  -- 5. Excede el saldo SIN justificación -> debe bloquearse
+  ---------------------------------------------------------------------
+  v_bloqueado := false;
+  begin
+    insert into public.requests (user_id, tipo, fecha_inicio, fecha_fin, motivo)
+    values (v_user_id, 'vacacion', v_lun + 30, v_lun + 59, 'SMOKE sin justificar');
+  exception when check_violation then
+    v_bloqueado := true;
+  end;
+  insert into _smoke_resultados (caso, esperado, obtenido) values
+    ('16. Excede saldo sin justificación se bloquea', 'true', v_bloqueado::text);
 
--- ===== 7. Flujo completo jefe -> RRHH -> QR + débito de saldo =====
-update public.requests r set estado='pendiente_rrhh', jefe_aprobado_por=u.id
-  from public.users u where u.cedula='1710034065' and r.fecha_inicio='2026-11-09';
-update public.requests r set estado='aprobado', rrhh_aprobado_por=u.id
-  from public.users u where u.cedula='0703886002' and r.fecha_inicio='2026-11-09';
+  ---------------------------------------------------------------------
+  -- 6. Excede el saldo CON justificación -> se acepta como adelanto
+  ---------------------------------------------------------------------
+  insert into public.requests (user_id, tipo, fecha_inicio, fecha_fin, motivo, justificacion)
+  values (v_user_id, 'vacacion', v_lun + 30, v_lun + 59, 'SMOKE con justificación',
+          'Días adelantados por viaje familiar programado con anticipación.')
+  returning id, es_adelanto into v_req_excede, v_adelanto;
 
-select 'aprobacion final' as caso, estado, qr_hash is not null as qr_emitido,
-       qr_emitido_en is not null as ts_qr, qr_expira_en::date as qr_expira
-from public.requests where fecha_inicio='2026-11-09';
+  insert into _smoke_resultados (caso, esperado, obtenido) values
+    ('17. Excede saldo con justificación se acepta', 'true', (v_req_excede is not null)::text),
+    ('18. Se marca como días adelantados',           'true', v_adelanto::text);
 
-select 'saldo tras aprobar (12.5-5=7.5)' as caso, dias_vacaciones from public.users where cedula='0926687856';
-select 'movimiento de saldo' as caso, dias, saldo_previo, saldo_nuevo, motivo from public.vacation_movements;
+  ---------------------------------------------------------------------
+  -- 7. No se puede saltar la aprobación del jefe
+  ---------------------------------------------------------------------
+  v_bloqueado := false;
+  begin
+    update public.requests set estado = 'aprobado' where id = v_req_ok;
+  exception when raise_exception then
+    v_bloqueado := true;
+  end;
+  insert into _smoke_resultados (caso, esperado, obtenido) values
+    ('19. Transición pendiente_jefe -> aprobado bloqueada', 'true', v_bloqueado::text);
 
--- ===== 8. Cancelación de aprobada devuelve saldo =====
-update public.requests set estado='cancelado' where fecha_inicio='2026-11-09';
-select 'saldo tras cancelar (7.5+5=12.5)' as caso, dias_vacaciones from public.users where cedula='0926687856';
+  ---------------------------------------------------------------------
+  -- 8. Flujo completo: jefe -> RRHH -> QR + débito de saldo
+  ---------------------------------------------------------------------
+  update public.requests set estado = 'pendiente_rrhh' where id = v_req_ok;
+  update public.requests set estado = 'aprobado'       where id = v_req_ok;
 
--- ===== 9. Trazabilidad =====
-select 'audit_logs' as caso, accion, count(*) from public.audit_logs group by accion order by accion;
+  select estado, qr_hash, qr_emitido_en is not null
+    into v_estado, v_qr, v_bloqueado
+  from public.requests where id = v_req_ok;
 
--- ===== 10. Garita: access_log + visitante =====
-insert into public.visitors (cedula, nombre, empresa, motivo_visita, a_quien_visita_texto, registrado_por)
-select '1713175071', 'Proveedor X', 'ACME', 'Entrega de equipos', 'Bodega', id
-from public.users where cedula='1713175071';
-insert into public.access_logs (visitor_id, cedula, tipo_acceso, guardia_id, ip)
-select v.id, v.cedula, 'ingreso_visita', u.id, '10.0.0.5'::inet
-from public.visitors v, public.users u where u.cedula='1713175071' limit 1;
-select 'garita' as caso, (select count(*) from public.v_visitantes_dentro) as ignorado_sin_rol,
-       (select count(*) from public.access_logs) as logs;
+  select dias_vacaciones into v_saldo from public.users where id = v_user_id;
+
+  select count(*) into v_cnt
+  from public.vacation_movements where request_id = v_req_ok and dias = -5;
+
+  insert into _smoke_resultados (caso, esperado, obtenido) values
+    ('20. Estado final tras aprobar RRHH',        'aprobado', v_estado::text),
+    ('21. Se emite el código QR',                 'true',     (v_qr is not null)::text),
+    ('22. Se registra la fecha de emisión del QR','true',     v_bloqueado::text),
+    ('23. Saldo descontado (12.5 - 5)',           '7.50',     v_saldo::text),
+    ('24. Movimiento de saldo registrado',        '1',        v_cnt::text);
+
+  ---------------------------------------------------------------------
+  -- 9. Cancelar una solicitud aprobada devuelve los días
+  ---------------------------------------------------------------------
+  update public.requests set estado = 'cancelado' where id = v_req_ok;
+  select dias_vacaciones into v_saldo from public.users where id = v_user_id;
+
+  insert into _smoke_resultados (caso, esperado, obtenido) values
+    ('25. Saldo devuelto tras cancelar (7.5 + 5)', '12.50', v_saldo::text);
+
+  ---------------------------------------------------------------------
+  -- 10. Trazabilidad: auditoría automática de solicitudes
+  ---------------------------------------------------------------------
+  select count(*) into v_cnt
+  from public.audit_logs
+  where entidad = 'requests' and entidad_id = v_req_ok::text and accion = 'request_creada';
+  insert into _smoke_resultados (caso, esperado, obtenido) values
+    ('26. audit_logs registra la creación', '1', v_cnt::text);
+
+  select count(*) into v_cnt
+  from public.audit_logs
+  where entidad = 'requests' and entidad_id = v_req_ok::text and accion = 'request_estado_cambiado';
+  insert into _smoke_resultados (caso, esperado, obtenido) values
+    ('27. audit_logs registra los 3 cambios de estado', '3', v_cnt::text);
+
+  ---------------------------------------------------------------------
+  -- 11. Garita: visitante + bitácora de acceso
+  ---------------------------------------------------------------------
+  insert into public.visitors (cedula, nombre, empresa, motivo_visita, a_quien_visita_texto)
+  values ('0900000001', 'SMOKE Visitante', 'ACME', 'SMOKE entrega de equipos', 'Bodega')
+  returning id into v_visit_id;
+
+  insert into public.access_logs (visitor_id, cedula, tipo_acceso, ip, observacion)
+  values (v_visit_id, '0900000001', 'ingreso_visita', '10.0.0.5'::inet, 'SMOKE ingreso');
+
+  insert into public.access_logs (user_id, cedula, tipo_acceso, ip, observacion)
+  values (v_user_id, '1700000001', 'salida_empleado', '10.0.0.5'::inet, 'SMOKE salida');
+
+  select count(*) into v_cnt from public.access_logs where observacion like 'SMOKE%';
+  insert into _smoke_resultados (caso, esperado, obtenido) values
+    ('28. Garita registra accesos de empleado y visita', '2', v_cnt::text);
+
+  select count(*) into v_cnt from public.visitors
+   where id = v_visit_id and salida_en is null;
+  insert into _smoke_resultados (caso, esperado, obtenido) values
+    ('29. Visitante queda marcado como "dentro"', '1', v_cnt::text);
+
+  ---------------------------------------------------------------------
+  -- 12. Cédula inválida rechazada por el CHECK de users
+  ---------------------------------------------------------------------
+  v_bloqueado := false;
+  begin
+    insert into public.users (cedula, nombre, email, rol, fecha_ingreso)
+    values ('1234567890', 'SMOKE Inválido', 'invalido@smoke.test', 'empleado', '2021-01-04');
+  exception when check_violation then
+    v_bloqueado := true;
+  end;
+  insert into _smoke_resultados (caso, esperado, obtenido) values
+    ('30. CHECK rechaza cédula inválida en users', 'true', v_bloqueado::text);
+
+  ---------------------------------------------------------------------
+  -- LIMPIEZA: se borra todo lo creado por la prueba
+  ---------------------------------------------------------------------
+  delete from public.access_logs where observacion like 'SMOKE%';
+  delete from public.audit_logs  where entidad = 'requests'
+     and entidad_id in (v_req_ok::text, v_req_excede::text);
+  delete from public.visitors    where id = v_visit_id;
+  delete from public.users       where id = v_user_id;   -- cascada: requests y movimientos
+  delete from public.feriados    where nombre = 'SMOKE feriado';
+
+  update _smoke_resultados set ok = (esperado = obtenido);
+
+exception when others then
+  -- Si algo explota, se deja constancia y se limpia igual
+  get stacked diagnostics v_txt = message_text;
+  insert into _smoke_resultados (caso, esperado, obtenido, ok)
+  values ('ERROR INESPERADO', 'sin error', v_txt, false);
+
+  delete from public.access_logs where observacion like 'SMOKE%';
+  delete from public.visitors    where cedula = '0900000001' and motivo_visita like 'SMOKE%';
+  delete from public.users       where email like '%@smoke.test';
+  delete from public.feriados    where nombre = 'SMOKE feriado';
+  update _smoke_resultados set ok = (esperado = obtenido) where ok is null;
+end
+$smoke$;
+
+-- ===== RESULTADOS =====
+select
+  case when ok then '✅' else '❌' end as r,
+  caso, esperado, obtenido
+from _smoke_resultados
+order by n;

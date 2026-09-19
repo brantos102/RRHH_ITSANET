@@ -53,4 +53,6 @@ La migración es **idempotente**: se puede volver a ejecutar sin errores.
 
 ### Verificación
 
-`supabase/tests/smoke_test.sql` inserta datos y comprueba validación de cédula, cálculo de días, justificación obligatoria, transiciones de estado, emisión de QR y débito/reversa de saldo. **Ejecútalo solo en una base local o de staging.**
+`supabase/tests/smoke_test.sql` es **SQL puro**: se pega y ejecuta tal cual en el SQL Editor de Supabase. Corre 30 casos (validación de cédula, cálculo de días, justificación obligatoria, transiciones de estado, emisión de QR, débito y reversa de saldo, auditoría y registro de garita), crea sus propios datos de prueba con correos `@smoke.test` y **los borra al terminar**. Devuelve una tabla con ✅/❌ por caso.
+
+Aun así, ejecútalo preferentemente en una base de staging: escribe y borra filas reales.
