@@ -92,6 +92,17 @@ Cada tipo define por sí mismo: si exige **adjunto de respaldo**, si exige **jus
 
 ## Verificación
 
-`supabase/tests/smoke_test.sql` es **SQL puro**: se pega tal cual en el SQL Editor. Corre **71 casos** (cédula módulo 10, días por antigüedad, períodos y caducidad, regla de fines de semana, flujo de aprobación, QR, consumo y reversa de saldo, descripción de 200 caracteres, permisos categorizados, adjuntos, firmas, auditoría y garita). Crea sus propios datos con correos `@smoke.test` y **los borra al terminar**. Devuelve una tabla con ✅/❌ por caso.
+```
+supabase/tests/
+├── _helpers.sql                # ejecutar PRIMERO (crea utilidades temporales)
+├── smoke_test.sql              # 71 casos: vacaciones, permisos, QR, garita
+└── smoke_test_normativa.sql    # 39 casos: normativa, alertas, datos, seguridad
+```
 
-Ejecútalo preferentemente en staging: escribe y borra filas reales.
+En el SQL Editor de Supabase, **en la misma pestaña**: primero `_helpers.sql`, luego el archivo de pruebas. Las utilidades son temporales y viven solo mientras dure la sesión de esa pestaña.
+
+Ambos archivos son **SQL puro** y están escritos como sentencias cortas e independientes (la mayor no llega a 1,5 KB). Si el editor corta el pegado, el error señala en qué sección ocurrió y se puede reanudar desde ahí, en lugar de fallar entero.
+
+Cada archivo crea sus propios datos (`@smoke.test` / `@norm.test`) y **los borra en su sección final**. Devuelven una tabla con ✅/❌ por caso.
+
+Ejecútalos preferentemente en staging: escriben y borran filas reales.
