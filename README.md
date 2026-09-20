@@ -94,15 +94,17 @@ Cada tipo define por sí mismo: si exige **adjunto de respaldo**, si exige **jus
 
 ```
 supabase/tests/
-├── _helpers.sql                # ejecutar PRIMERO (crea utilidades temporales)
-├── smoke_test.sql              # 71 casos: vacaciones, permisos, QR, garita
-└── smoke_test_normativa.sql    # 39 casos: normativa, alertas, datos, seguridad
+├── 00_verificar_instalacion.sql  # qué migraciones están aplicadas
+├── smoke_test.sql                # 71 casos (requiere 0001 y 0002)
+└── smoke_test_normativa.sql      # 39 casos (requiere 0001 a 0004)
 ```
 
-En el SQL Editor de Supabase, **en la misma pestaña**: primero `_helpers.sql`, luego el archivo de pruebas. Las utilidades son temporales y viven solo mientras dure la sesión de esa pestaña.
+Ejecuta primero `00_verificar_instalacion.sql`: te dice con ✅/❌ qué migración falta antes de que un test falle por eso.
 
-Ambos archivos son **SQL puro** y están escritos como sentencias cortas e independientes (la mayor no llega a 1,5 KB). Si el editor corta el pegado, el error señala en qué sección ocurrió y se puede reanudar desde ahí, en lugar de fallar entero.
+Cada archivo de pruebas es **autónomo** — se pega y ejecuta de una sola vez, en cualquier sesión. Crea sus utilidades en un esquema `smoke`, sus datos de prueba con correos `@smoke.test` / `@norm.test`, y **los borra en su sección final**. Devuelve una tabla con ✅/❌ por caso.
 
-Cada archivo crea sus propios datos (`@smoke.test` / `@norm.test`) y **los borra en su sección final**. Devuelven una tabla con ✅/❌ por caso.
+No usa objetos temporales: el editor de Supabase abre una conexión distinta en cada ejecución, y lo temporal no sobrevive entre ellas. Por eso el estado va en el esquema `smoke`, que además permite pegar el archivo por secciones si el editor corta el texto. Al terminar puedes eliminarlo con `drop schema smoke cascade;`.
+
+Las sentencias son cortas e independientes (la mayor no llega a 1,5 KB), así que un corte de pegado señala la sección exacta en vez de tumbar el archivo entero.
 
 Ejecútalos preferentemente en staging: escriben y borran filas reales.
