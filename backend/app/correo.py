@@ -40,7 +40,22 @@ def _plantilla_otp(nombre: str, codigo: str, minutos: int, app: str) -> tuple[st
     return texto, html
 
 
-async def enviar(destinatario: str, asunto: str, texto: str, html: str | None = None) -> None:
+async def enviar(
+    destinatario: str,
+    asunto: str,
+    texto: str,
+    html: str | None = None,
+    *,
+    imagenes: dict[str, bytes] | None = None,
+    adjuntos: list[tuple[str, bytes, str]] | None = None,
+) -> None:
+    """Envía un correo.
+
+    `imagenes` son imágenes incrustadas por Content-ID: {"qr": b"...png"} se
+    referencia en el HTML como <img src="cid:qr">. Los clientes de correo
+    bloquean las data URI, pero muestran las imágenes incrustadas así.
+    `adjuntos` es una lista de (nombre, contenido, mime).
+    """
     settings = get_settings()
 
     if settings.email_backend == "console":
@@ -55,6 +70,15 @@ async def enviar(destinatario: str, asunto: str, texto: str, html: str | None = 
     mensaje.set_content(texto)
     if html:
         mensaje.add_alternative(html, subtype="html")
+
+        for cid, contenido in (imagenes or {}).items():
+            mensaje.get_payload()[-1].add_related(
+                contenido, maintype="image", subtype="png", cid=f"<{cid}>"
+            )
+
+    for nombre, contenido, mime in adjuntos or []:
+        principal, _, secundario = mime.partition("/")
+        mensaje.add_attachment(contenido, maintype=principal, subtype=secundario, filename=nombre)
 
     await aiosmtplib.send(
         mensaje,

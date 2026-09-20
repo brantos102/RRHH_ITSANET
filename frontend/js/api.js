@@ -96,6 +96,17 @@ export const api = {
     return peticion(`/solicitudes/adjuntos?solicitud_id=${solicitudId}`, { method: "POST", body: fd });
   },
 
+  // Aprobaciones
+  pendientes: () => peticion("/aprobaciones/pendientes"),
+  decidir: (id, accion, motivo) =>
+    peticion(`/aprobaciones/${id}/decidir`, { method: "POST", body: JSON.stringify({ accion, motivo }) }),
+  // Enlace del correo: no requiere sesión
+  verEnlace: (token, rol) => peticion(`/aprobaciones/enlace/${token}?rol=${rol}`),
+  decidirEnlace: (token, rol, accion, motivo) =>
+    peticion(`/aprobaciones/enlace/${token}/decidir?rol=${rol}`,
+             { method: "POST", body: JSON.stringify({ accion, motivo }) }),
+  qrUrl: (id) => `${API}/solicitudes/${id}/qr.png`,
+
   miFirma: () => peticion("/firmas/mia"),
   guardarFirma: (contenido) =>
     peticion("/firmas/dibujada", { method: "POST", body: JSON.stringify({ contenido }) }),

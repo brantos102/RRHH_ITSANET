@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     smtp_starttls: bool = True
     email_backend: str = "smtp"  # smtp | console
 
+    # Enlaces de aprobación enviados por correo
+    aprobacion_link_dias: int = 15
+
     # Aplicación
     app_nombre: str = "Sistema de Permisos y Vacaciones"
     app_url: str = "http://localhost:5500"

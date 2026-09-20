@@ -7,10 +7,12 @@ import uuid
 from datetime import date, time
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import (APIRouter, BackgroundTasks, Depends, File, HTTPException, Request,
+                     UploadFile, status)
 from pydantic import BaseModel, Field, field_validator
 from psycopg import errors as pg
 
+from .. import notificaciones
 from ..audit import registrar
 from ..db import conexion, obtener_todos, obtener_uno
 from ..deps import usuario_actual
@@ -107,7 +109,8 @@ async def previsualizar(
 # ------------------------------------------------------------------ envío
 @router.post("/solicitudes", status_code=status.HTTP_201_CREATED)
 async def crear_solicitud(
-    datos: NuevaSolicitud, request: Request, usuario: Annotated[dict, Depends(usuario_actual)]
+    datos: NuevaSolicitud, request: Request, tareas: BackgroundTasks,
+    usuario: Annotated[dict, Depends(usuario_actual)]
 ) -> dict:
     """Crea la solicitud con sus adjuntos y su firma en una sola transacción.
 
@@ -174,6 +177,30 @@ async def crear_solicitud(
     await registrar(request, "solicitud_enviada", user_id=str(usuario["id"]),
                     cedula=usuario["cedula"], entidad="requests", entidad_id=str(datos.id),
                     detalle={"tipo": datos.tipo, "dias": float(creada["dias_solicitados"])})
+
+    # El correo al jefe va en segundo plano: el SMTP no debe hacer esperar al empleado
+    completa = await obtener_uno(
+        """
+        select r.id, r.tipo, r.fecha_inicio, r.fecha_fin, r.hora_inicio, r.hora_fin,
+               r.dias_solicitados, r.descripcion, r.justificacion, r.es_adelanto, r.jefe_token,
+               u.nombre as empleado, pt.nombre as categoria,
+               j.email as jefe_email, j.nombre as jefe_nombre
+        from public.requests r
+        join public.users u on u.id = r.user_id
+        left join public.users j on j.id = r.jefe_id
+        left join public.permission_types pt on pt.id = r.permission_type_id
+        where r.id = %s
+        """,
+        (datos.id,),
+    )
+    if completa and completa["jefe_email"]:
+        tareas.add_task(
+            notificaciones.avisar_al_jefe,
+            {"email": completa["jefe_email"], "nombre": completa["jefe_nombre"]},
+            completa,
+        )
+    elif completa:
+        log.warning("La solicitud %s no tiene jefe asignado: nadie recibió el aviso", datos.id)
 
     return {
         "id": str(creada["id"]),

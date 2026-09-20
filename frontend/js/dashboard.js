@@ -35,6 +35,11 @@ async function cargar() {
   $("cab-nombre").textContent = perfil.nombre;
   $("cab-cargo").textContent = [perfil.cargo, perfil.departamento].filter(Boolean).join(" · ") || perfil.rol;
 
+  // Quien aprueba llega a su bandeja desde aquí
+  if (["jefe", "rrhh", "admin"].includes(perfil.rol)) {
+    $("enlace-aprobaciones").classList.remove("hidden");
+  }
+
   const [saldo, notificaciones, solicitudes, tipos, firma] = await Promise.all([
     api.saldo().catch(() => null),
     api.notificaciones().catch(() => []),
@@ -179,13 +184,38 @@ function pintarSolicitudes(solicitudes) {
           <span>Enviada ${fechaHora(s.created_at)}</span>
           ${s.adjuntos ? `<span>📎 ${s.adjuntos} adjunto(s)</span>` : ""}
           ${s.firmas ? `<span>✍️ firmada</span>` : ""}
-          ${s.qr_hash ? `<span class="font-medium text-emerald-700">✅ QR emitido</span>` : ""}
+          ${s.qr_hash && s.estado === "aprobado"
+            ? `<button data-qr="${s.id}" data-hasta="${s.fecha_fin}"
+                       class="font-medium text-emerald-700 hover:underline">Ver código QR</button>`
+            : s.qr_hash ? `<span class="text-slate-400">QR anulado</span>` : ""}
           ${cancelable ? `<button data-cancelar="${s.id}" class="ml-auto font-medium text-rose-600 hover:underline">Cancelar</button>` : ""}
         </div>
       </article>`;
     })
     .join("");
 }
+
+/* ---- Código QR ---- */
+document.addEventListener("click", async (e) => {
+  const boton = e.target.closest("[data-qr]");
+  if (!boton) return;
+
+  // La imagen va protegida por token, así que se pide con fetch y se
+  // muestra desde un blob: un <img src> normal no lleva la cabecera.
+  try {
+    const respuesta = await fetch(api.qrUrl(boton.dataset.qr), {
+      headers: { Authorization: `Bearer ${sesion.token}` },
+    });
+    if (!respuesta.ok) throw new Error("No se pudo obtener el código.");
+    const previo = $("imagen-qr").src;
+    if (previo.startsWith("blob:")) URL.revokeObjectURL(previo);
+    $("imagen-qr").src = URL.createObjectURL(await respuesta.blob());
+    $("qr-vigencia").textContent = `Válido hasta el ${fecha(boton.dataset.hasta)}`;
+    abrir("modal-qr");
+  } catch (err) {
+    avisar(err.message, "error");
+  }
+});
 
 document.addEventListener("click", async (e) => {
   const boton = e.target.closest("[data-cancelar]");
