@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>Mi panel · Permisos y Vacaciones</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗓️</text></svg>">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="config.js"></script>
+<style>
+  dialog::backdrop { background: rgb(15 23 42 / .5); }
+  dialog[open] { animation: aparecer .15s ease-out; }
+  @keyframes aparecer { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
+  #lienzo-firma { touch-action: none; }
+</style>
+</head>
+
+<body class="min-h-dvh bg-slate-100 text-slate-900 antialiased">
+
+<!-- ================= Encabezado ================= -->
+<header class="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur">
+  <div class="mx-auto flex max-w-4xl items-center gap-3 px-4 py-3">
+    <div class="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-slate-900 text-lg">🗓️</div>
+    <div class="min-w-0 flex-1">
+      <p id="cab-nombre" class="truncate text-sm font-semibold">…</p>
+      <p id="cab-cargo" class="truncate text-xs text-slate-500">…</p>
+    </div>
+
+    <button id="btn-campana" class="relative rounded-xl p-2 hover:bg-slate-100" aria-label="Notificaciones">
+      <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round"
+              d="M14.9 17.1a3 3 0 1 1-5.8 0m8.6-4.6V10a5.7 5.7 0 1 0-11.4 0v2.5c0 .6-.2 1.1-.6 1.5l-.8.9c-.5.5-.1 1.3.6 1.3h13c.7 0 1.1-.8.6-1.3l-.8-.9a2.1 2.1 0 0 1-.6-1.5Z"/>
+      </svg>
+      <span id="punto-campana"
+            class="absolute right-1.5 top-1.5 hidden h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-white"></span>
+    </button>
+
+    <button id="btn-salir" class="rounded-xl px-3 py-2 text-sm text-slate-600 hover:bg-slate-100">Salir</button>
+  </div>
+</header>
+
+<main class="mx-auto max-w-4xl space-y-6 px-4 py-6 pb-24">
+
+  <!-- ================= Alertas ================= -->
+  <section id="alertas" class="hidden space-y-3" aria-live="polite"></section>
+
+  <!-- ================= Resumen ================= -->
+  <section class="grid gap-3 sm:grid-cols-3">
+    <article class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:col-span-1">
+      <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Vacaciones disponibles</p>
+      <p class="mt-2 flex items-baseline gap-1.5">
+        <span id="saldo-dias" class="text-4xl font-semibold tabular-nums">—</span>
+        <span class="text-sm text-slate-500">días</span>
+      </p>
+      <button id="btn-detalle-saldo"
+              class="mt-3 text-sm font-medium text-slate-900 underline decoration-slate-300 underline-offset-4
+                     hover:decoration-slate-900">
+        ¿Por qué tengo estos días?
+      </button>
+    </article>
+
+    <article class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Antigüedad</p>
+      <p id="antiguedad" class="mt-2 text-2xl font-semibold">—</p>
+      <p id="fecha-ingreso" class="mt-1 text-sm text-slate-500">—</p>
+    </article>
+
+    <article class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Fines de semana</p>
+      <p id="fds-pendientes" class="mt-2 text-2xl font-semibold">—</p>
+      <p class="mt-1 text-sm leading-snug text-slate-500">
+        obligatorios por consumir en su período
+      </p>
+    </article>
+  </section>
+
+  <!-- ================= Acciones ================= -->
+  <section class="grid gap-3 sm:grid-cols-2">
+    <button data-nueva="vacacion"
+            class="flex items-center gap-3 rounded-2xl bg-slate-900 p-5 text-left text-white
+                   transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2">
+      <span class="text-2xl">🏖️</span>
+      <span>
+        <span class="block font-medium">Solicitar vacaciones</span>
+        <span class="block text-sm text-slate-300">Días calendario, según su saldo</span>
+      </span>
+    </button>
+
+    <button data-nueva="permiso"
+            class="flex items-center gap-3 rounded-2xl bg-white p-5 text-left ring-1 ring-slate-200
+                   transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2">
+      <span class="text-2xl">📄</span>
+      <span>
+        <span class="block font-medium">Solicitar permiso</span>
+        <span class="block text-sm text-slate-500">Médico, calamidad, estudios y más</span>
+      </span>
+    </button>
+  </section>
+
+  <!-- ================= Firma ================= -->
+  <section id="tarjeta-firma" class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h2 class="font-medium">Mi firma electrónica</h2>
+        <p id="estado-firma" class="mt-0.5 text-sm text-slate-500">Consultando…</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <img id="vista-firma" alt="Firma registrada" class="hidden h-12 rounded-lg bg-slate-50 px-2 ring-1 ring-slate-200">
+        <button id="btn-firma" class="rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium hover:bg-slate-200">
+          Registrar firma
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= Logros ================= -->
+  <section id="seccion-logros" class="hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <h2 class="font-medium">Mis logros</h2>
+    <ul id="lista-logros" class="mt-3 space-y-2"></ul>
+  </section>
+
+  <!-- ================= Solicitudes ================= -->
+  <section>
+    <h2 class="mb-3 px-1 font-medium">Mis solicitudes</h2>
+    <div id="lista-solicitudes" class="space-y-3">
+      <p class="rounded-2xl bg-white p-5 text-sm text-slate-500 ring-1 ring-slate-200">Cargando…</p>
+    </div>
+  </section>
+</main>
+
+<!-- ================= Modal: nueva solicitud ================= -->
+<dialog id="modal-solicitud"
+        class="w-[min(100vw-1.5rem,34rem)] rounded-2xl p-0 backdrop:backdrop-blur-sm">
+  <form id="form-solicitud" method="dialog" class="max-h-[85dvh] overflow-y-auto">
+    <header class="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
+      <h2 id="titulo-solicitud" class="font-semibold">Nueva solicitud</h2>
+      <button type="button" data-cerrar class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100" aria-label="Cerrar">✕</button>
+    </header>
+
+    <div class="space-y-4 px-5 py-4">
+      <!-- Tipo de permiso -->
+      <div id="campo-tipo-permiso" class="hidden">
+        <label for="tipo-permiso" class="block text-sm font-medium text-slate-700">Tipo de permiso</label>
+        <select id="tipo-permiso"
+                class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                       focus:bg-white focus:ring-2 focus:ring-slate-900">
+          <option value="">Seleccione…</option>
+        </select>
+        <p id="info-permiso" class="mt-2 hidden rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-600"></p>
+      </div>
+
+      <!-- Fechas -->
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label for="fecha-inicio" class="block text-sm font-medium text-slate-700">Desde</label>
+          <input type="date" id="fecha-inicio" required
+                 class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                        focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </div>
+        <div>
+          <label for="fecha-fin" class="block text-sm font-medium text-slate-700">Hasta</label>
+          <input type="date" id="fecha-fin" required
+                 class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                        focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </div>
+      </div>
+
+      <!-- Horas (solo permisos) -->
+      <div id="campo-horas" class="hidden grid-cols-2 gap-3">
+        <div>
+          <label for="hora-inicio" class="block text-sm font-medium text-slate-700">Hora de inicio</label>
+          <input type="time" id="hora-inicio"
+                 class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                        focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </div>
+        <div>
+          <label for="hora-fin" class="block text-sm font-medium text-slate-700">Hora de fin</label>
+          <input type="time" id="hora-fin"
+                 class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                        focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </div>
+      </div>
+
+      <!-- Previsualización en vivo -->
+      <div id="previsualizacion" class="hidden rounded-xl p-3 text-sm"></div>
+
+      <!-- Descripción -->
+      <div>
+        <div class="flex items-baseline justify-between">
+          <label for="descripcion" class="block text-sm font-medium text-slate-700">Descripción</label>
+          <span id="contador-desc" class="text-xs text-slate-400">0/200</span>
+        </div>
+        <textarea id="descripcion" rows="2" maxlength="200" required
+                  placeholder="Ej.: viaje familiar programado"
+                  class="mt-1.5 w-full resize-none rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                         focus:bg-white focus:ring-2 focus:ring-slate-900"></textarea>
+      </div>
+
+      <!-- Justificación (condicional) -->
+      <div id="campo-justificacion" class="hidden">
+        <label for="justificacion" class="block text-sm font-medium text-slate-700">
+          Justificación <span class="font-normal text-slate-500">(obligatoria)</span>
+        </label>
+        <textarea id="justificacion" rows="3"
+                  placeholder="Explique el motivo con al menos 10 caracteres"
+                  class="mt-1.5 w-full resize-none rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                         focus:bg-white focus:ring-2 focus:ring-slate-900"></textarea>
+      </div>
+
+      <!-- Adjuntos -->
+      <div id="campo-adjuntos" class="hidden">
+        <label class="block text-sm font-medium text-slate-700">Respaldo</label>
+        <p class="mt-0.5 text-xs text-slate-500">Foto, escaneo o PDF. Máximo 10 MB por archivo.</p>
+        <input type="file" id="adjuntos" multiple accept="image/jpeg,image/png,image/webp,image/heic,application/pdf"
+               class="mt-2 block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0
+                      file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:text-white hover:file:bg-slate-800">
+        <ul id="lista-adjuntos" class="mt-2 space-y-1"></ul>
+      </div>
+
+      <!-- Firma -->
+      <label id="campo-firma" class="hidden items-start gap-2.5 rounded-xl bg-slate-50 p-3">
+        <input type="checkbox" id="firmar" checked class="mt-0.5 h-4 w-4 rounded border-slate-300">
+        <span class="text-sm text-slate-700">
+          Firmar esta solicitud con mi firma registrada
+          <span id="aviso-sin-firma" class="mt-1 hidden text-rose-600">
+            — aún no registra su firma. Regístrela antes de enviar.
+          </span>
+        </span>
+      </label>
+
+      <p id="error-solicitud" class="hidden rounded-xl bg-rose-50 p-3 text-sm text-rose-800 ring-1 ring-rose-200" role="alert"></p>
+    </div>
+
+    <footer class="sticky bottom-0 flex gap-3 border-t border-slate-200 bg-white px-5 py-4">
+      <button type="button" data-cerrar class="flex-1 rounded-xl bg-slate-100 px-4 py-3 font-medium hover:bg-slate-200">
+        Cancelar
+      </button>
+      <button type="submit" id="btn-enviar-solicitud"
+              class="flex-1 rounded-xl bg-slate-900 px-4 py-3 font-medium text-white hover:bg-slate-800 disabled:opacity-50">
+        Enviar solicitud
+      </button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- ================= Modal: detalle del saldo ================= -->
+<dialog id="modal-saldo" class="w-[min(100vw-1.5rem,38rem)] rounded-2xl p-0">
+  <div class="max-h-[85dvh] overflow-y-auto">
+    <header class="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
+      <h2 class="font-semibold">De dónde salen sus días</h2>
+      <button type="button" data-cerrar class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100" aria-label="Cerrar">✕</button>
+    </header>
+    <div id="contenido-saldo" class="space-y-5 px-5 py-4"></div>
+  </div>
+</dialog>
+
+<!-- ================= Modal: notificaciones ================= -->
+<dialog id="modal-notificaciones" class="w-[min(100vw-1.5rem,34rem)] rounded-2xl p-0">
+  <div class="max-h-[85dvh] overflow-y-auto">
+    <header class="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
+      <h2 class="font-semibold">Notificaciones</h2>
+      <button type="button" data-cerrar class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100" aria-label="Cerrar">✕</button>
+    </header>
+    <div id="contenido-notificaciones" class="divide-y divide-slate-100"></div>
+  </div>
+</dialog>
+
+<!-- ================= Modal: firma ================= -->
+<dialog id="modal-firma" class="w-[min(100vw-1.5rem,32rem)] rounded-2xl p-0">
+  <div>
+    <header class="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+      <h2 class="font-semibold">Su firma electrónica</h2>
+      <button type="button" data-cerrar class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100" aria-label="Cerrar">✕</button>
+    </header>
+
+    <div class="space-y-4 px-5 py-4">
+      <p class="text-sm text-slate-600">
+        Dibuje su firma con el mouse o con el dedo. Quedará guardada para sus próximas solicitudes.
+      </p>
+
+      <div class="relative overflow-hidden rounded-xl bg-slate-50 ring-1 ring-slate-300">
+        <canvas id="lienzo-firma" class="block h-44 w-full cursor-crosshair"></canvas>
+        <span id="guia-firma" class="pointer-events-none absolute inset-x-0 bottom-6 text-center text-sm text-slate-400">
+          Firme aquí
+        </span>
+      </div>
+
+      <div class="flex gap-3">
+        <button type="button" id="btn-limpiar-firma"
+                class="rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium hover:bg-slate-200">Limpiar</button>
+        <button type="button" id="btn-guardar-firma"
+                class="flex-1 rounded-xl bg-slate-900 px-4 py-2 font-medium text-white hover:bg-slate-800 disabled:opacity-50">
+          Guardar firma
+        </button>
+      </div>
+
+      <div class="border-t border-slate-200 pt-4">
+        <p class="text-sm text-slate-600">¿Prefiere subir su firma escaneada o su certificado oficial?</p>
+        <input type="file" id="archivo-firma" accept="image/png,image/jpeg,application/pdf"
+               class="mt-2 block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0
+                      file:bg-slate-100 file:px-3 file:py-2 file:text-sm hover:file:bg-slate-200">
+      </div>
+
+      <p id="error-firma" class="hidden rounded-xl bg-rose-50 p-3 text-sm text-rose-800" role="alert"></p>
+    </div>
+  </div>
+</dialog>
+
+<!-- ================= Aviso flotante ================= -->
+<div id="aviso" class="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4">
+  <p id="aviso-texto" class="hidden max-w-sm rounded-xl bg-slate-900 px-4 py-3 text-center text-sm text-white shadow-lg"></p>
+</div>
+
+<script type="module" src="js/dashboard.js"></script>
+</body>
+</html>

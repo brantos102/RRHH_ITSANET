@@ -5,8 +5,8 @@ Stack: **Supabase (PostgreSQL + Auth + Realtime + Storage)** · **Python / FastA
 | Sprint | Entregable | Estado |
 |---|---|---|
 | Tarea 1 | Esquema de base de datos y reglas de negocio Ecuador | ✅ |
-| Tarea 2 | API Backend — Autenticación OTP por cédula (FastAPI) | ⏳ |
-| Tarea 3 | Interfaz del empleado (login + dashboard + firma) | ⏳ |
+| Tarea 2 | API Backend — Autenticación OTP por cédula (FastAPI) | ✅ |
+| Tarea 3 | Interfaz del empleado (login + dashboard + firma) | ✅ |
 | Tarea 4 | Flujo de aprobaciones + generación de QR | ⏳ |
 | Tarea 5 | Dashboard de garita (Realtime + escáner QR + visitas) | ⏳ |
 

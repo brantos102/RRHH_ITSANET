@@ -66,7 +66,8 @@ async def empleado():
         (CEDULA_PRUEBA, CORREO_PRUEBA),
     )
     user_id = str(fila["id"])
-    await obtener_uno("select public.generar_periodos_vacaciones(%s) as ok", (user_id,))
+    # Saldo realista: sin esto acumularía los 7 años completos (108 días)
+    await obtener_uno("select public.cargar_saldo_inicial(%s, 12.5, 0) as saldo", (user_id,))
     yield {"id": user_id, "cedula": CEDULA_PRUEBA, "email": CORREO_PRUEBA}
     await _limpiar()
 
