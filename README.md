@@ -7,8 +7,23 @@ Stack: **Supabase (PostgreSQL + Auth + Realtime + Storage)** · **Python / FastA
 | Tarea 1 | Esquema de base de datos y reglas de negocio Ecuador | ✅ |
 | Tarea 2 | API Backend — Autenticación OTP por cédula (FastAPI) | ✅ |
 | Tarea 3 | Interfaz del empleado (login + dashboard + firma) | ✅ |
-| Tarea 4 | Flujo de aprobaciones + generación de QR | ⏳ |
-| Tarea 5 | Dashboard de garita (Realtime + escáner QR + visitas) | ⏳ |
+| Tarea 4 | Flujo de aprobaciones + generación de QR | ✅ |
+| Tarea 5 | Garita: escáner QR, panel del día y registro de visitas | ✅ |
+| Extra | Informes con filtros, administración y menús por rol | ✅ |
+
+## Pantallas
+
+| Archivo | Quién entra | Qué hace |
+|---|---|---|
+| `index.html` | Todos | Ingreso con cédula y código al correo |
+| `dashboard.html` | Todos | Panel, solicitudes, calendario, aprobaciones y anulaciones |
+| `garita.html` | Guardia, RRHH | Validación de QR, personal del día y visitas |
+| `informes.html` | Jefe, RRHH, admin | Filtros combinables y descarga en CSV |
+| `administracion.html` | RRHH, admin | Personal, tipos, feriados, parámetros y bitácora |
+| `colaboradores.html` | Jefe, RRHH, admin | Saldos y vencimientos del equipo a cargo |
+| `aprobar.html` | Enlace de correo | Decidir sin iniciar sesión |
+
+El logo se toma de `frontend/img/logo.svg`. Sustituya ese archivo (o cambie la ruta en `config.js`) y aparecerá en toda la aplicación.
 
 ## Base de datos
 

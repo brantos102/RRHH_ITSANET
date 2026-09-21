@@ -268,12 +268,14 @@ async def test_listar_y_cancelar(cliente, auth):
     listado = (await cliente.get("/solicitudes/mias", headers=auth)).json()
     assert any(s["id"] == creada.json()["id"] for s in listado)
 
-    r = await cliente.post(f"/solicitudes/{creada.json()['id']}/cancelar", headers=auth)
+    # Todavía no está aprobada: se cancela sin pedir permiso a nadie
+    r = await cliente.post(f"/solicitudes/{creada.json()['id']}/cancelar",
+                           headers=auth, json={})
     assert r.status_code == 200 and r.json()["estado"] == "cancelado"
 
 
 async def test_no_se_cancela_una_solicitud_ajena(cliente, auth):
-    r = await cliente.post(f"/solicitudes/{uuid.uuid4()}/cancelar", headers=auth)
+    r = await cliente.post(f"/solicitudes/{uuid.uuid4()}/cancelar", headers=auth, json={})
     assert r.status_code == 404
 
 

@@ -327,6 +327,85 @@ async def decidir_por_enlace(
     return resultado
 
 
+# ------------------------------------------------------------- anulaciones
+@router.get("/aprobaciones/anulaciones")
+async def anulaciones_pendientes(
+    usuario: Annotated[dict, Depends(usuario_actual)]
+) -> list[dict]:
+    """Pedidos de anulación de solicitudes ya aprobadas."""
+    if usuario["rol"] not in ("rrhh", "admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail={"mensaje": "Solo Talento Humano resuelve anulaciones."})
+
+    filas = await obtener_todos(
+        """
+        select r.id, r.folio, r.tipo::text, pt.nombre as categoria,
+               r.fecha_inicio, r.fecha_fin, r.dias_solicitados, r.descripcion,
+               r.anulacion_motivo, r.anulacion_solicitada_en, r.qr_usado_en,
+               u.nombre as empleado, u.cedula, u.departamento
+        from public.requests r
+        join public.users u on u.id = r.user_id
+        left join public.permission_types pt on pt.id = r.permission_type_id
+        where r.estado = 'pendiente_anulacion'
+        order by r.anulacion_solicitada_en
+        """
+    )
+    return [{**f, "id": str(f["id"]), "dias_solicitados": float(f["dias_solicitados"])}
+            for f in filas]
+
+
+@router.post("/aprobaciones/{solicitud_id}/anulacion")
+async def resolver_anulacion(
+    solicitud_id: uuid.UUID,
+    decision: Decision,
+    request: Request,
+    usuario: Annotated[dict, Depends(usuario_actual)],
+) -> dict:
+    """Autorizar la anulación devuelve los días y deja el QR sin efecto."""
+    if usuario["rol"] not in ("rrhh", "admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail={"mensaje": "Solo Talento Humano resuelve anulaciones."})
+
+    if decision.accion == "rechazar" and not (decision.motivo or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"mensaje": "Indique por qué no se autoriza la anulación."},
+        )
+
+    nuevo = "cancelado" if decision.accion == "aprobar" else "aprobado"
+    try:
+        fila = await obtener_uno(
+            """
+            update public.requests
+               set estado = %(estado)s,
+                   anulacion_resuelta_por = %(quien)s,
+                   anulacion_rechazada_motivo = %(motivo)s
+             where id = %(id)s and estado = 'pendiente_anulacion'
+            returning id, folio, estado::text, dias_solicitados
+            """,
+            {"estado": nuevo, "quien": usuario["id"], "id": solicitud_id,
+             "motivo": (decision.motivo or "").strip() or None},
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise traducir(exc) from exc
+
+    if fila is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail={"mensaje": "Esa solicitud ya no tiene una anulación pendiente."})
+
+    await registrar(request, f"anulacion_{decision.accion}da", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="requests", entidad_id=str(solicitud_id),
+                    detalle={"folio": fila["folio"], "motivo": decision.motivo})
+
+    return {
+        "id": str(fila["id"]), "estado": fila["estado"],
+        "mensaje": (f"Anulación autorizada: se devolvieron {float(fila['dias_solicitados']):g} día(s) "
+                    "y el código QR quedó sin efecto.")
+                   if nuevo == "cancelado"
+                   else "Anulación no autorizada: la solicitud sigue vigente.",
+    }
+
+
 # ------------------------------------------------------------------- QR
 @router.get("/solicitudes/{solicitud_id}/qr.png")
 async def qr_png(solicitud_id: uuid.UUID, usuario: Annotated[dict, Depends(usuario_actual)]) -> Response:

@@ -1,11 +1,12 @@
 /* Panel del empleado: perfil, saldo, alertas, solicitudes y firma. */
 import { api, sesion, fecha, fechaHora, esc, ESTADOS, ErrorApi } from "./api.js";
 import { PanelFirma } from "./firma.js";
+import { montarNavegacion } from "./navegacion.js";
 
 const $ = (id) => document.getElementById(id);
 const estado = {
   tipos: [], firma: null, adjuntos: [], tipoActual: null, saldo: null,
-  solicitudes: [], pendientes: [], companeros: [], calendario: [],
+  solicitudes: [], pendientes: [], anulaciones: [], companeros: [], calendario: [],
   mes: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
 };
 
@@ -41,9 +42,12 @@ async function cargar() {
 
   // Quien aprueba cambia de sombrero sin cambiar de página
   const aprueba = ["jefe", "rrhh", "admin"].includes(perfil.rol);
+  const resuelveAnulaciones = ["rrhh", "admin"].includes(perfil.rol);
   $("pestanas").classList.toggle("hidden", !aprueba);
+  $("pestana-anulaciones").classList.toggle("hidden", !resuelveAnulaciones);
 
-  const [saldo, notificaciones, solicitudes, tipos, firma, companeros, calendario, pendientes] =
+  const [saldo, notificaciones, solicitudes, tipos, firma, companeros, calendario,
+         pendientes, anulaciones] =
     await Promise.all([
       api.saldo().catch(() => null),
       api.notificaciones().catch(() => []),
@@ -53,9 +57,15 @@ async function cargar() {
       api.companeros().catch(() => []),
       api.calendario().catch(() => []),
       aprueba ? api.pendientes().catch(() => []) : Promise.resolve([]),
+      resuelveAnulaciones ? api.anulacionesPendientes().catch(() => []) : Promise.resolve([]),
     ]);
 
-  Object.assign(estado, { tipos, firma, saldo, solicitudes, companeros, calendario, pendientes });
+  Object.assign(estado, { tipos, firma, saldo, solicitudes, companeros, calendario,
+                          pendientes, anulaciones });
+  montarNavegacion($("barra"), {
+    activo: "panel",
+    contadores: { pendientes: pendientes.length, anulaciones: anulaciones.length },
+  });
 
   pintarResumen(perfil, saldo);
   pintarAlertas(notificaciones);
@@ -67,6 +77,7 @@ async function cargar() {
   llenarCompaneros(companeros);
   pintarCalendario();
   pintarPendientes();
+  pintarAnulaciones();
 }
 
 /* ------------------------------------------------------------- pestañas */
@@ -83,7 +94,8 @@ function mostrarPestana(cual) {
   });
   $("vista-panel").classList.toggle("hidden", cual !== "panel");
   $("vista-aprobaciones").classList.toggle("hidden", cual !== "aprobaciones");
-  location.hash = cual === "panel" ? "" : "#aprobaciones";
+  $("vista-anulaciones").classList.toggle("hidden", cual !== "anulaciones");
+  location.hash = cual === "panel" ? "" : `#${cual}`;
 }
 
 function pintarResumen(perfil, saldo) {
@@ -232,7 +244,11 @@ function pintarSolicitudes() {
             ? `<button data-qr="${s.id}" data-hasta="${s.fecha_fin}"
                        class="font-medium text-emerald-700 hover:underline">Ver código QR</button>`
             : s.qr_hash ? `<span class="text-slate-400">QR anulado</span>` : ""}
-          ${cancelable ? `<button data-cancelar="${s.id}" class="ml-auto font-medium text-rose-600 hover:underline">Cancelar</button>` : ""}
+          ${cancelable
+            ? `<button data-cancelar="${s.id}" data-aprobada="${s.estado === "aprobado" ? 1 : 0}"
+                       class="ml-auto font-medium text-rose-600 hover:underline">${
+                 s.estado === "aprobado" ? "Pedir anulación" : "Cancelar"}</button>`
+            : ""}
         </div>
       </article>`;
     })
@@ -277,10 +293,22 @@ $("filtro-solicitudes").addEventListener("input", () => pintarSolicitudes());
 document.addEventListener("click", async (e) => {
   const boton = e.target.closest("[data-cancelar]");
   if (!boton) return;
-  if (!confirm("¿Seguro que desea cancelar esta solicitud?")) return;
+
+  // Una solicitud aprobada ya consumió saldo y tiene QR: anularla
+  // necesita motivo y el visto bueno de Talento Humano.
+  const aprobada = boton.dataset.aprobada === "1";
+  let motivo = null;
+  if (aprobada) {
+    motivo = prompt("¿Por qué necesita anular esta solicitud aprobada?\n" +
+                    "Talento Humano debe autorizarlo.");
+    if (motivo === null) return;
+    if (motivo.trim().length < 5) return avisar("Indique un motivo.", "error");
+  } else if (!confirm("¿Seguro que desea cancelar esta solicitud?")) {
+    return;
+  }
+
   try {
-    await api.cancelar(boton.dataset.cancelar);
-    avisar("Solicitud cancelada.");
+    avisar((await api.cancelar(boton.dataset.cancelar, motivo)).mensaje);
     await cargar();
   } catch (err) {
     avisar(err.message, "error");
@@ -483,6 +511,86 @@ $("form-rechazo").addEventListener("submit", async (e) => {
   }
   await cargar();
   mostrarPestana("aprobaciones");
+});
+
+/* ------------------------------------------------------------- anulaciones */
+function pintarAnulaciones() {
+  const caja = $("vista-anulaciones");
+  const cuenta = $("cuenta-anulaciones");
+  if (!caja) return;
+  cuenta.textContent = estado.anulaciones.length;
+  cuenta.classList.toggle("hidden", estado.anulaciones.length === 0);
+
+  if (!estado.anulaciones.length) {
+    caja.innerHTML = `<p class="rounded-2xl bg-white p-8 text-center text-sm text-slate-500 ring-1 ring-slate-200">
+        No hay pedidos de anulación pendientes.</p>`;
+    return;
+  }
+
+  caja.innerHTML = estado.anulaciones.map((a) => `
+    <article class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-orange-200">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p class="font-semibold">
+            <span class="mr-1.5 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600">Nº ${a.folio}</span>
+            ${esc(a.empleado)}
+          </p>
+          <p class="text-sm text-slate-500">${esc(a.cedula)}${a.departamento ? " · " + esc(a.departamento) : ""}</p>
+        </div>
+        <span class="rounded-full bg-orange-100 px-2.5 py-1 text-xs font-medium text-orange-800">
+          Pide anular
+        </span>
+      </div>
+
+      <p class="mt-3 text-sm text-slate-700">
+        ${a.tipo === "vacacion" ? "Vacaciones" : esc(a.categoria || "Permiso")} del
+        <strong>${fecha(a.fecha_inicio, false)}</strong> al <strong>${fecha(a.fecha_fin)}</strong>
+        · ${a.dias_solicitados} día(s)
+      </p>
+      <p class="mt-2 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
+        <span class="font-medium">Motivo:</span> ${esc(a.anulacion_motivo || "no indicado")}
+      </p>
+      ${a.qr_usado_en
+        ? `<p class="mt-2 rounded-xl bg-rose-50 p-3 text-sm text-rose-800">
+             Atención: el código QR ya se usó en garita el ${fechaHora(a.qr_usado_en)}.</p>`
+        : ""}
+
+      <div class="mt-4 flex gap-3">
+        <button data-anul-rechazar="${a.id}"
+                class="flex-1 rounded-xl bg-white px-4 py-2.5 font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50">
+          No autorizar
+        </button>
+        <button data-anul-aprobar="${a.id}"
+                class="flex-1 rounded-xl bg-orange-600 px-4 py-2.5 font-medium text-white hover:bg-orange-700">
+          Autorizar anulación
+        </button>
+      </div>
+    </article>`).join("");
+}
+
+document.addEventListener("click", async (e) => {
+  const aprobar = e.target.closest("[data-anul-aprobar]");
+  if (aprobar) {
+    if (!confirm("¿Autorizar la anulación? Se devuelven los días y el código QR deja de servir.")) return;
+    try {
+      avisar((await api.resolverAnulacion(aprobar.dataset.anulAprobar, "aprobar", null)).mensaje);
+    } catch (err) { avisar(err.message, "error"); }
+    await cargar();
+    mostrarPestana("anulaciones");
+    return;
+  }
+
+  const rechazar = e.target.closest("[data-anul-rechazar]");
+  if (rechazar) {
+    const motivo = prompt("¿Por qué no se autoriza la anulación? El empleado lo verá.");
+    if (motivo === null) return;
+    if (motivo.trim().length < 5) return avisar("Indique un motivo.", "error");
+    try {
+      avisar((await api.resolverAnulacion(rechazar.dataset.anulRechazar, "rechazar", motivo)).mensaje);
+    } catch (err) { avisar(err.message, "error"); }
+    await cargar();
+    mostrarPestana("anulaciones");
+  }
 });
 
 /* --------------------------------------------------------------- del saldo */
@@ -850,16 +958,12 @@ $("form-solicitud").addEventListener("submit", async (e) => {
 });
 
 /* ------------------------------------------------------------------- salir */
-$("btn-salir").addEventListener("click", async () => {
-  try { await api.cerrarSesion(); } catch { /* el token se descarta igual */ }
-  sesion.borrar();
-  location.href = "index.html";
-});
-
 cargar()
   .then(() => {
-    if (location.hash === "#aprobaciones" && !$("pestanas").classList.contains("hidden")) {
-      mostrarPestana("aprobaciones");
+    const destino = location.hash.slice(1);
+    if (["aprobaciones", "anulaciones"].includes(destino) &&
+        !$("pestanas").classList.contains("hidden")) {
+      mostrarPestana(destino);
     }
   })
   .catch((err) => avisar(err.message || "No se pudo cargar su panel.", "error"));

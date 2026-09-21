@@ -74,11 +74,14 @@ async def empleado():
 
 async def _limpiar() -> None:
     await ejecutar("delete from public.auth_otp where cedula = any(%s)",
-                   ([CEDULA_PRUEBA, CEDULA_SIN_REGISTRO, "0900000001", "1100000007"],))
+                   ([CEDULA_PRUEBA, CEDULA_SIN_REGISTRO, "0900000001", "1100000007", "1200000006"],))
     await ejecutar(
         "delete from public.notifications where user_id in "
         "(select id from public.users where email like %s)", ("%@api.test",))
     await ejecutar("delete from public.audit_logs where cedula = any(%s)",
-                   ([CEDULA_PRUEBA, CEDULA_SIN_REGISTRO, "0900000001", "1100000007"],))
+                   ([CEDULA_PRUEBA, CEDULA_SIN_REGISTRO, "0900000001", "1100000007", "1200000006"],))
+    await ejecutar("delete from public.visitors where motivo_visita like %s", ("%de prueba%",))
+    await ejecutar("delete from public.visitors where nombre like %s", ("Proveedor de prueba%",))
     await ejecutar("delete from public.users where email like %s", ("%@api.test",))
+    await ejecutar("delete from public.users where email like %s", ("%@empresa-prueba.com",))
     await ejecutar("delete from auth.users where email like %s", ("%@api.test",))

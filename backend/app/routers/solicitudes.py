@@ -284,7 +284,7 @@ async def mis_solicitudes(usuario: Annotated[dict, Depends(usuario_actual)]) -> 
         select r.id, r.folio, r.tipo, pt.nombre as categoria, r.fecha_inicio, r.fecha_fin,
                r.hora_inicio, r.hora_fin, r.dias_solicitados, r.horas_solicitadas,
                r.descripcion, r.justificacion, r.estado, r.es_adelanto,
-               r.motivo_rechazo, r.rechazado_en_etapa, r.created_at,
+               r.motivo_rechazo, r.rechazado_en_etapa, r.anulacion_motivo, r.created_at,
                r.qr_hash, r.qr_emitido_en, r.qr_usado_en,
                j.nombre as jefe, rp.nombre as reemplazo,
                r.jefe_aprobado_en, r.rrhh_aprobado_en,
@@ -302,29 +302,59 @@ async def mis_solicitudes(usuario: Annotated[dict, Depends(usuario_actual)]) -> 
     )
 
 
+class Anulacion(BaseModel):
+    motivo: str | None = Field(None, max_length=300)
+
+
 @router.post("/solicitudes/{solicitud_id}/cancelar")
 async def cancelar(
-    solicitud_id: uuid.UUID, request: Request, usuario: Annotated[dict, Depends(usuario_actual)]
+    solicitud_id: uuid.UUID, datos: Anulacion, request: Request,
+    usuario: Annotated[dict, Depends(usuario_actual)],
 ) -> dict:
+    """Cancelar o pedir anulación, según en qué punto esté la solicitud.
+
+    Mientras espera aprobación no se ha descontado nada: se cancela y listo.
+    Una vez aprobada ya consumió saldo y tiene un QR emitido, así que
+    deshacerla necesita el visto bueno de Talento Humano.
+    """
+    actual = await obtener_uno(
+        "select estado::text, folio from public.requests where id = %s and user_id = %s",
+        (solicitud_id, usuario["id"]),
+    )
+    if actual is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail={"mensaje": "No se encontró esa solicitud entre las suyas."})
+
+    if actual["estado"] in ("pendiente_jefe", "pendiente_rrhh"):
+        nuevo, accion, mensaje = "cancelado", "solicitud_cancelada", "Solicitud cancelada."
+    elif actual["estado"] == "aprobado":
+        if not (datos.motivo or "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"mensaje": "Indique por qué necesita anular una solicitud ya aprobada."},
+            )
+        nuevo, accion = "pendiente_anulacion", "anulacion_solicitada"
+        mensaje = "Su pedido de anulación pasó a Talento Humano."
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"mensaje": f"Una solicitud en estado «{actual['estado']}» ya no se puede anular."},
+        )
+
     try:
         fila = await obtener_uno(
-            """
-            update public.requests set estado = 'cancelado'
-             where id = %s and user_id = %s and estado in ('pendiente_jefe','pendiente_rrhh','aprobado')
-            returning id, estado
-            """,
-            (solicitud_id, usuario["id"]),
+            """update public.requests
+                  set estado = %s, anulacion_motivo = coalesce(%s, anulacion_motivo)
+                where id = %s returning id, estado::text""",
+            (nuevo, (datos.motivo or "").strip() or None, solicitud_id),
         )
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
-    if fila is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail={"mensaje": "No se encontró una solicitud suya que se pueda cancelar."})
-
-    await registrar(request, "solicitud_cancelada", user_id=str(usuario["id"]),
-                    cedula=usuario["cedula"], entidad="requests", entidad_id=str(solicitud_id))
-    return {"id": str(fila["id"]), "estado": fila["estado"], "mensaje": "Solicitud cancelada."}
+    await registrar(request, accion, user_id=str(usuario["id"]), cedula=usuario["cedula"],
+                    entidad="requests", entidad_id=str(solicitud_id),
+                    detalle={"folio": actual["folio"], "motivo": datos.motivo})
+    return {"id": str(fila["id"]), "estado": fila["estado"], "mensaje": mensaje}
 
 
 # ---------------------------------------------------------------- adjuntos

@@ -1,0 +1,9 @@
+<!-- Marcador. Sustituya este archivo por el logo real de ITSANET
+     (SVG preferible; también sirve PNG cambiando la ruta en config.js). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 32" width="120" height="32" role="img"
+     aria-label="ITSANET">
+  <rect width="28" height="28" x="2" y="2" rx="7" fill="#22d3ee"/>
+  <path d="M10 10h12M16 10v12" stroke="#0b1220" stroke-width="3" stroke-linecap="round"/>
+  <text x="38" y="22" font-family="ui-sans-serif,system-ui,sans-serif" font-size="16"
+        font-weight="700" letter-spacing="0.5" fill="#ffffff">ITSANET</text>
+</svg>

@@ -1,0 +1,13 @@
+{
+  "name": "Garita ITSANET",
+  "short_name": "Garita",
+  "description": "Control de acceso: validación de códigos QR y registro de visitas",
+  "start_url": "garita.html",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "orientation": "any",
+  "icons": [
+    { "src": "img/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

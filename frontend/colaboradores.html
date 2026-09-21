@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>Períodos de mis colaboradores</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👥</text></svg>">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="config.js"></script>
+</head>
+<body class="min-h-dvh bg-slate-100 text-slate-900 antialiased">
+<div id="barra"></div>
+<main class="mx-auto max-w-5xl px-4 py-5 pb-24">
+  <section class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="border-b border-slate-200 px-5 py-3.5">
+      <h1 class="font-medium">Períodos de mis colaboradores</h1>
+      <p class="mt-0.5 text-sm text-slate-500">
+        Saldo, antigüedad y días en riesgo de caducar de la gente a su cargo
+      </p>
+    </header>
+    <div id="tabla" class="overflow-x-auto">
+      <p class="px-5 py-10 text-center text-sm text-slate-500">Cargando…</p>
+    </div>
+  </section>
+</main>
+<script type="module">
+import { api, sesion, esc, fecha } from "./js/api.js";
+import { montarNavegacion } from "./js/navegacion.js";
+
+if (!sesion.vigente) location.replace("index.html");
+if (!["jefe", "rrhh", "admin"].includes(sesion.perfil?.rol)) location.replace("dashboard.html");
+montarNavegacion(document.getElementById("barra"), { activo: "jefe" });
+
+const hoy = new Date();
+try {
+  const gente = await api.colaboradores();
+  document.getElementById("tabla").innerHTML = gente.length ? `
+    <table class="w-full text-left text-sm">
+      <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+        <tr><th class="px-3 py-2.5">Colaborador</th><th class="px-3 py-2.5">Cargo</th>
+            <th class="px-3 py-2.5">Ingreso</th><th class="px-3 py-2.5 text-right">Años</th>
+            <th class="px-3 py-2.5 text-right">Saldo</th>
+            <th class="px-3 py-2.5 text-right">Fines de semana</th>
+            <th class="px-3 py-2.5">Vence</th><th class="px-3 py-2.5 text-center">En trámite</th></tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        ${gente.map((p) => {
+          const vence = p.proximo_vencimiento ? new Date(p.proximo_vencimiento + "T12:00") : null;
+          const urgente = vence && (vence - hoy) / 86400000 < 120;
+          return `<tr class="hover:bg-slate-50">
+            <td class="px-3 py-2.5">
+              <p class="font-medium">${esc(p.nombre)}</p>
+              <p class="text-xs text-slate-500">${esc(p.cedula)}</p>
+            </td>
+            <td class="px-3 py-2.5 text-slate-600">${esc(p.cargo || "—")}</td>
+            <td class="px-3 py-2.5 whitespace-nowrap text-slate-600">${fecha(p.fecha_ingreso)}</td>
+            <td class="px-3 py-2.5 text-right tabular-nums">${p.anios}</td>
+            <td class="px-3 py-2.5 text-right tabular-nums font-medium">${Number(p.saldo)}</td>
+            <td class="px-3 py-2.5 text-right tabular-nums">${p.fines_semana_pendientes}</td>
+            <td class="px-3 py-2.5 whitespace-nowrap">
+              ${vence ? `<span class="${urgente ? "font-medium text-rose-700" : "text-slate-600"}">
+                          ${fecha(p.proximo_vencimiento)}</span>` : "—"}
+            </td>
+            <td class="px-3 py-2.5 text-center">
+              ${p.en_tramite ? `<span class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                                 ${p.en_tramite}</span>` : `<span class="text-slate-300">—</span>`}
+            </td></tr>`;
+        }).join("")}
+      </tbody>
+    </table>`
+    : `<p class="px-5 py-10 text-center text-sm text-slate-500">No tiene colaboradores a cargo.</p>`;
+} catch (err) {
+  document.getElementById("tabla").innerHTML =
+    `<p class="px-5 py-10 text-center text-sm text-rose-700">${esc(err.message)}</p>`;
+}
+</script>
+</body>
+</html>
