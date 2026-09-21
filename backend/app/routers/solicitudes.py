@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import uuid
-from datetime import date, time
+from datetime import date, time, timedelta
 from typing import Annotated, Literal
 
 from fastapi import (APIRouter, BackgroundTasks, Depends, File, HTTPException, Request,
@@ -53,6 +53,7 @@ class NuevaSolicitud(BaseModel):
     hora_fin: time | None = None
     descripcion: str = Field(..., min_length=5, max_length=200)
     justificacion: str | None = None
+    reemplazo_id: uuid.UUID | None = None
     adjuntos: list[AdjuntoEntrada] = []
     firmar: bool = True
 
@@ -77,6 +78,67 @@ async def tipos_permiso(_: Annotated[dict, Depends(usuario_actual)]) -> list[dic
         where pt.activo
         order by pt.orden
         """
+    )
+
+
+@router.get("/catalogos/companeros")
+async def companeros(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[dict]:
+    """Quién puede cubrir la ausencia: el equipo del mismo jefe o departamento."""
+    return await obtener_todos(
+        """
+        select id, nombre, cargo
+        from public.users
+        where activo and id <> %(yo)s
+          and (
+            (%(jefe)s::uuid is not null and jefe_id = %(jefe)s)
+            or (%(depto)s::text is not null and departamento = %(depto)s)
+          )
+        order by nombre
+        limit 100
+        """,
+        {"yo": usuario["id"], "jefe": usuario["jefe_id"], "depto": usuario["departamento"]},
+    )
+
+
+@router.get("/calendario")
+async def calendario(
+    usuario: Annotated[dict, Depends(usuario_actual)],
+    desde: date | None = None,
+    hasta: date | None = None,
+) -> list[dict]:
+    """Ausencias del equipo en el rango, para no dejar un puesto descubierto.
+
+    Entre compañeros se ve quién falta y cuándo, nunca el motivo detallado:
+    la categoría de un permiso médico es un dato de salud (LOPDP Art. 4).
+    """
+    if usuario["rol"] in ("rrhh", "admin"):
+        alcance, parametros = "true", {}
+    else:
+        alcance = """(
+            c.jefe_id = %(jefe)s
+            or c.user_id = %(yo)s
+            or c.jefe_id = %(yo)s
+            or c.departamento = %(depto)s
+        )"""
+        parametros = {"jefe": usuario["jefe_id"], "yo": usuario["id"],
+                      "depto": usuario["departamento"]}
+
+    parametros |= {
+        "desde": desde or date.today().replace(day=1),
+        "hasta": hasta or (date.today() + timedelta(days=90)),
+    }
+
+    return await obtener_todos(
+        f"""
+        select c.request_id, c.folio, c.user_id, c.nombre, c.departamento,
+               c.fecha_inicio, c.fecha_fin, c.estado, c.motivo_general,
+               c.reemplazo_nombre
+        from public.v_calendario_equipo c
+        where {alcance}
+          and c.fecha_fin >= %(desde)s and c.fecha_inicio <= %(hasta)s
+        order by c.fecha_inicio
+        """,
+        parametros,
     )
 
 
@@ -131,10 +193,10 @@ async def crear_solicitud(
                     """
                     insert into public.requests
                         (id, user_id, tipo, permission_type_id, fecha_inicio, fecha_fin,
-                         hora_inicio, hora_fin, descripcion, justificacion)
+                         hora_inicio, hora_fin, descripcion, justificacion, reemplazo_id)
                     values (%(id)s, %(user_id)s, %(tipo)s, %(pt)s, %(inicio)s, %(fin)s,
-                            %(h_ini)s, %(h_fin)s, %(desc)s, %(just)s)
-                    returning id, estado, dias_solicitados, horas_solicitadas,
+                            %(h_ini)s, %(h_fin)s, %(desc)s, %(just)s, %(reemplazo)s)
+                    returning id, folio, estado, dias_solicitados, horas_solicitadas,
                               fines_semana, es_adelanto, saldo_al_solicitar, created_at
                     """,
                     {
@@ -142,7 +204,7 @@ async def crear_solicitud(
                         "pt": datos.permission_type_id, "inicio": datos.fecha_inicio,
                         "fin": datos.fecha_fin, "h_ini": datos.hora_inicio,
                         "h_fin": datos.hora_fin, "desc": datos.descripcion,
-                        "just": datos.justificacion,
+                        "just": datos.justificacion, "reemplazo": datos.reemplazo_id,
                     },
                 )
                 creada = await cur.fetchone()
@@ -204,12 +266,13 @@ async def crear_solicitud(
 
     return {
         "id": str(creada["id"]),
+        "folio": creada["folio"],
         "estado": creada["estado"],
         "dias_solicitados": float(creada["dias_solicitados"]),
         "horas_solicitadas": float(creada["horas_solicitadas"]) if creada["horas_solicitadas"] else None,
         "fines_semana": creada["fines_semana"],
         "es_adelanto": creada["es_adelanto"],
-        "mensaje": "Su solicitud fue enviada a su jefe inmediato.",
+        "mensaje": f"Solicitud Nº {creada['folio']} enviada a su jefe inmediato.",
     }
 
 
@@ -218,15 +281,18 @@ async def crear_solicitud(
 async def mis_solicitudes(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[dict]:
     return await obtener_todos(
         """
-        select r.id, r.tipo, pt.nombre as categoria, r.fecha_inicio, r.fecha_fin,
+        select r.id, r.folio, r.tipo, pt.nombre as categoria, r.fecha_inicio, r.fecha_fin,
                r.hora_inicio, r.hora_fin, r.dias_solicitados, r.horas_solicitadas,
                r.descripcion, r.justificacion, r.estado, r.es_adelanto,
-               r.motivo_rechazo, r.created_at, r.qr_hash, r.qr_emitido_en, r.qr_usado_en,
-               j.nombre as jefe, r.jefe_aprobado_en, r.rrhh_aprobado_en,
+               r.motivo_rechazo, r.rechazado_en_etapa, r.created_at,
+               r.qr_hash, r.qr_emitido_en, r.qr_usado_en,
+               j.nombre as jefe, rp.nombre as reemplazo,
+               r.jefe_aprobado_en, r.rrhh_aprobado_en,
                (select count(*) from public.request_attachments a where a.request_id = r.id) as adjuntos,
                (select count(*) from public.request_signatures s where s.request_id = r.id) as firmas
         from public.requests r
         left join public.users j on j.id = r.jefe_id
+        left join public.users rp on rp.id = r.reemplazo_id
         left join public.permission_types pt on pt.id = r.permission_type_id
         where r.user_id = %s
         order by r.created_at desc

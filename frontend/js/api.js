@@ -83,6 +83,9 @@ export const api = {
 
   tiposPermiso: () => peticion("/catalogos/tipos-permiso"),
   feriados: () => peticion("/catalogos/feriados"),
+  companeros: () => peticion("/catalogos/companeros"),
+  calendario: (desde, hasta) =>
+    peticion("/calendario" + (desde ? `?desde=${desde}&hasta=${hasta}` : "")),
 
   previsualizar: (datos) =>
     peticion("/solicitudes/previsualizar", { method: "POST", body: JSON.stringify(datos) }),

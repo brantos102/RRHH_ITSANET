@@ -3,7 +3,11 @@ import { api, sesion, fecha, fechaHora, esc, ESTADOS, ErrorApi } from "./api.js"
 import { PanelFirma } from "./firma.js";
 
 const $ = (id) => document.getElementById(id);
-const estado = { tipos: [], firma: null, adjuntos: [], tipoActual: null, saldo: null };
+const estado = {
+  tipos: [], firma: null, adjuntos: [], tipoActual: null, saldo: null,
+  solicitudes: [], pendientes: [], companeros: [], calendario: [],
+  mes: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+};
 
 if (!sesion.vigente) location.replace("index.html");
 
@@ -35,30 +39,51 @@ async function cargar() {
   $("cab-nombre").textContent = perfil.nombre;
   $("cab-cargo").textContent = [perfil.cargo, perfil.departamento].filter(Boolean).join(" · ") || perfil.rol;
 
-  // Quien aprueba llega a su bandeja desde aquí
-  if (["jefe", "rrhh", "admin"].includes(perfil.rol)) {
-    $("enlace-aprobaciones").classList.remove("hidden");
-  }
+  // Quien aprueba cambia de sombrero sin cambiar de página
+  const aprueba = ["jefe", "rrhh", "admin"].includes(perfil.rol);
+  $("pestanas").classList.toggle("hidden", !aprueba);
 
-  const [saldo, notificaciones, solicitudes, tipos, firma] = await Promise.all([
-    api.saldo().catch(() => null),
-    api.notificaciones().catch(() => []),
-    api.misSolicitudes().catch(() => []),
-    api.tiposPermiso().catch(() => []),
-    api.miFirma().catch(() => ({ registrada: false })),
-  ]);
+  const [saldo, notificaciones, solicitudes, tipos, firma, companeros, calendario, pendientes] =
+    await Promise.all([
+      api.saldo().catch(() => null),
+      api.notificaciones().catch(() => []),
+      api.misSolicitudes().catch(() => []),
+      api.tiposPermiso().catch(() => []),
+      api.miFirma().catch(() => ({ registrada: false })),
+      api.companeros().catch(() => []),
+      api.calendario().catch(() => []),
+      aprueba ? api.pendientes().catch(() => []) : Promise.resolve([]),
+    ]);
 
-  estado.tipos = tipos;
-  estado.firma = firma;
-  estado.saldo = saldo;
+  Object.assign(estado, { tipos, firma, saldo, solicitudes, companeros, calendario, pendientes });
 
   pintarResumen(perfil, saldo);
   pintarAlertas(notificaciones);
   pintarNotificaciones(notificaciones);
   pintarLogros(perfil.logros);
-  pintarSolicitudes(solicitudes);
+  pintarSolicitudes();
   pintarFirma(firma);
   llenarTiposPermiso(tipos);
+  llenarCompaneros(companeros);
+  pintarCalendario();
+  pintarPendientes();
+}
+
+/* ------------------------------------------------------------- pestañas */
+document.querySelectorAll("[data-pestana]").forEach((boton) =>
+  boton.addEventListener("click", () => mostrarPestana(boton.dataset.pestana))
+);
+
+function mostrarPestana(cual) {
+  document.querySelectorAll("[data-pestana]").forEach((b) => {
+    const activa = b.dataset.pestana === cual;
+    b.className = activa
+      ? "border-b-2 border-slate-900 px-4 py-3 text-sm font-medium"
+      : "border-b-2 border-transparent px-4 py-3 text-sm font-medium text-slate-500 hover:text-slate-900";
+  });
+  $("vista-panel").classList.toggle("hidden", cual !== "panel");
+  $("vista-aprobaciones").classList.toggle("hidden", cual !== "aprobaciones");
+  location.hash = cual === "panel" ? "" : "#aprobaciones";
 }
 
 function pintarResumen(perfil, saldo) {
@@ -67,6 +92,13 @@ function pintarResumen(perfil, saldo) {
     perfil.anios_servicio === 1 ? "1 año" : `${perfil.anios_servicio} años`;
   $("fecha-ingreso").textContent = `Ingresó el ${fecha(perfil.fecha_ingreso)}`;
   $("fds-pendientes").textContent = saldo ? saldo.fines_semana_pendientes : "—";
+
+  // De qué períodos vienen esos días: es lo que RRHH audita
+  const vigentes = (saldo?.periodos || []).filter((p) => !p.caducado && Number(p.saldo) > 0);
+  $("periodos-resumen").textContent = vigentes.length
+    ? `De ${vigentes.length} período(s): ` +
+      vigentes.map((p) => `año ${p.periodo} (${Number(p.saldo)})`).join(", ")
+    : "Sin días acumulados disponibles";
 }
 
 /* ------------------------------------------------------------------ alertas */
@@ -150,17 +182,25 @@ function pintarLogros(logros) {
 }
 
 /* -------------------------------------------------------------- solicitudes */
-function pintarSolicitudes(solicitudes) {
+function pintarSolicitudes() {
+  const termino = ($("filtro-solicitudes").value || "").trim().toLowerCase();
+  const solicitudes = termino
+    ? estado.solicitudes.filter((s) =>
+        [String(s.folio), s.tipo, s.categoria, s.descripcion, etiquetaEstado(s)]
+          .filter(Boolean).join(" ").toLowerCase().includes(termino))
+    : estado.solicitudes;
+
   const caja = $("lista-solicitudes");
   if (!solicitudes.length) {
     caja.innerHTML = `<p class="rounded-2xl bg-white p-5 text-sm text-slate-500 ring-1 ring-slate-200">
-        Todavía no ha enviado ninguna solicitud.</p>`;
+        ${termino ? "Ninguna solicitud coincide con la búsqueda." : "Todavía no ha enviado ninguna solicitud."}</p>`;
     return;
   }
 
   caja.innerHTML = solicitudes
     .map((s) => {
       const e = ESTADOS[s.estado] || { etiqueta: s.estado, clase: "bg-slate-100 text-slate-600 ring-slate-200" };
+      const etiqueta = etiquetaEstado(s);
       const rango =
         s.fecha_inicio === s.fecha_fin ? fecha(s.fecha_inicio) : `${fecha(s.fecha_inicio, false)} – ${fecha(s.fecha_fin)}`;
       const horas = s.hora_inicio ? ` · ${s.hora_inicio.slice(0, 5)} a ${s.hora_fin?.slice(0, 5)}` : "";
@@ -170,10 +210,13 @@ function pintarSolicitudes(solicitudes) {
       <article class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
         <div class="flex flex-wrap items-start justify-between gap-2">
           <div class="min-w-0">
-            <p class="font-medium">${s.tipo === "vacacion" ? "🏖️ Vacaciones" : "📄 " + esc(s.categoria || "Permiso")}</p>
+            <p class="font-medium">
+              <span class="mr-1.5 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600">Nº ${s.folio}</span>
+              ${s.tipo === "vacacion" ? "🏖️ Vacaciones" : "📄 " + esc(s.categoria || "Permiso")}
+            </p>
             <p class="mt-0.5 text-sm text-slate-600">${rango}${horas} · ${Number(s.dias_solicitados)} día(s)</p>
           </div>
-          <span class="rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${e.clase}">${e.etiqueta}</span>
+          <span class="rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${e.clase}">${esc(etiqueta)}</span>
         </div>
 
         <p class="mt-2 text-sm text-slate-600">${esc(s.descripcion)}</p>
@@ -182,6 +225,7 @@ function pintarSolicitudes(solicitudes) {
 
         <div class="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
           <span>Enviada ${fechaHora(s.created_at)}</span>
+          ${s.reemplazo ? `<span>🔁 Lo cubre ${esc(s.reemplazo)}</span>` : ""}
           ${s.adjuntos ? `<span>📎 ${s.adjuntos} adjunto(s)</span>` : ""}
           ${s.firmas ? `<span>✍️ firmada</span>` : ""}
           ${s.qr_hash && s.estado === "aprobado"
@@ -217,6 +261,19 @@ document.addEventListener("click", async (e) => {
   }
 });
 
+/** El estado dice además QUIÉN decidió: no es lo mismo que rechace el jefe o RRHH. */
+function etiquetaEstado(s) {
+  const base = (ESTADOS[s.estado] || {}).etiqueta || s.estado;
+  if (s.estado !== "rechazado") return base;
+  return s.rechazado_en_etapa === "jefe"
+    ? "Rechazada por su jefe"
+    : s.rechazado_en_etapa === "rrhh"
+      ? "Rechazada por Talento Humano"
+      : base;
+}
+
+$("filtro-solicitudes").addEventListener("input", () => pintarSolicitudes());
+
 document.addEventListener("click", async (e) => {
   const boton = e.target.closest("[data-cancelar]");
   if (!boton) return;
@@ -228,6 +285,204 @@ document.addEventListener("click", async (e) => {
   } catch (err) {
     avisar(err.message, "error");
   }
+});
+
+/* -------------------------------------------------------------- calendario */
+const DIAS_CORTOS = ["L", "M", "M", "J", "V", "S", "D"];
+const NOMBRE_MES = ["enero","febrero","marzo","abril","mayo","junio",
+                    "julio","agosto","septiembre","octubre","noviembre","diciembre"];
+
+function pintarCalendario() {
+  const inicio = estado.mes;
+  const fin = new Date(inicio.getFullYear(), inicio.getMonth() + 1, 0);
+  $("mes-actual").textContent = `${NOMBRE_MES[inicio.getMonth()]} ${inicio.getFullYear()}`;
+
+  const totalDias = fin.getDate();
+  const dias = Array.from({ length: totalDias }, (_, i) =>
+    new Date(inicio.getFullYear(), inicio.getMonth(), i + 1));
+
+  // Una fila por persona con alguna ausencia este mes
+  const porPersona = new Map();
+  for (const a of estado.calendario) {
+    const desde = new Date(a.fecha_inicio + "T12:00");
+    const hasta = new Date(a.fecha_fin + "T12:00");
+    if (hasta < inicio || desde > fin) continue;
+    if (!porPersona.has(a.user_id)) porPersona.set(a.user_id, { nombre: a.nombre, tramos: [] });
+    porPersona.get(a.user_id).tramos.push({ desde, hasta, estado: a.estado, motivo: a.motivo_general });
+  }
+
+  const caja = $("calendario");
+  if (!porPersona.size) {
+    caja.innerHTML = `<p class="rounded-xl bg-slate-50 p-4 text-center text-sm text-slate-500">
+        Nadie de su equipo tiene ausencias registradas en ${NOMBRE_MES[inicio.getMonth()]}.</p>`;
+    return;
+  }
+
+  const hoy = new Date().toDateString();
+  const cabecera = dias.map((d) => {
+    const finde = d.getDay() === 0 || d.getDay() === 6;
+    return `<th class="w-6 px-0 pb-1 text-center text-[10px] font-medium
+                 ${finde ? "text-slate-300" : "text-slate-400"}
+                 ${d.toDateString() === hoy ? "text-slate-900" : ""}">
+              ${d.getDate()}<br><span class="text-[9px]">${DIAS_CORTOS[(d.getDay() + 6) % 7]}</span>
+            </th>`;
+  }).join("");
+
+  const filas = [...porPersona.values()].map((p) => {
+    const celdas = dias.map((d) => {
+      const tramo = p.tramos.find((t) => d >= t.desde && d <= t.hasta);
+      const finde = d.getDay() === 0 || d.getDay() === 6;
+      if (!tramo) return `<td class="h-7 border border-slate-100 ${finde ? "bg-slate-50" : ""}"></td>`;
+      const color = tramo.estado === "aprobado"
+        ? "bg-emerald-400"
+        : "bg-amber-300";
+      return `<td class="h-7 border border-slate-100 p-0">
+                <div class="h-full w-full ${color}" title="${esc(p.nombre)} · ${esc(tramo.motivo)} · ${
+                  tramo.estado === "aprobado" ? "aprobada" : "en trámite"}"></div>
+              </td>`;
+    }).join("");
+    return `<tr>
+      <th class="sticky left-0 z-10 bg-white pr-3 text-left text-xs font-medium whitespace-nowrap">
+        ${esc(p.nombre)}</th>${celdas}</tr>`;
+  }).join("");
+
+  caja.innerHTML = `
+    <table class="border-separate border-spacing-0 text-xs">
+      <thead><tr><th class="sticky left-0 z-10 bg-white"></th>${cabecera}</tr></thead>
+      <tbody>${filas}</tbody>
+    </table>
+    <div class="mt-3 flex flex-wrap gap-4 text-xs text-slate-500">
+      <span class="flex items-center gap-1.5"><i class="inline-block h-3 w-3 rounded-sm bg-emerald-400"></i> Aprobada</span>
+      <span class="flex items-center gap-1.5"><i class="inline-block h-3 w-3 rounded-sm bg-amber-300"></i> En trámite</span>
+      <span>Solo se muestra quién falta y cuándo, no el motivo.</span>
+    </div>`;
+}
+
+$("mes-anterior").addEventListener("click", () => cambiarMes(-1));
+$("mes-siguiente").addEventListener("click", () => cambiarMes(1));
+
+async function cambiarMes(delta) {
+  estado.mes = new Date(estado.mes.getFullYear(), estado.mes.getMonth() + delta, 1);
+  const fin = new Date(estado.mes.getFullYear(), estado.mes.getMonth() + 1, 0);
+  const iso = (d) => d.toISOString().slice(0, 10);
+  try {
+    estado.calendario = await api.calendario(iso(estado.mes), iso(fin));
+  } catch { /* se mantiene lo ya cargado */ }
+  pintarCalendario();
+}
+
+/* ------------------------------------------------------------ aprobaciones */
+function pintarPendientes() {
+  const caja = $("vista-aprobaciones");
+  const cuenta = $("cuenta-pendientes");
+  cuenta.textContent = estado.pendientes.length;
+  cuenta.classList.toggle("hidden", estado.pendientes.length === 0);
+
+  if (!estado.pendientes.length) {
+    caja.innerHTML = `<p class="rounded-2xl bg-white p-8 text-center text-sm text-slate-500 ring-1 ring-slate-200">
+        No tiene solicitudes por aprobar. 🎉</p>`;
+    return;
+  }
+
+  caja.innerHTML = estado.pendientes.map((s) => {
+    const rango = s.fecha_inicio === s.fecha_fin
+      ? fecha(s.fecha_inicio)
+      : `${fecha(s.fecha_inicio, false)} – ${fecha(s.fecha_fin)}`;
+    const horas = s.hora_inicio ? ` · ${s.hora_inicio} a ${s.hora_fin}` : "";
+
+    const banderas = [];
+    if (s.es_adelanto) banderas.push(["amber", "Supera su saldo: días adelantados"]);
+    if (s.tipo === "permiso" && !s.adjuntos) banderas.push(["rose", "Sin respaldo adjunto"]);
+    if (s.tipo === "permiso" && !s.firmas) banderas.push(["rose", "Sin firma del solicitante"]);
+    if (!s.reemplazo) banderas.push(["slate", "Sin reemplazo asignado"]);
+
+    return `
+    <article class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <p class="font-semibold">
+            <span class="mr-1.5 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600">Nº ${s.folio}</span>
+            ${esc(s.empleado)}
+          </p>
+          <p class="text-sm text-slate-500">${esc(s.cedula)}${s.departamento ? " · " + esc(s.departamento) : ""}</p>
+        </div>
+        <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+          ${s.tipo === "vacacion" ? "🏖️ Vacaciones" : "📄 " + esc(s.categoria || "Permiso")}
+        </span>
+      </div>
+
+      <dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
+        <div><dt class="text-xs text-slate-500">Fechas</dt><dd class="font-medium">${rango}${horas}</dd></div>
+        <div><dt class="text-xs text-slate-500">Días</dt><dd class="font-medium">${s.dias_solicitados}</dd></div>
+        <div><dt class="text-xs text-slate-500">Saldo</dt><dd class="font-medium">${s.saldo_actual} días</dd></div>
+        <div><dt class="text-xs text-slate-500">Lo cubre</dt>
+             <dd class="font-medium">${s.reemplazo ? esc(s.reemplazo) : "—"}</dd></div>
+      </dl>
+
+      <p class="mt-3 text-sm text-slate-700">${esc(s.descripcion)}</p>
+      ${s.justificacion
+        ? `<p class="mt-2 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
+             <span class="font-medium">Justificación:</span> ${esc(s.justificacion)}</p>` : ""}
+
+      ${banderas.length
+        ? `<div class="mt-3 flex flex-wrap gap-2">${banderas.map(([t, texto]) =>
+            `<span class="rounded-lg px-2.5 py-1 text-xs font-medium ${
+              t === "amber" ? "bg-amber-50 text-amber-800 ring-1 ring-amber-200"
+              : t === "rose" ? "bg-rose-50 text-rose-800 ring-1 ring-rose-200"
+              : "bg-slate-50 text-slate-600 ring-1 ring-slate-200"}">${esc(texto)}</span>`
+          ).join("")}</div>` : ""}
+
+      <div class="mt-4 flex gap-3">
+        <button data-rechazar="${s.id}" data-nombre="${esc(s.empleado)}" data-folio="${s.folio}"
+                class="flex-1 rounded-xl bg-white px-4 py-2.5 font-medium text-rose-700 ring-1 ring-rose-200 hover:bg-rose-50">
+          Rechazar
+        </button>
+        <button data-aprobar="${s.id}"
+                class="flex-1 rounded-xl bg-emerald-600 px-4 py-2.5 font-medium text-white hover:bg-emerald-700">
+          Aprobar
+        </button>
+      </div>
+    </article>`;
+  }).join("");
+}
+
+document.addEventListener("click", async (e) => {
+  const aprobar = e.target.closest("[data-aprobar]");
+  if (aprobar) {
+    aprobar.disabled = true;
+    aprobar.textContent = "Aprobando…";
+    try {
+      avisar((await api.decidir(aprobar.dataset.aprobar, "aprobar", null)).mensaje);
+    } catch (err) {
+      avisar(err.message, "error");
+    }
+    await cargar();
+    mostrarPestana("aprobaciones");
+    return;
+  }
+
+  const rechazar = e.target.closest("[data-rechazar]");
+  if (rechazar) {
+    $("form-rechazo").dataset.id = rechazar.dataset.rechazar;
+    $("rechazo-de").textContent = `Solicitud Nº ${rechazar.dataset.folio} de ${rechazar.dataset.nombre}`;
+    $("motivo-rechazo").value = "";
+    abrir("modal-rechazo");
+    $("motivo-rechazo").focus();
+  }
+});
+
+$("form-rechazo").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const motivo = $("motivo-rechazo").value.trim();
+  if (motivo.length < 5) return $("motivo-rechazo").focus();
+  $("modal-rechazo").close();
+  try {
+    avisar((await api.decidir($("form-rechazo").dataset.id, "rechazar", motivo)).mensaje);
+  } catch (err) {
+    avisar(err.message, "error");
+  }
+  await cargar();
+  mostrarPestana("aprobaciones");
 });
 
 /* --------------------------------------------------------------- del saldo */
@@ -369,6 +624,14 @@ $("archivo-firma").addEventListener("change", async (e) => {
 });
 
 /* -------------------------------------------------------- nueva solicitud */
+function llenarCompaneros(companeros) {
+  $("reemplazo").innerHTML =
+    `<option value="">Nadie asignado</option>` +
+    companeros.map((c) => `<option value="${c.id}">${esc(c.nombre)}${
+      c.cargo ? " · " + esc(c.cargo) : ""}</option>`).join("");
+  $("campo-reemplazo").classList.toggle("hidden", companeros.length === 0);
+}
+
 function llenarTiposPermiso(tipos) {
   $("tipo-permiso").innerHTML =
     `<option value="">Seleccione…</option>` +
@@ -404,6 +667,7 @@ function abrirFormulario(tipo) {
   $("fecha-inicio").min = manana;
   $("fecha-fin").min = manana;
 
+  $("reemplazo").value = "";
   $("aviso-sin-firma").classList.toggle("hidden", !!estado.firma?.registrada);
   $("firmar").checked = !!estado.firma?.registrada;
 
@@ -472,11 +736,23 @@ async function previsualizar() {
     $("campo-justificacion").classList.toggle("hidden", !necesitaJustificar);
 
     const tono = p.valido ? "bg-slate-50 text-slate-700" : "bg-amber-50 text-amber-900 ring-1 ring-amber-200";
+    const d = p.desglose || {};
+    // Desglose explícito: de dónde sale el número de días que se descuenta
+    const lineas = [
+      `${d.total_calendario ?? Number(p.dias)} día(s) en el rango`,
+      d.fines_de_semana ? `${d.fines_de_semana} de fin de semana` : null,
+      d.dias_no_laborables ? `${d.dias_no_laborables} no laborable(s)` : null,
+    ].filter(Boolean);
+
     caja.className = `rounded-xl p-3 text-sm ${tono}`;
     caja.innerHTML =
-      `<p><strong>${Number(p.dias)} día(s)</strong>` +
-      (p.fines_semana_incluidos ? ` · ${p.fines_semana_incluidos} fin(es) de semana` : "") +
+      `<p><strong>${Number(p.dias)} día(s) a descontar</strong>` +
       ` · saldo después: <strong>${Number(p.saldo_despues)}</strong></p>` +
+      `<p class="mt-1 text-xs opacity-75">${esc(lineas.join(" · "))}</p>` +
+      ((d.feriados || []).length
+        ? `<p class="mt-1.5 text-xs">Feriados en el rango: ${
+            d.feriados.map((f) => `${esc(f.nombre)} (${fecha(f.fecha, false)})`).join(", ")}</p>`
+        : "") +
       (p.avisos?.length
         ? `<ul class="mt-2 list-disc space-y-1 pl-4">${p.avisos.map((a) => `<li>${esc(a)}</li>`).join("")}</ul>`
         : "") +
@@ -541,6 +817,7 @@ $("form-solicitud").addEventListener("submit", async (e) => {
       hora_fin: $("hora-fin").value || null,
       descripcion: $("descripcion").value.trim(),
       justificacion: $("justificacion").value.trim() || null,
+      reemplazo_id: $("reemplazo").value || null,
       adjuntos: adjuntosSubidos,
       firmar: $("firmar").checked,
     });
@@ -579,4 +856,10 @@ $("btn-salir").addEventListener("click", async () => {
   location.href = "index.html";
 });
 
-cargar().catch((err) => avisar(err.message || "No se pudo cargar su panel.", "error"));
+cargar()
+  .then(() => {
+    if (location.hash === "#aprobaciones" && !$("pestanas").classList.contains("hidden")) {
+      mostrarPestana("aprobaciones");
+    }
+  })
+  .catch((err) => avisar(err.message || "No se pudo cargar su panel.", "error"));

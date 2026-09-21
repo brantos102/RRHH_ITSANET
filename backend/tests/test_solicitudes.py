@@ -7,7 +7,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from app.db import ejecutar, obtener_uno
+from app.db import ejecutar, obtener_todos, obtener_uno
 from tests.conftest import CEDULA_PRUEBA
 
 def _firma(trazo: bytes = b"trazo de prueba ") -> str:
@@ -40,10 +40,27 @@ def auth(token):
     return {"Authorization": f"Bearer {token}"}
 
 
-def lunes_futuro(semanas: int = 6) -> date:
-    """Un lunes lejano, para no chocar con feriados ni con el pasado."""
+async def lunes_futuro(semanas: int = 6) -> date:
+    """Un lunes futuro cuya semana no tenga feriados.
+
+    Fijar «hoy + N semanas» hacía que las pruebas se rompieran según el día
+    en que se ejecutaran: si la semana caía en Difuntos o Independencia de
+    Cuenca, los días computables no eran los esperados.
+    """
+    feriados = {
+        f["fecha"]
+        for f in await obtener_todos(
+            "select fecha from public.feriados where activo and fecha >= current_date"
+        )
+    }
     base = date.today() + timedelta(weeks=semanas)
-    return base - timedelta(days=base.weekday())
+    candidato = base - timedelta(days=base.weekday())
+    for _ in range(60):
+        semana = {candidato + timedelta(days=i) for i in range(7)}
+        if not (semana & feriados):
+            return candidato
+        candidato += timedelta(weeks=1)
+    raise AssertionError("No se encontró una semana sin feriados")
 
 
 # ------------------------------------------------------------------ catálogo
@@ -63,7 +80,7 @@ async def test_catalogo_trae_tipos_con_base_legal(cliente, auth):
 
 # ----------------------------------------------------------- previsualización
 async def test_previsualizar_calcula_dias_y_saldo(cliente, auth):
-    lunes = lunes_futuro()
+    lunes = await lunes_futuro()
     r = await cliente.post(
         "/solicitudes/previsualizar",
         headers=auth,
@@ -77,7 +94,7 @@ async def test_previsualizar_calcula_dias_y_saldo(cliente, auth):
 
 
 async def test_previsualizar_avisa_si_excede_el_saldo(cliente, auth):
-    lunes = lunes_futuro()
+    lunes = await lunes_futuro()
     r = await cliente.post(
         "/solicitudes/previsualizar",
         headers=auth,
@@ -88,7 +105,7 @@ async def test_previsualizar_avisa_si_excede_el_saldo(cliente, auth):
 
 # ------------------------------------------------------------------- envío
 async def test_enviar_vacacion(cliente, auth):
-    lunes = lunes_futuro()
+    lunes = await lunes_futuro()
     r = await cliente.post(
         "/solicitudes",
         headers=auth,
@@ -107,7 +124,7 @@ async def test_enviar_vacacion(cliente, auth):
 
 
 async def test_descripcion_larga_se_rechaza(cliente, auth):
-    lunes = lunes_futuro()
+    lunes = await lunes_futuro()
     r = await cliente.post(
         "/solicitudes",
         headers=auth,
@@ -118,7 +135,7 @@ async def test_descripcion_larga_se_rechaza(cliente, auth):
 
 
 async def test_exceder_saldo_sin_justificar_da_mensaje_util(cliente, auth):
-    lunes = lunes_futuro()
+    lunes = await lunes_futuro()
     r = await cliente.post(
         "/solicitudes",
         headers=auth,
@@ -136,7 +153,7 @@ async def test_regla_de_fin_de_semana_devuelve_rango_sugerido(cliente, auth, emp
         "update public.vacation_periods set fines_semana_consumidos = 0 where user_id = %s",
         (empleado["id"],),
     )
-    lunes = lunes_futuro()
+    lunes = await lunes_futuro()
     r = await cliente.post(
         "/solicitudes",
         headers=auth,
@@ -151,7 +168,7 @@ async def test_regla_de_fin_de_semana_devuelve_rango_sugerido(cliente, auth, emp
 
 
 async def test_permiso_sin_categoria_se_rechaza(cliente, auth):
-    lunes = lunes_futuro()
+    lunes = await lunes_futuro()
     r = await cliente.post(
         "/solicitudes",
         headers=auth,
@@ -165,7 +182,7 @@ async def test_permiso_sin_categoria_se_rechaza(cliente, auth):
 async def test_permiso_medico_sin_respaldo_se_rechaza(cliente, auth):
     tipos = (await cliente.get("/catalogos/tipos-permiso", headers=auth)).json()
     medica = next(t for t in tipos if t["codigo"] == "cita_medica")
-    lunes = lunes_futuro()
+    lunes = await lunes_futuro()
     r = await cliente.post(
         "/solicitudes",
         headers=auth,
@@ -224,7 +241,7 @@ async def test_registrar_firma_y_reemplazarla(cliente, auth):
 
 async def test_solicitud_firmada_guarda_la_firma(cliente, auth, empleado):
     await cliente.post("/firmas/dibujada", headers=auth, json={"contenido": FIRMA_PNG})
-    lunes = lunes_futuro()
+    lunes = await lunes_futuro()
     r = await cliente.post(
         "/solicitudes", headers=auth,
         json={"tipo": "vacacion", "fecha_inicio": str(lunes),
@@ -241,7 +258,7 @@ async def test_solicitud_firmada_guarda_la_firma(cliente, auth, empleado):
 
 # ----------------------------------------------------------------- consultas
 async def test_listar_y_cancelar(cliente, auth):
-    lunes = lunes_futuro()
+    lunes = await lunes_futuro()
     creada = await cliente.post(
         "/solicitudes", headers=auth,
         json={"tipo": "vacacion", "fecha_inicio": str(lunes),

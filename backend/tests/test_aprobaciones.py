@@ -7,16 +7,34 @@ from datetime import date, timedelta
 import pytest
 
 from app import notificaciones
-from app.db import ejecutar, obtener_uno
+from app.db import ejecutar, obtener_todos, obtener_uno
 from tests.conftest import CEDULA_PRUEBA
 
 CEDULA_JEFE = "0900000001"
 CEDULA_RRHH = "1100000007"
 
 
-def lunes_futuro(semanas: int = 10) -> date:
+async def lunes_futuro(semanas: int = 6) -> date:
+    """Un lunes futuro cuya semana no tenga feriados.
+
+    Fijar «hoy + N semanas» hacía que las pruebas se rompieran según el día
+    en que se ejecutaran: si la semana caía en Difuntos o Independencia de
+    Cuenca, los días computables no eran los esperados.
+    """
+    feriados = {
+        f["fecha"]
+        for f in await obtener_todos(
+            "select fecha from public.feriados where activo and fecha >= current_date"
+        )
+    }
     base = date.today() + timedelta(weeks=semanas)
-    return base - timedelta(days=base.weekday())
+    candidato = base - timedelta(days=base.weekday())
+    for _ in range(60):
+        semana = {candidato + timedelta(days=i) for i in range(7)}
+        if not (semana & feriados):
+            return candidato
+        candidato += timedelta(weeks=1)
+    raise AssertionError("No se encontró una semana sin feriados")
 
 
 @pytest.fixture
@@ -77,7 +95,7 @@ async def _sesion(cliente, codigos, cedula: str) -> str:
 async def solicitud(cliente, codigos, equipo, correos):
     """Una solicitud de vacaciones recién enviada por el empleado."""
     token = await _sesion(cliente, codigos, CEDULA_PRUEBA)
-    lunes = lunes_futuro()
+    lunes = await lunes_futuro()
     r = await cliente.post(
         "/solicitudes",
         headers={"Authorization": f"Bearer {token}"},
@@ -122,7 +140,7 @@ async def test_nadie_aprueba_su_propia_solicitud(cliente, codigos, solicitud, eq
     # El jefe envía una solicitud suya y luego intenta aprobarla
     token = await _sesion(cliente, codigos, CEDULA_JEFE)
     cab = {"Authorization": f"Bearer {token}"}
-    lunes = lunes_futuro(14)
+    lunes = await lunes_futuro(14)
     propia = await cliente.post(
         "/solicitudes", headers=cab,
         json={"tipo": "vacacion", "fecha_inicio": str(lunes), "fecha_fin": str(lunes + timedelta(days=6)),

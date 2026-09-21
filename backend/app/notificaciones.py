@@ -71,6 +71,7 @@ def _tabla(filas: list[tuple[str, str]]) -> str:
 
 def _detalle(solicitud: dict) -> list[tuple[str, str]]:
     filas = [
+        ("Nº de solicitud", str(solicitud.get("folio") or "—")),
         ("Solicitante", solicitud["empleado"]),
         ("Tipo", solicitud.get("categoria") or ("Vacaciones" if solicitud["tipo"] == "vacacion" else "Permiso")),
         ("Fechas", _rango(solicitud["fecha_inicio"], solicitud["fecha_fin"])),
@@ -78,6 +79,8 @@ def _detalle(solicitud: dict) -> list[tuple[str, str]]:
     ]
     if solicitud.get("hora_inicio"):
         filas.append(("Horario", f"{str(solicitud['hora_inicio'])[:5]} a {str(solicitud['hora_fin'])[:5]}"))
+    if solicitud.get("reemplazo"):
+        filas.append(("Lo cubre", solicitud["reemplazo"]))
     filas.append(("Descripción", solicitud["descripcion"]))
     if solicitud.get("justificacion"):
         filas.append(("Justificación", solicitud["justificacion"]))

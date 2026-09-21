@@ -29,10 +29,11 @@ log = logging.getLogger("rrhh.aprobaciones")
 router = APIRouter(tags=["Aprobaciones"])
 
 SQL_SOLICITUD = """
-    select r.id, r.tipo, r.estado, r.fecha_inicio, r.fecha_fin, r.hora_inicio, r.hora_fin,
+    select r.id, r.folio, r.tipo, r.estado, r.fecha_inicio, r.fecha_fin, r.hora_inicio, r.hora_fin,
            r.dias_solicitados, r.horas_solicitadas, r.descripcion, r.justificacion,
            r.es_adelanto, r.saldo_al_solicitar, r.fines_semana, r.created_at,
            r.jefe_id, r.jefe_token, r.rrhh_token, r.qr_hash, r.motivo_rechazo,
+           rp.nombre as reemplazo,
            r.user_id, u.nombre as empleado, u.cedula, u.email, u.departamento, u.cargo,
            u.dias_vacaciones as saldo_actual,
            pt.nombre as categoria, pt.requiere_adjunto,
@@ -43,6 +44,7 @@ SQL_SOLICITUD = """
     join public.users u on u.id = r.user_id
     left join public.users j on j.id = r.jefe_id
     left join public.permission_types pt on pt.id = r.permission_type_id
+    left join public.users rp on rp.id = r.reemplazo_id
     where r.id = %s
 """
 
@@ -61,7 +63,9 @@ def _publico(solicitud: dict) -> dict:
     """Lo que ve quien aprueba. Sin tokens ni identificadores internos."""
     return {
         "id": str(solicitud["id"]),
+        "folio": solicitud["folio"],
         "empleado": solicitud["empleado"],
+        "reemplazo": solicitud["reemplazo"],
         "cedula": solicitud["cedula"],
         "cargo": solicitud["cargo"],
         "departamento": solicitud["departamento"],
@@ -179,10 +183,10 @@ async def pendientes(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[
 
     filas = await obtener_todos(
         f"""
-        select r.id, r.tipo, r.estado, r.fecha_inicio, r.fecha_fin, r.hora_inicio, r.hora_fin,
+        select r.id, r.folio, r.tipo, r.estado, r.fecha_inicio, r.fecha_fin, r.hora_inicio, r.hora_fin,
                r.dias_solicitados, r.horas_solicitadas, r.descripcion, r.justificacion,
                r.es_adelanto, r.saldo_al_solicitar, r.fines_semana, r.created_at, r.motivo_rechazo,
-               u.nombre as empleado, u.cedula, u.departamento, u.cargo,
+               u.nombre as empleado, u.cedula, u.departamento, u.cargo, rp.nombre as reemplazo,
                u.dias_vacaciones as saldo_actual,
                pt.nombre as categoria, j.nombre as jefe_nombre,
                (select count(*) from public.request_attachments a where a.request_id = r.id) as adjuntos,
@@ -191,6 +195,7 @@ async def pendientes(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[
         join public.users u on u.id = r.user_id
         left join public.users j on j.id = r.jefe_id
         left join public.permission_types pt on pt.id = r.permission_type_id
+        left join public.users rp on rp.id = r.reemplazo_id
         where {filtro}
         order by r.created_at
         """,
