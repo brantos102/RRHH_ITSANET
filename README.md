@@ -11,6 +11,18 @@ Stack: **Supabase (PostgreSQL + Auth + Realtime + Storage)** · **Python / FastA
 | Tarea 5 | Garita: escáner QR, panel del día y registro de visitas | ✅ |
 | Extra | Informes con filtros, administración y menús por rol | ✅ |
 
+## Probar el sistema
+
+```bash
+cp backend/.env.example backend/.env     # complete DATABASE_URL y SUPABASE_JWT_SECRET
+python scripts/verificar.py              # dice qué falta y cómo resolverlo
+./scripts/iniciar.sh                     # backend en :8000, frontend en :5500
+```
+
+Antes necesita un usuario con el que entrar: edite `supabase/crear_mi_usuario.sql` con su cédula y correo, y ejecútelo en Supabase. Guía completa en **[docs/probar.md](docs/probar.md)**.
+
+Con `EMAIL_BACKEND=console` el código de acceso se imprime en la terminal, así puede probar sin configurar correo.
+
 ## Pantallas
 
 | Archivo | Quién entra | Qué hace |
