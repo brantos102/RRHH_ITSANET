@@ -102,9 +102,17 @@ Hacen falta **dos ventanas**: una para la API y otra para las páginas. El front
 Ventana 1 — backend:
 
 ```powershell
-cd C:\ruta\al\proyecto\RRHH_ITSANET\backend
-python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+cd C:\ruta\al\proyecto\RRHH_ITSANET
+python scripts\servidor.py
 ```
+
+> **Use `scripts\servidor.py`, no `uvicorn` directamente.** En Windows, psycopg
+> no puede trabajar sobre el bucle de eventos que Python trae por omisión
+> (`ProactorEventLoop`), y uvicorn solo lo cambia cuando arranca un
+> subproceso, es decir con `--reload`. Sin `--reload` el servidor levanta pero
+> no logra conectarse a la base: `Psycopg cannot use the 'ProactorEventLoop'`.
+> El lanzador fija el bucle correcto siempre. Para probar cómo se comportará
+> publicado, `python scripts\servidor.py --sin-recarga`.
 
 Ventana 2 — frontend:
 
@@ -183,6 +191,8 @@ update public.requests set fecha_inicio = current_date, fecha_fin = current_date
 | La página se ve sin estilos | El CDN de Tailwind está bloqueado por la red. Pruebe desde otra conexión |
 | «Demasiados intentos» | Son 5 códigos por cédula y hora. Espere, o `delete from public.auth_otp where cedula = '…'` |
 | `pool initialization incomplete` | `DATABASE_URL` incorrecta, o falta la contraseña en la URI |
+| `Psycopg cannot use the 'ProactorEventLoop'` (Windows) | Arranque con `python scripts\servidor.py` en vez de llamar a uvicorn directamente |
+| `Field required: database_url` | No encuentra `backend/.env`. Compruebe que el archivo exista **dentro de la carpeta `backend`** y que se llame `.env`, no `.env.txt` (el Bloc de notas añade la extensión si no la pone entre comillas al guardar) |
 
 ---
 

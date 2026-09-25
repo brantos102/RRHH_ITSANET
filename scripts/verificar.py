@@ -8,9 +8,17 @@ si hay con quién iniciar sesión. Dice qué falta y cómo resolverlo.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from pathlib import Path
+
+if sys.platform == "win32":
+    # psycopg en modo asíncrono no funciona sobre ProactorEventLoop, que es
+    # el predeterminado de Python en Windows. Hay que elegir el otro antes
+    # de crear cualquier bucle, o la conexión falla con «Psycopg cannot use
+    # the 'ProactorEventLoop'».
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ / "backend"))
@@ -132,7 +140,6 @@ def main() -> int:
 
     # ------------------------------------------------------------ base de datos
     titulo("2. Base de datos")
-    import asyncio
     return asyncio.run(revisar_base())
 
 

@@ -1,12 +1,24 @@
 """Configuración leída del entorno (12-factor)."""
 import re
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# El .env vive junto al backend, y se busca por ruta absoluta: si se
+# resolviera contra la carpeta actual, arrancar desde la raíz del proyecto
+# (o desde cualquier otro sitio) daría «Field required: database_url» aunque
+# el archivo estuviera ahí mismo. Las variables de entorno siguen mandando
+# sobre el archivo, que es lo que esperan Docker y los servicios de hosting.
+_CARPETA_BACKEND = Path(__file__).resolve().parents[1]
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=(_CARPETA_BACKEND / ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     # Base de datos
     database_url: str
