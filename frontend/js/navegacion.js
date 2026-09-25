@@ -22,6 +22,10 @@ const MODULOS = [
       { texto: "Colaboradores", href: "colaboradores.html" },
       { texto: "Días no laborables", href: "administracion.html#feriados" },
       { texto: "Antigüedades y días", href: "administracion.html#antiguedades" },
+      // La bitácora es herramienta de Talento Humano, no solo del administrador:
+      // la trazabilidad de quién pidió, quién aprobó y cuándo es responsabilidad
+      // suya ante la LOPDP. El backend ya se la permitía; faltaba en el menú.
+      { texto: "Bitácora", href: "administracion.html#bitacora" },
     ],
   },
   {
@@ -77,9 +81,9 @@ export function montarNavegacion(contenedor, { activo = "panel", contadores = {}
                 ${insignia(m.opciones.find((o) => o.contador && contadores[o.contador])?.contador)}
                 <span class="text-[10px] opacity-60">▼</span>
               </button>
-              <div data-panel="${m.id}"
-                   class="absolute left-0 top-full z-30 hidden min-w-[16rem] rounded-xl border border-slate-200
-                          bg-white py-1.5 text-slate-800 shadow-xl">
+              <div data-panel="${m.id}" role="menu"
+                   class="fixed z-50 hidden min-w-[16rem] overflow-y-auto overscroll-contain rounded-xl
+                          border border-slate-200 bg-white py-1.5 text-slate-800 shadow-xl">
                 ${m.opciones.map((o) => `
                   <a href="${o.href}"
                      class="flex items-center justify-between gap-3 px-4 py-2.5 text-sm hover:bg-slate-50">
@@ -115,9 +119,9 @@ export function montarNavegacion(contenedor, { activo = "panel", contadores = {}
             </span>
             <span class="hidden max-w-[10rem] truncate sm:block">${esc(perfil.nombre)}</span>
           </button>
-          <div data-panel="perfil"
-               class="absolute right-0 top-full z-30 hidden min-w-[14rem] rounded-xl border border-slate-200
-                      bg-white py-1.5 text-slate-800 shadow-xl">
+          <div data-panel="perfil" data-alinear="derecha" role="menu"
+               class="fixed z-50 hidden min-w-[14rem] overflow-y-auto overscroll-contain rounded-xl
+                      border border-slate-200 bg-white py-1.5 text-slate-800 shadow-xl">
             <p class="px-4 py-2 text-xs text-slate-500">
               ${esc(perfil.cargo || "")}<br>${esc(ROL_TEXTO[perfil.rol] || perfil.rol)}
             </p>
@@ -131,21 +135,62 @@ export function montarNavegacion(contenedor, { activo = "panel", contadores = {}
       </div>
     </div>`;
 
-  // Menús desplegables: uno abierto a la vez, se cierran al pulsar fuera o con Escape
-  const cerrarTodos = () =>
-    contenedor.querySelectorAll("[data-panel]").forEach((p) => p.classList.add("hidden"));
+  /* Menús desplegables.
 
-  contenedor.querySelectorAll("[data-abrir]").forEach((boton) =>
+     Los paneles se posicionan con `fixed` y coordenadas calculadas, no con
+     `absolute` dentro del botón. Motivo: la barra de módulos necesita
+     `overflow-x-auto` para desplazarse en pantallas angostas, y un ancestro
+     con overflow recorta a sus descendientes posicionados —aunque sobre
+     espacio en la pantalla—. Con `absolute`, el panel simplemente no se veía.
+     Con `fixed` sale del recorte, y al calcular la posición se lo mantiene
+     dentro de la ventana en móvil. */
+  const botones = [...contenedor.querySelectorAll("[data-abrir]")];
+  const paneles = [...contenedor.querySelectorAll("[data-panel]")];
+  const MARGEN = 8;
+
+  function cerrarTodos() {
+    paneles.forEach((p) => p.classList.add("hidden"));
+    botones.forEach((b) => b.setAttribute("aria-expanded", "false"));
+  }
+
+  function colocar(panel, boton) {
+    const caja = boton.getBoundingClientRect();
+    panel.classList.remove("hidden");
+    const ancho = panel.offsetWidth;
+    const derecha = panel.dataset.alinear === "derecha";
+    let izquierda = derecha ? caja.right - ancho : caja.left;
+    // Nunca fuera de la ventana: en un teléfono el último módulo queda al borde
+    izquierda = Math.min(Math.max(MARGEN, izquierda),
+                         Math.max(MARGEN, window.innerWidth - ancho - MARGEN));
+    panel.style.left = `${izquierda}px`;
+    panel.style.top = `${caja.bottom + 4}px`;
+    panel.style.maxHeight = `${Math.max(120, window.innerHeight - caja.bottom - 16)}px`;
+  }
+
+  let abierto = null;
+
+  botones.forEach((boton) => {
+    boton.setAttribute("aria-haspopup", "true");
+    boton.setAttribute("aria-expanded", "false");
     boton.addEventListener("click", (e) => {
       e.stopPropagation();
       const panel = contenedor.querySelector(`[data-panel="${boton.dataset.abrir}"]`);
-      const abierto = !panel.classList.contains("hidden");
+      const yaEstaba = abierto === panel;
       cerrarTodos();
-      panel.classList.toggle("hidden", abierto);
-    })
-  );
-  document.addEventListener("click", cerrarTodos);
-  document.addEventListener("keydown", (e) => e.key === "Escape" && cerrarTodos());
+      if (yaEstaba) { abierto = null; return; }
+      colocar(panel, boton);
+      boton.setAttribute("aria-expanded", "true");
+      abierto = panel;
+    });
+  });
+
+  // Un panel `fixed` no acompaña al documento: si este se mueve, se cierra.
+  const cerrar = () => { cerrarTodos(); abierto = null; };
+  document.addEventListener("click", cerrar);
+  document.addEventListener("keydown", (e) => e.key === "Escape" && cerrar());
+  window.addEventListener("resize", cerrar);
+  window.addEventListener("scroll", cerrar, { passive: true, capture: true });
+  paneles.forEach((p) => p.addEventListener("click", (e) => e.stopPropagation()));
 
   contenedor.querySelector("#nav-salir").addEventListener("click", async () => {
     const { api } = await import("./api.js");

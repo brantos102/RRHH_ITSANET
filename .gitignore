@@ -5,3 +5,6 @@ __pycache__/
 .env.local
 .pytest_cache/
 *.log
+
+# Dependencias del compilador de estilos (no hacen falta para ejecutar)
+build/node_modules/

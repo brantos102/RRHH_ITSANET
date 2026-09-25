@@ -1,0 +1,11 @@
+{
+  "name": "rrhh-itsanet-estilos",
+  "private": true,
+  "description": "Compila el CSS de Tailwind del frontend. No hace falta para ejecutar el sistema, solo para regenerar estilos.",
+  "scripts": {
+    "estilos": "tailwindcss -i ./entrada.css -o ../frontend/vendor/tailwind.css --minify"
+  },
+  "devDependencies": {
+    "tailwindcss": "3.4.17"
+  }
+}
