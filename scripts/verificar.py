@@ -236,7 +236,15 @@ def resumen() -> int:
     if problemas:
         print(f"{ROJO}Faltan {len(problemas)} cosa(s) antes de poder probar.{FIN}")
         return 1
-    print(f"{VERDE}Todo listo.{FIN} Arranque con:  ./scripts/iniciar.sh")
+    print(f"{VERDE}Todo listo.{FIN} Arranque con:")
+    if sys.platform == "win32":
+        # En Windows hacen falta dos ventanas y el lanzador que fija el bucle
+        # de eventos; ./scripts/iniciar.sh es de Linux y aquí no corre.
+        print("    python scripts\\servidor.py          (backend)")
+        print("    cd frontend; python -m http.server 5500   (en otra ventana)")
+        print(f"\n{GRIS}Luego abra http://127.0.0.1:5500{FIN}")
+    else:
+        print("    ./scripts/iniciar.sh")
     return 0
 
 
