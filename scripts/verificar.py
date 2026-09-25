@@ -74,6 +74,19 @@ def main() -> int:
     else:
         print(f"  {OK} Correo por SMTP vía {settings.smtp_host}")
 
+    # CORS: la causa habitual del 400 en OPTIONS y del «No se pudo conectar»
+    if settings.es_produccion:
+        print(f"  {OK} ENTORNO=produccion: solo los orígenes listados")
+        print(f"    {GRIS}{', '.join(settings.origenes_permitidos) or 'ninguno'}{FIN}")
+        if any(o.startswith("http://") for o in settings.origenes_permitidos):
+            print(f"  {AVISO} Hay orígenes http:// en producción: publique con https")
+        if not settings.origenes_permitidos:
+            fallo("ENTORNO=produccion y CORS_ORIGINS vacío: el navegador no podrá llamar",
+                  "Liste la URL del frontend en CORS_ORIGINS, o use ENTORNO=desarrollo")
+    else:
+        print(f"  {OK} ENTORNO=desarrollo: CORS acepta cualquier http://localhost:PUERTO")
+        print(f"    {GRIS}y además {', '.join(settings.origenes_permitidos) or 'nada más'}{FIN}")
+
     if problemas:
         return resumen()
 

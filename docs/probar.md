@@ -25,19 +25,41 @@ Si la cédula no es válida, el script se lo dice **y le sugiere cuál debería 
 
 ## 2. Configure el backend
 
+Copie el ejemplo a `backend/.env`:
+
+```powershell
+# Windows (PowerShell), desde la raíz del proyecto
+copy backend\.env.example backend\.env
+```
+
 ```bash
+# Linux / macOS
 cp backend/.env.example backend/.env
 ```
 
-Solo **tres valores** son imprescindibles para la primera prueba:
+Solo **dos valores** hay que completar a mano; el resto del archivo ya viene listo para probar en su máquina:
 
 | Valor | Dónde sacarlo |
 |---|---|
-| `DATABASE_URL` | Supabase → Project Settings → **Database** → Connection string (URI). Use el pooler, puerto **6543** |
+| `DATABASE_URL` | Supabase → Project Settings → **Database** → Connection string (URI). Use el pooler, puerto **6543**, y reemplace `[YOUR-PASSWORD]` por la contraseña real |
 | `SUPABASE_JWT_SECRET` | Supabase → Project Settings → **API** → JWT Settings → JWT Secret |
-| `EMAIL_BACKEND=console` | Así el código de acceso se **imprime en la terminal** en lugar de enviarse por correo |
 
-> `EMAIL_BACKEND=console` le permite probar **sin configurar nada de correo**. Cuando quiera probar el envío real, pase a `smtp` y complete `SMTP_USER` y `SMTP_PASSWORD` (con Google Workspace: una contraseña de aplicación, no la normal).
+Así debe quedar el final del archivo para la primera prueba (ya viene así en el ejemplo):
+
+```ini
+EMAIL_BACKEND=console
+APP_URL=http://localhost:5500
+CORS_ORIGINS=http://localhost:5500,http://127.0.0.1:5500
+ENTORNO=desarrollo
+```
+
+Qué hace cada uno:
+
+- **`EMAIL_BACKEND=console`** imprime el código de acceso **en la terminal del backend** en vez de enviarlo. Prueba sin tocar nada de correo. Para el envío real: `smtp` más `SMTP_USER` y `SMTP_PASSWORD` (con Google Workspace, una contraseña de aplicación, no la normal).
+- **`CORS_ORIGINS`** son las direcciones desde las que el navegador puede llamar a la API. `http://localhost:5500` y `http://127.0.0.1:5500` son **orígenes distintos** para el navegador: por eso están los dos.
+- **`ENTORNO=desarrollo`** deja abierta la documentación en `/docs` y acepta **cualquier puerto local** (Live Server usa 5500 o 5501 según esté libre). Al publicar se pone `produccion` y entonces solo valen los dominios listados.
+
+> Si cambia el `.env`, **reinicie uvicorn**: `--reload` vigila el código, no el `.env`.
 
 ---
 
@@ -65,14 +87,45 @@ Todo listo. Arranque con:  ./scripts/iniciar.sh
 
 ## 4. Arranque
 
+### Linux / macOS
+
 ```bash
 ./scripts/iniciar.sh
 ```
 
-Crea el entorno de Python la primera vez, ajusta `frontend/config.js` y levanta:
+Crea el entorno de Python la primera vez, ajusta `frontend/config.js` y levanta backend y frontend juntos.
 
-- **Backend** en `http://localhost:8000` (documentación interactiva en `/docs`)
-- **Frontend** en `http://localhost:5500`
+### Windows (PowerShell)
+
+Hacen falta **dos ventanas**: una para la API y otra para las páginas. El frontend **no se abre con doble clic** sobre el `.html` — así el navegador manda el origen `null` y la API lo rechaza siempre.
+
+Ventana 1 — backend:
+
+```powershell
+cd C:\ruta\al\proyecto\RRHH_ITSANET\backend
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Ventana 2 — frontend:
+
+```powershell
+cd C:\ruta\al\proyecto\RRHH_ITSANET\frontend
+python -m http.server 5500
+```
+
+Y abra **`http://127.0.0.1:5500`** (no `localhost`, para que coincida con el `--host 127.0.0.1` del backend: en Windows `localhost` a veces resuelve a IPv6 y la conexión se rechaza).
+
+Al arrancar, el backend dice en su terminal qué orígenes acepta:
+
+```
+INFO rrhh :: Entorno: desarrollo
+INFO rrhh :: CORS acepta: http://localhost:5500, http://127.0.0.1:5500 y cualquier http://localhost:PUERTO
+```
+
+Resultado en ambos sistemas:
+
+- **Backend** en `http://127.0.0.1:8000` (documentación interactiva en `/docs`)
+- **Frontend** en `http://127.0.0.1:5500`
 
 Abra `http://localhost:5500`, escriba su cédula, y **el código aparecerá en esa misma terminal**:
 
@@ -123,7 +176,8 @@ update public.requests set fecha_inicio = current_date, fecha_fin = current_date
 
 | Síntoma | Causa y arreglo |
 |---|---|
-| «No se pudo conectar con el servidor» | El backend no está arriba, o `frontend/config.js` apunta a otro puerto |
+| «No se pudo conectar con el servidor» **y en la terminal del backend aparece `"OPTIONS /auth/solicitar-token" 400 Bad Request`** | El navegador pidió permiso (preflight) desde un origen no autorizado. El backend escribe en su terminal la línea `CORS: origen rechazado …` con el origen exacto: agréguelo a `CORS_ORIGINS` en `backend/.env` y **reinicie uvicorn**. Si el origen es `null`, está abriendo el HTML con doble clic: sírvalo con `python -m http.server 5500` |
+| «No se pudo conectar con el servidor» **sin ninguna línea nueva en la terminal** | La petición no llegó: el backend no está arriba, o `frontend/config.js` apunta a otro puerto, o uvicorn escucha en `127.0.0.1` y usted abrió `localhost` (en Windows resuelve a IPv6). Use `127.0.0.1` en ambos lados, o arranque con `--host 0.0.0.0` |
 | El código nunca llega | Con `EMAIL_BACKEND=console` está **en la terminal**, no en el correo |
 | «Su sesión expiró» al entrar | `SUPABASE_JWT_SECRET` no coincide con el de su proyecto |
 | La página se ve sin estilos | El CDN de Tailwind está bloqueado por la red. Pruebe desde otra conexión |

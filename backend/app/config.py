@@ -1,4 +1,5 @@
 """Configuración leída del entorno (12-factor)."""
+import re
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -37,12 +38,35 @@ class Settings(BaseSettings):
     # Aplicación
     app_nombre: str = "Sistema de Permisos y Vacaciones"
     app_url: str = "http://localhost:5500"
-    cors_origins: str = "http://localhost:5500"
+    cors_origins: str = "http://localhost:5500,http://127.0.0.1:5500"
     entorno: str = "desarrollo"
 
     @property
     def origenes_permitidos(self) -> list[str]:
-        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        return [o.strip().rstrip("/") for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def origen_regex(self) -> str | None:
+        """Fuera de producción, cualquier puerto local vale.
+
+        `localhost:5500` y `127.0.0.1:5500` son orígenes distintos para el
+        navegador, y cada servidor de estáticos elige su propio puerto (Live
+        Server usa 5500 o 5501, `python -m http.server` el que se le indique).
+        Exigir que el puerto exacto esté en CORS_ORIGINS solo produce
+        preflights rechazados con 400 durante el desarrollo. En producción
+        devuelve None: ahí manda la lista explícita y nada más.
+        """
+        if self.es_produccion:
+            return None
+        return r"http://(localhost|127\.0\.0\.1|\[::1\]):\d+"
+
+    def origen_aceptado(self, origen: str) -> bool:
+        """¿El navegador que envía este Origin recibirá respuesta?"""
+        origen = origen.rstrip("/")
+        if origen in self.origenes_permitidos:
+            return True
+        patron = self.origen_regex
+        return bool(patron) and re.fullmatch(patron, origen) is not None
 
     @property
     def es_produccion(self) -> bool:

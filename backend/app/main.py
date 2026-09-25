@@ -24,6 +24,12 @@ log = logging.getLogger("rrhh")
 async def ciclo_de_vida(app: FastAPI):
     await abrir_pool()
     log.info("Pool de base de datos abierto")
+    log.info("Entorno: %s", settings.entorno)
+    log.info(
+        "CORS acepta: %s%s",
+        ", ".join(settings.origenes_permitidos) or "(lista vacía)",
+        "" if settings.es_produccion else " y cualquier http://localhost:PUERTO",
+    )
     yield
     await cerrar_pool()
     log.info("Pool cerrado")
@@ -47,11 +53,33 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.origenes_permitidos,
+    allow_origin_regex=settings.origen_regex,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
     max_age=600,
 )
+
+
+@app.middleware("http")
+async def diagnostico_de_origen(request: Request, call_next):
+    """Un preflight rechazado devuelve 400 sin decir por qué. Aquí sí se dice.
+
+    Es el error más frecuente al arrancar en una máquina nueva: el navegador
+    envía un Origin que no está permitido, CORSMiddleware responde 400 y el
+    usuario solo ve «No se pudo conectar con el servidor».
+    """
+    origen = request.headers.get("origin")
+    if origen and not settings.origen_aceptado(origen):
+        log.error(
+            "CORS: origen rechazado %s (permitidos: %s). "
+            "Agréguelo a CORS_ORIGINS en backend/.env y reinicie uvicorn. "
+            "Si el origen es 'null', está abriendo el HTML con doble clic: "
+            "sírvalo por HTTP (python -m http.server 5500 dentro de frontend/).",
+            origen,
+            ", ".join(settings.origenes_permitidos) or "ninguno",
+        )
+    return await call_next(request)
 
 
 @app.middleware("http")
