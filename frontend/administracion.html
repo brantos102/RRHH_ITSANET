@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>Administración del sistema</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚙️</text></svg>">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="config.js"></script>
+<style>dialog::backdrop{background:rgb(15 23 42/.5)}</style>
+</head>
+
+<body class="min-h-dvh bg-slate-100 text-slate-900 antialiased">
+<div id="barra"></div>
+
+<main class="mx-auto max-w-6xl px-4 py-5 pb-24">
+  <nav class="mb-5 flex gap-1 overflow-x-auto rounded-2xl bg-white p-1.5 shadow-sm ring-1 ring-slate-200">
+    <button data-seccion="usuarios" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Usuarios</button>
+    <button data-seccion="tipos" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Tipos de solicitud</button>
+    <button data-seccion="feriados" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Días no laborables</button>
+    <button data-seccion="antiguedades" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Antigüedades</button>
+    <button data-seccion="configuracion" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Configuración</button>
+    <button data-seccion="bitacora" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Bitácora</button>
+  </nav>
+
+  <!-- ===== Usuarios ===== -->
+  <section data-panel="usuarios" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+      <h2 class="font-medium">Personal</h2>
+      <div class="flex items-center gap-3">
+        <input id="buscar-usuario" type="search" placeholder="Nombre o cédula"
+               class="w-48 rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
+        <label class="flex items-center gap-2 text-sm text-slate-600">
+          <input id="ver-inactivos" type="checkbox" class="rounded border-slate-300"> Inactivos
+        </label>
+        <button id="btn-nuevo-usuario"
+                class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
+          + Nuevo
+        </button>
+      </div>
+    </header>
+    <div id="tabla-usuarios" class="overflow-x-auto"></div>
+  </section>
+
+  <!-- ===== Tipos de solicitud ===== -->
+  <section data-panel="tipos" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="border-b border-slate-200 px-5 py-3.5">
+      <h2 class="font-medium">Tipos de solicitud</h2>
+      <p class="mt-0.5 text-sm text-slate-500">
+        Cada tipo define qué exige. Cambiarlo aplica a las solicitudes nuevas, no a las ya enviadas.
+      </p>
+    </header>
+    <div id="tabla-tipos" class="overflow-x-auto"></div>
+  </section>
+
+  <!-- ===== Feriados ===== -->
+  <section data-panel="feriados" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+      <div>
+        <h2 class="font-medium">Días no laborables</h2>
+        <p class="mt-0.5 text-sm text-slate-500">No se descuentan del saldo cuando caen dentro de una ausencia</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <input id="anio-feriados" type="number" min="2020" max="2100"
+               class="w-24 rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300">
+        <button id="btn-nuevo-feriado"
+                class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
+          + Agregar
+        </button>
+      </div>
+    </header>
+    <div id="tabla-feriados" class="overflow-x-auto"></div>
+  </section>
+
+  <!-- ===== Antigüedades ===== -->
+  <section data-panel="antiguedades" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="border-b border-slate-200 px-5 py-3.5">
+      <h2 class="font-medium">Antigüedades y días</h2>
+      <p class="mt-0.5 text-sm text-slate-500">
+        Cuántos días devenga cada persona según sus años de servicio (Art. 69 del Código del Trabajo)
+      </p>
+    </header>
+    <div id="tabla-antiguedades" class="overflow-x-auto"></div>
+  </section>
+
+  <!-- ===== Configuración ===== -->
+  <section data-panel="configuracion" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="border-b border-slate-200 px-5 py-3.5">
+      <h2 class="font-medium">Parámetros del sistema</h2>
+      <p class="mt-0.5 text-sm text-slate-500">
+        Deciden derechos de toda la plantilla. Cada cambio queda en la bitácora.
+      </p>
+    </header>
+    <div id="lista-configuracion" class="divide-y divide-slate-100"></div>
+  </section>
+
+  <!-- ===== Bitácora ===== -->
+  <section data-panel="bitacora" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+      <div>
+        <h2 class="font-medium">Bitácora de auditoría</h2>
+        <p class="mt-0.5 text-sm text-slate-500">Registro inmutable: no se puede editar ni borrar</p>
+      </div>
+      <input id="filtro-bitacora" type="search" placeholder="Filtrar por acción"
+             class="w-48 rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+    </header>
+    <div id="tabla-bitacora" class="overflow-x-auto"></div>
+  </section>
+</main>
+
+<!-- ===== Alta / edición de usuario ===== -->
+<dialog id="modal-usuario" class="w-[min(100vw-1.5rem,34rem)] rounded-2xl p-0">
+  <form id="form-usuario" method="dialog" class="max-h-[85dvh] overflow-y-auto">
+    <div class="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
+      <h2 id="titulo-usuario" class="font-semibold">Nuevo usuario</h2>
+      <button type="button" data-cerrar class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100">✕</button>
+    </div>
+    <div class="grid gap-4 px-5 py-4 sm:grid-cols-2">
+      <div><label for="u-cedula" class="block text-sm font-medium text-slate-700">Cédula</label>
+        <input id="u-cedula" inputmode="numeric" maxlength="10" required
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 font-mono ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
+        <p id="u-error-cedula" class="mt-1 hidden text-xs text-rose-600"></p></div>
+      <div><label for="u-nombre" class="block text-sm font-medium text-slate-700">Nombre</label>
+        <input id="u-nombre" required maxlength="120"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900"></div>
+      <div class="sm:col-span-2"><label for="u-email" class="block text-sm font-medium text-slate-700">
+        Correo institucional</label>
+        <input id="u-email" type="email" required
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
+        <p class="mt-1 text-xs text-slate-500">Ahí llegará su código de acceso</p></div>
+      <div><label for="u-rol" class="block text-sm font-medium text-slate-700">Rol</label>
+        <select id="u-rol" class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300">
+          <option value="empleado">Empleado</option>
+          <option value="jefe">Jefe inmediato</option>
+          <option value="rrhh">Talento Humano</option>
+          <option value="guardia">Guardia de seguridad</option>
+          <option value="admin">Administrador</option>
+        </select></div>
+      <div><label for="u-telefono" class="block text-sm font-medium text-slate-700">Teléfono</label>
+        <input id="u-telefono" inputmode="tel" maxlength="20"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300"></div>
+      <div><label for="u-cargo" class="block text-sm font-medium text-slate-700">Cargo</label>
+        <input id="u-cargo" maxlength="80"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300"></div>
+      <div><label for="u-departamento" class="block text-sm font-medium text-slate-700">Departamento</label>
+        <input id="u-departamento" maxlength="80"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300"></div>
+      <div><label for="u-jefe" class="block text-sm font-medium text-slate-700">Jefe inmediato</label>
+        <select id="u-jefe" class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300">
+          <option value="">Sin jefe asignado</option>
+        </select></div>
+      <div><label for="u-ingreso" class="block text-sm font-medium text-slate-700">Fecha de ingreso</label>
+        <input id="u-ingreso" type="date" required
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300"></div>
+      <div id="campo-saldo"><label for="u-saldo" class="block text-sm font-medium text-slate-700">
+        Saldo en planilla</label>
+        <input id="u-saldo" type="number" step="0.5" min="0" placeholder="Días que ya tiene"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300">
+        <p class="mt-1 text-xs text-slate-500">Si se deja vacío, se calcula desde la fecha de ingreso</p></div>
+      <p id="u-error" class="hidden rounded-xl bg-rose-50 p-3 text-sm text-rose-800 sm:col-span-2"></p>
+    </div>
+    <div class="sticky bottom-0 flex gap-3 border-t border-slate-200 bg-white px-5 py-4">
+      <button type="button" data-cerrar class="flex-1 rounded-xl bg-slate-100 px-4 py-3 font-medium hover:bg-slate-200">
+        Cancelar</button>
+      <button type="submit" class="flex-1 rounded-xl bg-slate-900 px-4 py-3 font-medium text-white hover:bg-slate-800">
+        Guardar</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4">
+  <p id="aviso" class="hidden max-w-sm rounded-xl bg-slate-900 px-4 py-3 text-center text-sm text-white shadow-lg"></p>
+</div>
+
+<script type="module" src="js/administracion.js"></script>
+</body>
+</html>

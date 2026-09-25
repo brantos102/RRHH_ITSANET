@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>Garita · Control de acceso</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+<link rel="manifest" href="manifest.json">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="config.js"></script>
+<style>
+  dialog::backdrop { background: rgb(2 6 23 / .75); }
+  /* El veredicto ocupa la pantalla: el guardia lo lee de lejos y de un vistazo */
+  #veredicto[open] { border: 0; padding: 0; max-width: none; width: 100vw; height: 100dvh; }
+</style>
+</head>
+
+<body class="min-h-dvh bg-slate-100 text-slate-900 antialiased">
+<div id="barra"></div>
+
+<main class="mx-auto max-w-6xl px-4 py-5 pb-24">
+
+  <!-- ===== Escáner ===== -->
+  <section class="rounded-2xl bg-slate-900 p-5 text-white shadow-lg">
+    <div class="flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <h1 class="text-lg font-semibold">Validar salida</h1>
+        <p class="mt-0.5 text-sm text-slate-300">
+          Escanee el código del empleado o escríbalo y pulse Enter
+        </p>
+      </div>
+      <p id="reloj" class="font-mono text-2xl tabular-nums text-cyan-300"></p>
+    </div>
+
+    <form id="form-qr" class="mt-4 flex flex-wrap gap-3">
+      <input id="entrada-qr" autocomplete="off" autofocus
+             placeholder="Escaneando…"
+             class="min-w-0 flex-1 rounded-xl border-0 bg-slate-800 px-4 py-4 font-mono text-lg
+                    text-white ring-1 ring-slate-700 outline-none placeholder:text-slate-500
+                    focus:ring-2 focus:ring-cyan-400">
+      <button type="submit"
+              class="rounded-xl bg-cyan-500 px-6 py-4 font-semibold text-slate-900 hover:bg-cyan-400">
+        Validar
+      </button>
+      <button type="button" id="btn-camara"
+              class="rounded-xl bg-slate-800 px-5 py-4 font-medium ring-1 ring-slate-700 hover:bg-slate-700">
+        📷 Cámara
+      </button>
+    </form>
+
+    <div id="caja-camara" class="mt-4 hidden">
+      <video id="video" playsinline class="w-full max-w-md rounded-xl bg-black"></video>
+      <p class="mt-2 text-xs text-slate-400">Apunte al código. Se valida solo al reconocerlo.</p>
+    </div>
+  </section>
+
+  <!-- ===== Tres columnas ===== -->
+  <div class="mt-5 grid gap-4 lg:grid-cols-3">
+
+    <!-- Personal con autorización hoy -->
+    <section class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 lg:col-span-2">
+      <div class="flex items-center justify-between">
+        <h2 class="font-medium">Personal autorizado hoy</h2>
+        <span id="cuenta-hoy" class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">—</span>
+      </div>
+      <div id="lista-hoy" class="mt-3 space-y-2">
+        <p class="text-sm text-slate-500">Cargando…</p>
+      </div>
+
+      <details id="caja-tramite" class="mt-4 hidden">
+        <summary class="cursor-pointer text-sm font-medium text-amber-700">
+          Con solicitud en trámite (<span id="cuenta-tramite">0</span>) — todavía no pueden salir
+        </summary>
+        <div id="lista-tramite" class="mt-2 space-y-2"></div>
+      </details>
+    </section>
+
+    <!-- Visitantes -->
+    <section class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <div class="flex items-center justify-between">
+        <h2 class="font-medium">Visitas dentro</h2>
+        <button id="btn-nueva-visita"
+                class="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800">
+          + Registrar
+        </button>
+      </div>
+      <div id="lista-visitas" class="mt-3 space-y-2">
+        <p class="text-sm text-slate-500">Cargando…</p>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===== Bitácora ===== -->
+  <section class="mt-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <h2 class="font-medium">Últimos movimientos</h2>
+    <div id="bitacora" class="mt-3 overflow-x-auto"></div>
+  </section>
+</main>
+
+<!-- ===== Veredicto a pantalla completa ===== -->
+<dialog id="veredicto">
+  <div id="veredicto-fondo" class="flex h-full w-full flex-col items-center justify-center px-6 text-center">
+    <p id="veredicto-icono" class="text-7xl"></p>
+    <h2 id="veredicto-titulo" class="mt-4 text-3xl font-bold"></h2>
+    <p id="veredicto-motivo" class="mt-2 max-w-md text-lg"></p>
+
+    <dl id="veredicto-datos" class="mt-6 w-full max-w-sm space-y-1.5 rounded-2xl bg-black/15 p-5 text-left"></dl>
+
+    <button id="veredicto-cerrar"
+            class="mt-8 rounded-xl bg-white/90 px-8 py-3 font-semibold text-slate-900 hover:bg-white">
+      Continuar <span class="opacity-60">(Enter)</span>
+    </button>
+  </div>
+</dialog>
+
+<!-- ===== Registro de visita ===== -->
+<dialog id="modal-visita" class="w-[min(100vw-1.5rem,32rem)] rounded-2xl p-0">
+  <form id="form-visita" method="dialog">
+    <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+      <h2 class="font-semibold">Registrar visita</h2>
+      <button type="button" data-cerrar class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100">✕</button>
+    </div>
+    <div class="space-y-4 px-5 py-4">
+      <div>
+        <label for="v-cedula" class="block text-sm font-medium text-slate-700">Cédula</label>
+        <input id="v-cedula" inputmode="numeric" maxlength="10" required autocomplete="off"
+               placeholder="Escanee o escriba la cédula"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 font-mono text-lg
+                      ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+        <p id="v-error-cedula" class="mt-1.5 hidden text-sm text-rose-600"></p>
+      </div>
+      <div>
+        <label for="v-nombre" class="block text-sm font-medium text-slate-700">Nombre completo</label>
+        <input id="v-nombre" required maxlength="120"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label for="v-empresa" class="block text-sm font-medium text-slate-700">Empresa</label>
+          <input id="v-empresa" maxlength="120"
+                 class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                        focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </div>
+        <div>
+          <label for="v-telefono" class="block text-sm font-medium text-slate-700">Teléfono</label>
+          <input id="v-telefono" inputmode="tel" maxlength="20"
+                 class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                        focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </div>
+      </div>
+      <div>
+        <label for="v-anfitrion" class="block text-sm font-medium text-slate-700">¿A quién visita?</label>
+        <input id="v-anfitrion" list="anfitriones" autocomplete="off" maxlength="120"
+               placeholder="Escriba el nombre"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
+        <datalist id="anfitriones"></datalist>
+      </div>
+      <div>
+        <label for="v-motivo" class="block text-sm font-medium text-slate-700">Motivo</label>
+        <input id="v-motivo" required maxlength="200" placeholder="Ej.: entrega de equipos"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
+      </div>
+      <p id="v-error" class="hidden rounded-xl bg-rose-50 p-3 text-sm text-rose-800"></p>
+    </div>
+    <div class="flex gap-3 border-t border-slate-200 px-5 py-4">
+      <button type="button" data-cerrar class="flex-1 rounded-xl bg-slate-100 px-4 py-3 font-medium hover:bg-slate-200">
+        Cancelar
+      </button>
+      <button type="submit" class="flex-1 rounded-xl bg-slate-900 px-4 py-3 font-medium text-white hover:bg-slate-800">
+        Registrar ingreso
+      </button>
+    </div>
+  </form>
+</dialog>
+
+<div class="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4">
+  <p id="aviso" class="hidden max-w-sm rounded-xl bg-slate-900 px-4 py-3 text-center text-sm text-white shadow-lg"></p>
+</div>
+
+<script type="module" src="js/garita.js"></script>
+</body>
+</html>

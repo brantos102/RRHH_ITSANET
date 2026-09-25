@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>Informes de solicitudes</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="config.js"></script>
+</head>
+
+<body class="min-h-dvh bg-slate-100 text-slate-900 antialiased">
+<div id="barra"></div>
+
+<main class="mx-auto max-w-6xl px-4 py-5 pb-24">
+
+  <!-- ===== Filtros ===== -->
+  <section class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="flex items-center justify-between border-b border-slate-200 px-5 py-3.5">
+      <h1 class="font-medium">Informes · Solicitudes · Filtros</h1>
+      <button id="btn-limpiar" class="text-sm text-slate-500 hover:text-slate-900">Limpiar</button>
+    </header>
+
+    <form id="filtros" class="grid gap-4 px-5 py-4 sm:grid-cols-2">
+      <div class="sm:col-span-2">
+        <label for="f-folio" class="block text-sm font-medium text-slate-700">Nº de solicitud</label>
+        <input id="f-folio" type="number" min="1" placeholder="Si lo indica, se omiten los demás filtros"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900 sm:max-w-sm">
+      </div>
+
+      <div class="grid grid-cols-[auto_1fr_1fr] items-end gap-2 sm:col-span-2">
+        <div>
+          <label for="f-campo" class="block text-sm font-medium text-slate-700">Fecha de</label>
+          <select id="f-campo"
+                  class="mt-1.5 rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                         focus:bg-white focus:ring-2 focus:ring-slate-900"></select>
+        </div>
+        <div>
+          <label for="f-desde" class="block text-sm font-medium text-slate-700">Desde</label>
+          <input id="f-desde" type="date"
+                 class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                        focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </div>
+        <div>
+          <label for="f-hasta" class="block text-sm font-medium text-slate-700">Hasta</label>
+          <input id="f-hasta" type="date"
+                 class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                        focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </div>
+      </div>
+
+      <div><label for="f-estado" class="block text-sm font-medium text-slate-700">Estado</label>
+        <select id="f-estado" multiple size="4"
+                class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 ring-1 ring-slate-300
+                       focus:bg-white focus:ring-2 focus:ring-slate-900"></select></div>
+
+      <div><label for="f-tipo" class="block text-sm font-medium text-slate-700">Tipo</label>
+        <select id="f-tipo" multiple size="4"
+                class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 ring-1 ring-slate-300
+                       focus:bg-white focus:ring-2 focus:ring-slate-900"></select></div>
+
+      <div><label for="f-departamento" class="block text-sm font-medium text-slate-700">Departamento</label>
+        <select id="f-departamento" multiple size="4"
+                class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 ring-1 ring-slate-300
+                       focus:bg-white focus:ring-2 focus:ring-slate-900"></select></div>
+
+      <div><label for="f-cargo" class="block text-sm font-medium text-slate-700">Cargo</label>
+        <select id="f-cargo" multiple size="4"
+                class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 ring-1 ring-slate-300
+                       focus:bg-white focus:ring-2 focus:ring-slate-900"></select></div>
+
+      <div><label for="f-solicitante" class="block text-sm font-medium text-slate-700">Solicitante</label>
+        <select id="f-solicitante" multiple size="4"
+                class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 ring-1 ring-slate-300
+                       focus:bg-white focus:ring-2 focus:ring-slate-900"></select></div>
+
+      <div><label for="f-jefe" class="block text-sm font-medium text-slate-700">Jefe</label>
+        <select id="f-jefe" multiple size="4"
+                class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 ring-1 ring-slate-300
+                       focus:bg-white focus:ring-2 focus:ring-slate-900"></select></div>
+
+      <div>
+        <label for="f-cedula" class="block text-sm font-medium text-slate-700">Cédula</label>
+        <input id="f-cedula" inputmode="numeric" maxlength="10" placeholder="Empieza por…"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 font-mono ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
+      </div>
+
+      <div class="flex items-end gap-3 sm:col-span-2">
+        <button type="submit"
+                class="rounded-xl bg-slate-900 px-6 py-2.5 font-medium text-white hover:bg-slate-800">
+          Filtrar
+        </button>
+        <a id="btn-csv" href="#" download
+           class="rounded-xl bg-white px-5 py-2.5 font-medium ring-1 ring-slate-300 hover:bg-slate-50">
+          ↓ Descargar CSV
+        </a>
+        <p class="ml-auto text-xs text-slate-500">
+          Mantenga Ctrl (o Cmd) para elegir varios
+        </p>
+      </div>
+    </form>
+  </section>
+
+  <!-- ===== Resumen ===== -->
+  <section id="resumen" class="mt-4 hidden grid-cols-2 gap-3 sm:grid-cols-4"></section>
+
+  <!-- ===== Tabla ===== -->
+  <section class="mt-4 rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+      <h2 class="font-medium">Resultado</h2>
+      <div class="flex items-center gap-3">
+        <input id="buscar-tabla" type="search" placeholder="Buscar en el resultado"
+               class="w-48 rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
+        <select id="por-pagina" class="rounded-xl border-0 bg-slate-50 px-2.5 py-2 text-sm ring-1 ring-slate-300">
+          <option>10</option><option selected>25</option><option>50</option><option>100</option>
+        </select>
+      </div>
+    </header>
+    <div id="tabla" class="overflow-x-auto"></div>
+    <footer id="paginacion" class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-5 py-3.5"></footer>
+  </section>
+</main>
+
+<div class="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4">
+  <p id="aviso" class="hidden max-w-sm rounded-xl bg-slate-900 px-4 py-3 text-center text-sm text-white shadow-lg"></p>
+</div>
+
+<script type="module" src="js/informes.js"></script>
+</body>
+</html>
