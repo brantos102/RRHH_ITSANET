@@ -10,10 +10,20 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import Any
 
+from psycopg import adapters
 from psycopg.rows import dict_row
+from psycopg.types.string import TextLoader
 from psycopg_pool import AsyncConnectionPool
 
 from .config import get_settings
+
+# Las columnas `inet` (la IP de cada registro de bitácora) llegan por defecto
+# como objetos `ipaddress.IPv4Address`, que pydantic no sabe convertir a JSON:
+# la respuesta explotaba con "Unable to serialize unknown type". Se leen como
+# texto, que es lo único que la API hace con ellas. Afecta a toda consulta,
+# incluidas las vistas, así que no hay que acordarse de castear en cada SELECT.
+adapters.register_loader("inet", TextLoader)
+adapters.register_loader("cidr", TextLoader)
 
 _pool: AsyncConnectionPool | None = None
 

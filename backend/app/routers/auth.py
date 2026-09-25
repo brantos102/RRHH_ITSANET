@@ -307,7 +307,11 @@ async def mis_notificaciones(usuario: Annotated[dict, Depends(usuario_actual)]) 
     )
 
 
-@router.post("/cerrar-sesion", status_code=status.HTTP_204_NO_CONTENT)
+# `response_model=None` explícito: con `from __future__ import annotations`
+# el `-> None` llega como la cadena "None", y al resolverla FastAPI obtiene
+# NoneType —que es un tipo, no un None— y concluye que la respuesta lleva
+# cuerpo, cosa que un 204 prohíbe. El módulo entero fallaba al importarse.
+@router.post("/cerrar-sesion", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def cerrar_sesion(request: Request, usuario: Annotated[dict, Depends(usuario_actual)]) -> None:
     """El token es sin estado: el cliente lo descarta. Aquí queda el registro."""
     await registrar(request, "sesion_cerrada", user_id=str(usuario["id"]),

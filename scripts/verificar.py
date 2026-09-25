@@ -31,6 +31,44 @@ def fallo(mensaje: str, remedio: str) -> None:
     problemas.append(mensaje)
 
 
+def revisar_versiones() -> None:
+    """Un backend con librerías distintas a las ancladas falla de formas raras.
+
+    Pasó de verdad: con otra versión de FastAPI el módulo de autenticación ni
+    siquiera se importaba, y con otra de pydantic la bitácora devolvía 500.
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    criticas = {}
+    for linea in (RAIZ / "backend" / "requirements.txt").read_text().splitlines():
+        linea = linea.strip()
+        if "==" in linea and not linea.startswith("#"):
+            nombre, anclada = linea.split("==", 1)
+            criticas[nombre.split("[")[0]] = anclada
+
+    desajustes = []
+    faltantes = []
+    for paquete, anclada in criticas.items():
+        try:
+            instalada = version(paquete)
+        except PackageNotFoundError:
+            faltantes.append(paquete)
+            continue
+        if instalada != anclada:
+            desajustes.append(f"{paquete} {instalada} (anclada: {anclada})")
+
+    if faltantes:
+        fallo(f"Faltan librerías: {', '.join(faltantes)}",
+              "pip install -r backend/requirements.txt")
+    elif desajustes:
+        print(f"  {AVISO} Versiones distintas a las probadas:")
+        for d in desajustes:
+            print(f"    {GRIS}{d}{FIN}")
+        print(f"    {GRIS}→ pip install -r backend/requirements.txt  (si algo falla raro){FIN}")
+    else:
+        print(f"  {OK} Librerías en las versiones probadas")
+
+
 def main() -> int:
     print("Verificación del sistema de permisos y vacaciones")
 
@@ -73,6 +111,8 @@ def main() -> int:
               "Ponga EMAIL_BACKEND=console para probar sin correo")
     else:
         print(f"  {OK} Correo por SMTP vía {settings.smtp_host}")
+
+    revisar_versiones()
 
     # CORS: la causa habitual del 400 en OPTIONS y del «No se pudo conectar»
     if settings.es_produccion:
