@@ -11,7 +11,7 @@ const MODULOS = [
     opciones: [
       { texto: "Pendientes de autorización", href: "dashboard.html#aprobaciones", contador: "pendientes" },
       { texto: "Períodos de mis colaboradores", href: "colaboradores.html" },
-      { texto: "Calendario del equipo", href: "dashboard.html#calendario" },
+      { texto: "Calendario del equipo", href: "equipo.html" },
     ],
   },
   {

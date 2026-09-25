@@ -152,12 +152,15 @@ Ctrl+C detiene todo.
 | Como | Dónde | Qué mirar |
 |---|---|---|
 | **Empleado** | Panel | El saldo y su botón *¿Por qué tengo estos días?* con los artículos |
-| | Nueva solicitud | Elija lunes a viernes: debe avisar del fin de semana obligatorio y ofrecer corregir |
+| | Nueva solicitud | Elija lunes a viernes: son 5 días y el mínimo son 7. Debe frenarlo y ofrecer corregir con un clic |
+| | Solicitar permiso | Elija un pilar y un subtipo: aparece el ejemplo de cómo redactarlo y qué adjuntar |
 | | | Elija una semana con feriado: el desglose lo nombra |
 | | Firma | Dibújela con el mouse o el dedo |
-| **Jefe** | Pestaña *Por aprobar* | El Nº, el reemplazo y las banderas de lo que falta |
+| **Jefe** | Pestaña *Por aprobar* | Al aprobar, elige quién cubre el puesto; quien también falta esas fechas sale bloqueado |
+| | Menú *Jefe → Calendario del equipo* | Su equipo mes a mes. Pulse un bloque para ver quién cubre |
 | | Correo | El aviso trae un enlace que decide **sin iniciar sesión** |
 | **Talento Humano** | Pestaña *Anulaciones* | Pida anular una aprobada desde el panel del empleado y resuélvala aquí |
+| | *Calendario del equipo* → una ausencia aprobada | Botón **Ajustar**: el permiso de dos horas que deriva en tres días de reposo |
 | | Informes | Filtre y descargue el CSV (se abre en Excel con acentos) |
 | | Administración | Antigüedades, días no laborables, parámetros y bitácora |
 | **Guardia** | `garita.html` | Pegue el código QR: el veredicto ocupa la pantalla |
@@ -188,7 +191,7 @@ update public.requests set fecha_inicio = current_date, fecha_fin = current_date
 | «No se pudo conectar con el servidor» **sin ninguna línea nueva en la terminal** | La petición no llegó: el backend no está arriba, o `frontend/config.js` apunta a otro puerto, o uvicorn escucha en `127.0.0.1` y usted abrió `localhost` (en Windows resuelve a IPv6). Use `127.0.0.1` en ambos lados, o arranque con `--host 0.0.0.0` |
 | El código nunca llega | Con `EMAIL_BACKEND=console` está **en la terminal**, no en el correo |
 | «Su sesión expiró» al entrar | `SUPABASE_JWT_SECRET` no coincide con el de su proyecto |
-| La página se ve sin estilos | El CDN de Tailwind está bloqueado por la red. Pruebe desde otra conexión |
+| La página se ve sin estilos | Falta `frontend/vendor/tailwind.css`. Regenérelo con `cd build && npm install && npm run estilos`, o traiga el archivo del repositorio |
 | «Demasiados intentos» | Son 5 códigos por cédula y hora. Espere, o `delete from public.auth_otp where cedula = '…'` |
 | `pool initialization incomplete` | `DATABASE_URL` incorrecta, o falta la contraseña en la URI |
 | `Psycopg cannot use the 'ProactorEventLoop'` (Windows) | Arranque con `python scripts\servidor.py` en vez de llamar a uvicorn directamente |

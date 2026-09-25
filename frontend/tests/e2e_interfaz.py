@@ -8,8 +8,9 @@ Requiere, como las otras pruebas de extremo a extremo:
 
     python frontend/tests/e2e_interfaz.py
 
-Los clics usan force=True: sin acceso al CDN de Tailwind la página queda sin
-estilos y la geometría de clic no es fiable. Se comprueba la lógica.
+Los clics usan force=True para no depender de animaciones ni de la posición
+exacta de cada elemento. Los estilos se compilan localmente
+(frontend/vendor/tailwind.css), así que la página se ve como en producción.
 """
 import asyncio, datetime as dt, re
 from playwright.async_api import async_playwright
@@ -50,11 +51,13 @@ async def main():
         print(f"  {celdas} días pintados | leyenda dice el motivo:",
               "no el motivo" in cal or "no el motivo." in cal)
 
-        # ---- Nueva solicitud: desglose + reemplazo ----
+        # ---- Nueva solicitud: desglose ----
+        # El reemplazo ya no se pide aquí: lo asigna el jefe al aprobar.
         await pg.click("[data-nueva='vacacion']", force=True)
         await pg.wait_for_selector("#modal-solicitud[open]")
-        opciones = await pg.locator("#reemplazo option").count()
-        print(f"✓ selector de reemplazo con {opciones} opción(es)")
+        assert await pg.locator("#reemplazo").count() == 0, \
+            "el solicitante no debe poder elegir quién lo cubre"
+        print("✓ el formulario del colaborador ya no pide reemplazo")
 
         # Una semana con feriado dentro, para ver el desglose
         hoy = dt.date.today()
@@ -68,8 +71,6 @@ async def main():
         assert "a descontar" in previa
         assert "Feriados en el rango" in previa, "debe nombrar los feriados"
 
-        if opciones > 1:
-            await pg.select_option("#reemplazo", index=1)
         await pg.fill("#descripcion", "Descanso con feriado incluido")
         await pg.click("#btn-enviar-solicitud", force=True)
         await pg.wait_for_function("!document.getElementById('modal-solicitud').open", timeout=12000)
@@ -77,8 +78,7 @@ async def main():
 
         lista = await pg.inner_text("#lista-solicitudes")
         folio = re.search(r"Nº (\d+)", lista)
-        print(f"✓ solicitud creada con folio {folio.group(1)}; se muestra el reemplazo:",
-              "Lo cubre" in lista)
+        print(f"✓ solicitud creada con folio {folio.group(1)}")
 
         # ---- Filtro ----
         await pg.fill("#filtro-solicitudes", "zzzz")
@@ -102,8 +102,16 @@ async def main():
         await jefe.click("[data-pestana='aprobaciones']", force=True)
         await jefe.wait_for_timeout(700)
         bandeja = await jefe.inner_text("#vista-aprobaciones")
-        print("✓ bandeja muestra Nº y reemplazo:",
-              bool(re.search(r"Nº \d+", bandeja)), "|", "Lo cubre" in bandeja)
+        print("✓ bandeja muestra el Nº:", bool(re.search(r"Nº \d+", bandeja)))
+
+        # Aprobar abre el diálogo donde el jefe elige quién cubre el puesto
+        await jefe.click("[data-aprobar]", force=True)
+        await jefe.wait_for_selector("#modal-reemplazo[open]", timeout=8000)
+        await jefe.wait_for_timeout(1200)
+        candidatos = await jefe.locator("#reemplazo-jefe option").count()
+        print(f"✓ el jefe elige el reemplazo al aprobar: {candidatos} opción(es)")
+        await jefe.click("#modal-reemplazo [data-cerrar]", force=True)
+        await jefe.wait_for_timeout(400)
 
         await jefe.click("[data-rechazar]", force=True)
         await jefe.wait_for_selector("#modal-rechazo[open]")

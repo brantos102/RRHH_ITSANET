@@ -11,8 +11,9 @@ Requiere, como la otra prueba de extremo a extremo:
 
     python frontend/tests/e2e_flujo_aprobacion.py
 
-Los clics usan force=True: sin acceso al CDN de Tailwind la página queda
-sin estilos y la geometría de clic no es fiable. Se comprueba la lógica.
+Los clics usan force=True para no depender de animaciones ni de la posición
+exacta de cada elemento. Los estilos se compilan localmente
+(frontend/vendor/tailwind.css), así que la página se ve como en producción.
 """
 import asyncio, datetime as dt, re
 from playwright.async_api import async_playwright
@@ -65,7 +66,9 @@ async def main():
         await emp.click("#btn-enviar-solicitud", force=True)
         await emp.wait_for_function("!document.getElementById('modal-solicitud').open", timeout=12000)
         await emp.wait_for_timeout(1500)
-        print("✓ solicitud enviada:", (await emp.inner_text("#lista-solicitudes")).split("\n")[2].strip())
+        lista_emp = await emp.inner_text("#lista-solicitudes")
+        folio = re.search(r"Nº (\d+)", lista_emp).group(1)
+        print(f"✓ solicitud Nº {folio} enviada:", lista_emp.split("\n")[2].strip())
 
         # ---------- 2. El jefe decide desde el enlace del correo ----------
         token_jefe = enlace("jefe")
@@ -92,14 +95,22 @@ async def main():
         rrhh = await ctx3.new_page()
         rrhh.on("pageerror", lambda e: errores.append(str(e)))
         await entrar(rrhh, "0703886002")
-        await rrhh.goto(f"{BASE}/aprobaciones.html")
+        # La bandeja vive en el panel: aprobaciones.html solo redirige.
+        await rrhh.goto(f"{BASE}/dashboard.html#aprobaciones")
+        await rrhh.wait_for_timeout(2200)
+        await rrhh.click("[data-pestana='aprobaciones']", force=True)
         await rrhh.wait_for_selector("[data-aprobar]", timeout=10000)
+        bandeja = await rrhh.inner_text("#vista-aprobaciones")
         print("✓ Talento Humano ve la solicitud en su bandeja:",
-              (await rrhh.inner_text("#lista")).split("\n")[0])
+              [l for l in bandeja.split("\n") if l.strip()][0][:70])
         await rrhh.screenshot(path="/tmp/capturas/aprobaciones.png", full_page=True)
 
-        await rrhh.click("[data-aprobar]", force=True)
-        await rrhh.wait_for_timeout(2500)
+        # Se aprueba ESTA solicitud, no «la primera»: la bandeja puede tener otras.
+        await rrhh.locator("article", has_text=f"Nº {folio}").locator("[data-aprobar]").click(force=True)
+        await rrhh.wait_for_timeout(1500)
+        if await rrhh.locator("#modal-reemplazo[open]").count():
+            await rrhh.click("#form-reemplazo button[type=submit]", force=True)
+            await rrhh.wait_for_timeout(2500)
         print("✓ aprobación final:", await rrhh.inner_text("#aviso"))
 
         # ---------- 4. El empleado ve su QR ----------

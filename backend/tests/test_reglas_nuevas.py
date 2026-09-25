@@ -238,3 +238,29 @@ async def test_el_catalogo_llega_agrupado_y_con_ejemplos(cliente, auth):
         for sub in pilar["subtipos"]:
             assert sub["guia_ejemplo"], f"{sub['codigo']} sin ejemplo de redacción"
             assert sub["guia_adjuntos"], f"{sub['codigo']} sin guía de adjuntos"
+
+
+async def test_un_feriado_dentro_del_rango_no_invalida_la_semana(cliente, auth):
+    """El mínimo cuenta días de ausencia, no días cobrados al saldo.
+
+    Una semana de lunes a domingo con un feriado dentro descuenta 6 días del
+    saldo pero la persona está fuera 7. Medirlo contra los días cobrados hacía
+    imposible tomar la semana de Navidad o la de Carnaval.
+    """
+    feriado = await obtener_uno(
+        """select fecha from public.feriados
+            where activo and fecha > current_date + 30
+              and extract(isodow from fecha) between 1 and 5
+            order by fecha limit 1"""
+    )
+    assert feriado, "el seed debe tener feriados futuros entre semana"
+
+    lunes = feriado["fecha"] - timedelta(days=feriado["fecha"].weekday())
+    r = await cliente.post("/solicitudes", headers=auth, json={
+        "tipo": "vacacion", "fecha_inicio": str(lunes),
+        "fecha_fin": str(lunes + timedelta(days=6)),
+        "descripcion": "Semana completa con feriado incluido", "firmar": False,
+    })
+    assert r.status_code == 201, r.text
+    # Se descuentan menos días del saldo, pero la solicitud es válida
+    assert float(r.json()["dias_solicitados"]) < 7

@@ -10,8 +10,9 @@ Requiere, como las otras pruebas de extremo a extremo:
 
     python frontend/tests/e2e_garita_admin.py
 
-Los clics usan force=True: sin acceso al CDN de Tailwind la página queda sin
-estilos y la geometría de clic no es fiable. Se comprueba la lógica.
+Los clics usan force=True para no depender de animaciones ni de la posición
+exacta de cada elemento. Los estilos se compilan localmente
+(frontend/vendor/tailwind.css), así que la página se ve como en producción.
 """
 import asyncio, datetime as dt, re
 from playwright.async_api import async_playwright
@@ -80,7 +81,17 @@ async def main():
         print("✓ el jefe ve:", " · ".join(x.strip() for x in barra_jefe.split("\n") if x.strip())[:90])
         await jefe.click("[data-pestana='aprobaciones']", force=True)
         await jefe.wait_for_timeout(700)
-        await jefe.click("[data-aprobar]", force=True)
+        # Se apunta a la tarjeta de ESTE folio: la bandeja puede tener otras
+        # pendientes y aprobar «la primera» dejaba la prueba mirando otra cosa.
+        tarjeta = jefe.locator("article", has_text=f"Nº {folio}")
+        await tarjeta.locator("[data-aprobar]").click(force=True)
+        await jefe.wait_for_selector("#modal-reemplazo[open]", timeout=8000)
+        await jefe.wait_for_timeout(1500)
+        opciones = await jefe.locator("#reemplazo-jefe option").count()
+        print(f"  el jefe elige reemplazo entre {opciones} opción(es)")
+        if opciones > 1:
+            await jefe.select_option("#reemplazo-jefe", index=1)
+        await jefe.click("#form-reemplazo button[type=submit]", force=True)
         await jefe.wait_for_timeout(2500)
         print("  jefe aprobó:", (await jefe.inner_text("#aviso"))[:60])
 
@@ -95,8 +106,13 @@ async def main():
 
         await rrhh.click("[data-pestana='aprobaciones']", force=True)
         await rrhh.wait_for_timeout(800)
-        await rrhh.click("[data-aprobar]", force=True)
-        await rrhh.wait_for_timeout(2500)
+        # Talento Humano cierra: el diálogo de reemplazo es solo del jefe, pero
+        # el botón es el mismo, así que se contempla que pueda abrirse.
+        await rrhh.locator("article", has_text=f"Nº {folio}").locator("[data-aprobar]").click(force=True)
+        await rrhh.wait_for_timeout(1500)
+        if await rrhh.locator("#modal-reemplazo[open]").count():
+            await rrhh.click("#form-reemplazo button[type=submit]", force=True)
+            await rrhh.wait_for_timeout(2500)
         print("✓ aprobación final:", (await rrhh.inner_text("#aviso"))[:70])
 
         # ---------- 4. Garita ----------

@@ -546,7 +546,7 @@ begin
     -- El mínimo y la justificación se comprueban al insertar (ver
     -- `tg_requests_ruta_aprobacion`), que devuelve el error de inmediato.
     -- Aquí solo queda el adjunto, que llega después de la fila.
-    if v_minimo > 0 and new.dias_solicitados < v_minimo then
+    if v_minimo > 0 and ((new.fecha_fin - new.fecha_inicio) + 1) < v_minimo then
       if v_adjuntos = 0 then
         raise exception
           'Para tomar menos de % días debe adjuntar el documento que respalde la excepción.',
@@ -569,7 +569,8 @@ returns trigger
 language plpgsql
 as $ruta$
 declare
-  v_minimo numeric;
+  v_minimo     numeric;
+  v_calendario integer;
 begin
   new.ruta_aprobacion := 'estandar';
 
@@ -577,11 +578,17 @@ begin
     select coalesce(nullif(valor, '')::numeric, 0) into v_minimo
       from public.app_config where clave = 'vacaciones_bloque_minimo';
 
-    if coalesce(v_minimo, 0) > 0 and new.dias_solicitados < v_minimo then
+    -- El mínimo se mide en días de AUSENCIA, no en los que se descuentan del
+    -- saldo. Un feriado dentro del rango no acorta el descanso: la persona
+    -- igual está fuera. Medirlo contra `dias_solicitados` —que excluye
+    -- feriados— hacía imposible tomar la semana de Navidad o de Carnaval.
+    v_calendario := (new.fecha_fin - new.fecha_inicio) + 1;
+
+    if coalesce(v_minimo, 0) > 0 and v_calendario < v_minimo then
       if not new.bloque_menor_justificado then
         raise exception
-          'Las vacaciones se toman en bloques de al menos % días y usted pidió %. Si su caso lo amerita, márquelo como excepción, explique el motivo y adjunte el respaldo: la autoriza Talento Humano, no su jefe.',
-          v_minimo, new.dias_solicitados
+          'Las vacaciones se toman en bloques de al menos % días seguidos y usted pidió %. Si su caso lo amerita, márquelo como excepción, explique el motivo y adjunte el respaldo: la autoriza Talento Humano, no su jefe.',
+          v_minimo, v_calendario
           using errcode = 'P0001', hint = 'bloque_minimo|' || v_minimo::text;
       end if;
 

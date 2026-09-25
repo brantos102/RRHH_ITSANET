@@ -13,9 +13,9 @@ Requiere, en tres terminales:
 
     python frontend/tests/e2e.py
 
-Nota: los clics usan force=True porque en entornos sin acceso al CDN de
-Tailwind la página queda sin estilos y la geometría de clic no es fiable.
-Lo que se comprueba aquí es la lógica, no el diseño.
+Los clics usan force=True para no depender de animaciones ni de la posición
+exacta de cada elemento. Los estilos se compilan localmente
+(frontend/vendor/tailwind.css), así que la página se ve como en producción.
 """
 import asyncio
 import os
@@ -121,6 +121,22 @@ async def main():
 
         await pagina.fill("#descripcion", "Viaje familiar programado con anticipación")
         await pagina.click("#btn-enviar-solicitud", force=True)
+        await pagina.wait_for_timeout(2000)
+
+        # Lunes a viernes son 5 días: por debajo del bloque mínimo. La regla
+        # debe frenarlo y ofrecer la salida, no dejar al colaborador varado.
+        if await pagina.locator("#modal-solicitud[open]").count():
+            error = await pagina.inner_text("#error-solicitud")
+            assert "bloques de al menos" in error, f"se esperaba el aviso del mínimo: {error}"
+            print("✓ bloque mínimo aplicado:", error.split(".")[0][:90])
+            assert await pagina.locator("#campo-excepcion").is_visible(), \
+                "debe ofrecerse la vía de excepción"
+            await pagina.click("#btn-aplicar-sugerido", force=True)
+            await pagina.wait_for_timeout(800)
+            print("  corregido con un clic a:", await pagina.input_value("#fecha-inicio"),
+                  "–", await pagina.input_value("#fecha-fin"))
+            await pagina.click("#btn-enviar-solicitud", force=True)
+
         await pagina.wait_for_function("!document.getElementById('modal-solicitud').open", timeout=10000)
         await pagina.wait_for_timeout(1200)
         print("✓ solicitud enviada:", (await pagina.inner_text("#lista-solicitudes")).split("\n")[0])

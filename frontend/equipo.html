@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>Calendario del equipo · Permisos y Vacaciones</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📅</text></svg>">
+<link rel="stylesheet" href="vendor/tailwind.css">
+<script src="config.js"></script>
+</head>
+
+<body class="min-h-dvh bg-slate-100 text-slate-900 antialiased">
+<div id="barra"></div>
+
+<main class="mx-auto max-w-7xl px-4 py-5 pb-24">
+  <header class="mb-5 flex flex-wrap items-end justify-between gap-3">
+    <div>
+      <h1 class="text-xl font-semibold">Calendario del equipo</h1>
+      <p id="subtitulo" class="text-sm text-slate-500">Quién falta y cuándo, para no dejar un puesto descubierto</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <div id="filtro-departamento" class="hidden">
+        <select id="departamento"
+                class="rounded-xl border-0 bg-white px-3 py-2 text-sm ring-1 ring-slate-300
+                       focus:ring-2 focus:ring-slate-900">
+          <option value="">Todos los departamentos</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-1 rounded-xl bg-white p-1 ring-1 ring-slate-200">
+        <button id="mes-anterior" class="rounded-lg px-2.5 py-1.5 text-slate-600 hover:bg-slate-100"
+                aria-label="Mes anterior">‹</button>
+        <span id="mes-actual" class="min-w-[9rem] text-center text-sm font-medium"></span>
+        <button id="mes-siguiente" class="rounded-lg px-2.5 py-1.5 text-slate-600 hover:bg-slate-100"
+                aria-label="Mes siguiente">›</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <div id="rejilla" class="overflow-x-auto">
+      <p class="px-5 py-12 text-center text-sm text-slate-500">Cargando…</p>
+    </div>
+    <footer class="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-slate-200 px-5 py-3 text-xs text-slate-600">
+      <span class="flex items-center gap-1.5">
+        <span class="h-3 w-3 rounded bg-emerald-400"></span> Vacaciones aprobadas</span>
+      <span class="flex items-center gap-1.5">
+        <span class="h-3 w-3 rounded bg-emerald-200"></span> Vacaciones en trámite</span>
+      <span class="flex items-center gap-1.5">
+        <span class="h-3 w-3 rounded bg-sky-400"></span> Permiso aprobado</span>
+      <span class="flex items-center gap-1.5">
+        <span class="h-3 w-3 rounded bg-sky-200"></span> Permiso en trámite</span>
+      <span class="flex items-center gap-1.5">
+        <span class="h-3 w-3 rounded bg-slate-200"></span> Día no laborable</span>
+      <span class="ml-auto text-slate-400">
+        Se muestra quién falta y cuándo, nunca el motivo: es dato personal
+      </span>
+    </footer>
+  </section>
+
+  <section id="detalle" class="mt-5 hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200"></section>
+</main>
+
+<!-- ============ Modal: ajustar una ausencia ya autorizada ============ -->
+<dialog id="modal-ajuste" class="w-[min(100vw-1.5rem,34rem)] rounded-2xl p-0">
+  <form id="form-ajuste" method="dialog">
+    <div class="border-b border-slate-200 px-5 py-4">
+      <h2 class="font-semibold">Ajustar ausencia</h2>
+      <p id="ajuste-de" class="mt-0.5 text-sm text-slate-500"></p>
+    </div>
+
+    <div class="max-h-[70vh] space-y-4 overflow-y-auto px-5 py-4">
+      <p class="rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
+        Use esto cuando la ausencia real no coincide con la autorizada: un permiso
+        por cita médica que deriva en reposo, un imprevisto que la alarga. Las
+        fechas nuevas rigen de inmediato en garita y en el calendario del jefe.
+        El registro original se conserva.
+      </p>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label for="ajuste-inicio" class="block text-sm font-medium text-slate-700">Desde</label>
+          <input type="date" id="ajuste-inicio" required
+                 class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                        focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </div>
+        <div>
+          <label for="ajuste-fin" class="block text-sm font-medium text-slate-700">Hasta</label>
+          <input type="date" id="ajuste-fin" required
+                 class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                        focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </div>
+      </div>
+
+      <div>
+        <label for="ajuste-motivo" class="block text-sm font-medium text-slate-700">
+          ¿Qué ocurrió? <span class="font-normal text-slate-500">(el caso)</span>
+        </label>
+        <textarea id="ajuste-motivo" rows="3" maxlength="600" required minlength="15"
+                  placeholder="Ej.: el colaborador asistió a su cita y el especialista le otorgó reposo por tres días más"
+                  class="mt-1.5 w-full resize-none rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                         focus:bg-white focus:ring-2 focus:ring-slate-900"></textarea>
+      </div>
+
+      <div>
+        <label for="ajuste-resolucion" class="block text-sm font-medium text-slate-700">
+          ¿Qué se resolvió? <span class="font-normal text-slate-500">(y con qué respaldo)</span>
+        </label>
+        <textarea id="ajuste-resolucion" rows="3" maxlength="600" required minlength="15"
+                  placeholder="Ej.: se extiende la ausencia hasta el 18 con el certificado del IESS, entregado en físico a Talento Humano"
+                  class="mt-1.5 w-full resize-none rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                         focus:bg-white focus:ring-2 focus:ring-slate-900"></textarea>
+      </div>
+
+      <p id="error-ajuste" class="hidden rounded-xl bg-rose-50 p-3 text-sm text-rose-800 ring-1 ring-rose-200"></p>
+    </div>
+
+    <div class="flex gap-3 border-t border-slate-200 px-5 py-4">
+      <button type="button" data-cerrar-ajuste
+              class="flex-1 rounded-xl bg-slate-100 px-4 py-3 font-medium hover:bg-slate-200">Cancelar</button>
+      <button type="submit"
+              class="flex-1 rounded-xl bg-slate-900 px-4 py-3 font-medium text-white hover:bg-slate-800">
+        Guardar ajuste
+      </button>
+    </div>
+  </form>
+</dialog>
+
+<div id="aviso" class="fixed inset-x-0 bottom-5 z-50 mx-auto hidden max-w-sm rounded-xl px-4 py-3 text-center text-sm shadow-lg"></div>
+
+<script type="module" src="js/equipo.js"></script>
+</body>
+</html>
