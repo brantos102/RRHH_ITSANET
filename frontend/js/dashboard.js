@@ -5,8 +5,9 @@ import { montarNavegacion } from "./navegacion.js";
 
 const $ = (id) => document.getElementById(id);
 const estado = {
-  tipos: [], firma: null, adjuntos: [], tipoActual: null, saldo: null,
-  solicitudes: [], pendientes: [], anulaciones: [], companeros: [], calendario: [],
+  tipos: [], catalogo: null, pilarActual: null, firma: null, adjuntos: [],
+  tipoActual: null, saldo: null, bloqueMinimo: null,
+  solicitudes: [], pendientes: [], anulaciones: [], calendario: [],
   mes: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
 };
 
@@ -46,22 +47,20 @@ async function cargar() {
   $("pestanas").classList.toggle("hidden", !aprueba);
   $("pestana-anulaciones").classList.toggle("hidden", !resuelveAnulaciones);
 
-  const [saldo, notificaciones, solicitudes, tipos, firma, companeros, calendario,
+  const [saldo, notificaciones, solicitudes, catalogo, firma, calendario,
          pendientes, anulaciones] =
     await Promise.all([
       api.saldo().catch(() => null),
       api.notificaciones().catch(() => []),
       api.misSolicitudes().catch(() => []),
-      api.tiposPermiso().catch(() => []),
+      api.catalogoPermisos().catch(() => ({ mandato: "", pilares: [] })),
       api.miFirma().catch(() => ({ registrada: false })),
-      api.companeros().catch(() => []),
       api.calendario().catch(() => []),
       aprueba ? api.pendientes().catch(() => []) : Promise.resolve([]),
       resuelveAnulaciones ? api.anulacionesPendientes().catch(() => []) : Promise.resolve([]),
     ]);
 
-  Object.assign(estado, { tipos, firma, saldo, solicitudes, companeros, calendario,
-                          pendientes, anulaciones });
+  Object.assign(estado, { firma, saldo, solicitudes, calendario, pendientes, anulaciones });
   montarNavegacion($("barra"), {
     activo: "panel",
     contadores: { pendientes: pendientes.length, anulaciones: anulaciones.length },
@@ -73,8 +72,7 @@ async function cargar() {
   pintarLogros(perfil.logros);
   pintarSolicitudes();
   pintarFirma(firma);
-  llenarTiposPermiso(tipos);
-  llenarCompaneros(companeros);
+  montarPilares(catalogo);
   pintarCalendario();
   pintarPendientes();
   pintarAnulaciones();
@@ -477,15 +475,10 @@ function pintarPendientes() {
 document.addEventListener("click", async (e) => {
   const aprobar = e.target.closest("[data-aprobar]");
   if (aprobar) {
-    aprobar.disabled = true;
-    aprobar.textContent = "Aprobando…";
-    try {
-      avisar((await api.decidir(aprobar.dataset.aprobar, "aprobar", null)).mensaje);
-    } catch (err) {
-      avisar(err.message, "error");
-    }
-    await cargar();
-    mostrarPestana("aprobaciones");
+    /* Antes de aprobar, el jefe decide quién cubre el puesto. Es el momento
+       en que tiene el caso delante y conoce la carga del equipo; el
+       solicitante no tiene por qué saber quién está disponible. */
+    await abrirReemplazo(aprobar.dataset.aprobar);
     return;
   }
 
@@ -497,6 +490,38 @@ document.addEventListener("click", async (e) => {
     abrir("modal-rechazo");
     $("motivo-rechazo").focus();
   }
+});
+
+async function abrirReemplazo(solicitudId) {
+  const select = $("reemplazo-jefe");
+  $("form-reemplazo").dataset.id = solicitudId;
+  select.innerHTML = `<option value="">Cargando…</option>`;
+  abrir("modal-reemplazo");
+
+  try {
+    const candidatos = await api.candidatosReemplazo(solicitudId);
+    select.innerHTML =
+      `<option value="">Nadie por ahora</option>` +
+      candidatos.map((c) => `<option value="${c.id}"${c.tambien_ausente ? " disabled" : ""}>` +
+        `${esc(c.nombre)}${c.cargo ? " · " + esc(c.cargo) : ""}` +
+        `${c.tambien_ausente ? " — también estará ausente" : ""}</option>`).join("");
+  } catch {
+    select.innerHTML = `<option value="">No se pudo cargar el equipo</option>`;
+  }
+}
+
+$("form-reemplazo").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const id = $("form-reemplazo").dataset.id;
+  $("modal-reemplazo").close();
+  try {
+    const r = await api.decidir(id, "aprobar", null, $("reemplazo-jefe").value || null);
+    avisar(r.mensaje);
+  } catch (err) {
+    avisar(err.message, "error");
+  }
+  await cargar();
+  mostrarPestana("aprobaciones");
 });
 
 $("form-rechazo").addEventListener("submit", async (e) => {
@@ -732,18 +757,52 @@ $("archivo-firma").addEventListener("change", async (e) => {
 });
 
 /* -------------------------------------------------------- nueva solicitud */
-function llenarCompaneros(companeros) {
-  $("reemplazo").innerHTML =
-    `<option value="">Nadie asignado</option>` +
-    companeros.map((c) => `<option value="${c.id}">${esc(c.nombre)}${
-      c.cargo ? " · " + esc(c.cargo) : ""}</option>`).join("");
-  $("campo-reemplazo").classList.toggle("hidden", companeros.length === 0);
+/* Pilares y subtipos.
+
+   Antes eran veinte opciones planas en un desplegable: para elegir bien
+   había que leerlas todas. Ahora se responde una pregunta —emergencia del
+   hogar, salud o asunto propio— y se afina dentro de ese grupo. */
+function montarPilares(catalogo) {
+  estado.catalogo = catalogo;
+  estado.tipos = (catalogo.pilares || []).flatMap((p) => p.subtipos);
+  $("mandato").textContent = catalogo.mandato || "";
+
+  $("pilares").innerHTML = (catalogo.pilares || []).map((p) => `
+    <button type="button" data-pilar="${esc(p.codigo)}"
+            class="rounded-xl p-3 text-left ring-1 ring-slate-200 hover:ring-slate-400">
+      <span class="block text-sm font-medium text-slate-900">${esc(p.nombre)}</span>
+      <span class="mt-0.5 block text-xs leading-snug text-slate-500">${esc(p.descripcion)}</span>
+    </button>`).join("");
+
+  $("pilares").querySelectorAll("[data-pilar]").forEach((boton) =>
+    boton.addEventListener("click", () => elegirPilar(boton.dataset.pilar))
+  );
 }
 
-function llenarTiposPermiso(tipos) {
+function elegirPilar(codigo) {
+  const pilar = (estado.catalogo?.pilares || []).find((p) => p.codigo === codigo);
+  estado.pilarActual = pilar || null;
+  estado.tipoActual = null;
+
+  $("pilares").querySelectorAll("[data-pilar]").forEach((b) => {
+    const activo = b.dataset.pilar === codigo;
+    b.className = `rounded-xl p-3 text-left ring-1 ${activo
+      ? "bg-slate-900 text-white ring-slate-900"
+      : "ring-slate-200 hover:ring-slate-400"}`;
+    b.querySelector("span").className =
+      `block text-sm font-medium ${activo ? "text-white" : "text-slate-900"}`;
+    b.querySelectorAll("span")[1].className =
+      `mt-0.5 block text-xs leading-snug ${activo ? "text-slate-300" : "text-slate-500"}`;
+  });
+
   $("tipo-permiso").innerHTML =
     `<option value="">Seleccione…</option>` +
-    tipos.map((t) => `<option value="${t.id}">${esc(t.nombre)}</option>`).join("");
+    (pilar?.subtipos || []).map((t) => `<option value="${t.id}">${esc(t.nombre)}</option>`).join("");
+  $("campo-subtipo").classList.toggle("hidden", !pilar);
+  $("info-permiso").classList.add("hidden");
+  $("ejemplo-descripcion").classList.add("hidden");
+  $("campo-adjuntos").classList.add("hidden");
+  $("campo-justificacion").classList.add("hidden");
 }
 
 document.querySelectorAll("[data-nueva]").forEach((boton) =>
@@ -766,6 +825,16 @@ function abrirFormulario(tipo) {
   $("campo-adjuntos").classList.add("hidden");
   $("campo-justificacion").classList.add("hidden");
   $("info-permiso").classList.add("hidden");
+  $("ejemplo-descripcion").classList.add("hidden");
+  $("campo-subtipo").classList.add("hidden");
+  $("campo-excepcion").classList.add("hidden");
+  $("excepcion-bloque").checked = false;
+  estado.pilarActual = null;
+  $("pilares").querySelectorAll("[data-pilar]").forEach((b) => {
+    b.className = "rounded-xl p-3 text-left ring-1 ring-slate-200 hover:ring-slate-400";
+    b.querySelector("span").className = "block text-sm font-medium text-slate-900";
+    b.querySelectorAll("span")[1].className = "mt-0.5 block text-xs leading-snug text-slate-500";
+  });
   $("previsualizacion").classList.add("hidden");
   $("error-solicitud").classList.add("hidden");
   $("lista-adjuntos").innerHTML = "";
@@ -775,7 +844,6 @@ function abrirFormulario(tipo) {
   $("fecha-inicio").min = manana;
   $("fecha-fin").min = manana;
 
-  $("reemplazo").value = "";
   $("aviso-sin-firma").classList.toggle("hidden", !!estado.firma?.registrada);
   $("firmar").checked = !!estado.firma?.registrada;
 
@@ -787,12 +855,15 @@ $("descripcion").addEventListener("input", (e) => {
 });
 
 $("tipo-permiso").addEventListener("change", (e) => {
-  const tipo = estado.tipos.find((t) => String(t.id) === e.target.value);
+  const tipo = (estado.pilarActual?.subtipos || estado.tipos)
+    .find((t) => String(t.id) === e.target.value);
   estado.tipoActual = tipo || null;
 
   const info = $("info-permiso");
+  const ejemplo = $("ejemplo-descripcion");
   if (!tipo) {
     info.classList.add("hidden");
+    ejemplo.classList.add("hidden");
     $("campo-adjuntos").classList.add("hidden");
     return;
   }
@@ -800,17 +871,29 @@ $("tipo-permiso").addEventListener("change", (e) => {
   const requisitos = [
     tipo.requiere_adjunto ? "exige adjuntar respaldo" : null,
     tipo.requiere_justificacion ? "exige justificación" : null,
-    tipo.requiere_firma ? "exige su firma" : null,
     tipo.descuenta_vacaciones ? "se descuenta de sus vacaciones" : null,
     tipo.max_dias ? `máximo ${Number(tipo.max_dias)} día(s)` : null,
     tipo.max_horas ? `máximo ${Number(tipo.max_horas)} hora(s)` : null,
   ].filter(Boolean);
 
-  info.innerHTML =
-    `<strong>Este permiso ${requisitos.join(", ")}.</strong>` +
-    (tipo.articulo ? `<br><span class="text-slate-500">${esc(tipo.norma)} · ${esc(tipo.articulo)}</span>` : "");
+  info.innerHTML = requisitos.length
+    ? `<strong>Este permiso ${requisitos.join(", ")}.</strong>`
+    : `<strong>${esc(tipo.descripcion || tipo.nombre)}</strong>`;
   info.classList.remove("hidden");
 
+  /* El ejemplo es la pieza que evita el «permiso personal» a secas, que
+     obliga a devolver la solicitud y le cuesta un día al solicitante. */
+  if (tipo.guia_ejemplo) {
+    ejemplo.innerHTML =
+      `<span class="font-medium">Así se redacta una solicitud que se aprueba:</span><br>` +
+      esc(tipo.guia_ejemplo);
+    ejemplo.classList.remove("hidden");
+    $("descripcion").placeholder = "Motivo, lugar, hora y cuánto tiempo estará ausente";
+  } else {
+    ejemplo.classList.add("hidden");
+  }
+
+  $("guia-adjuntos").textContent = tipo.guia_adjuntos || "";
   $("campo-adjuntos").classList.toggle("hidden", !tipo.requiere_adjunto);
   $("campo-justificacion").classList.toggle("hidden", !tipo.requiere_justificacion);
   $("campo-horas").classList.toggle("hidden", !tipo.max_horas);
@@ -925,7 +1008,7 @@ $("form-solicitud").addEventListener("submit", async (e) => {
       hora_fin: $("hora-fin").value || null,
       descripcion: $("descripcion").value.trim(),
       justificacion: $("justificacion").value.trim() || null,
-      reemplazo_id: $("reemplazo").value || null,
+      bloque_menor_justificado: $("excepcion-bloque").checked,
       adjuntos: adjuntosSubidos,
       firmar: $("firmar").checked,
     });
@@ -936,7 +1019,31 @@ $("form-solicitud").addEventListener("submit", async (e) => {
   } catch (err) {
     error.innerHTML = esc(err.message);
     // Si la base sugiere otras fechas, se ofrecen con un clic
-    if (err instanceof ErrorApi && err.detalle?.rango_sugerido) {
+    if (err instanceof ErrorApi && err.detalle?.bloque_minimo) {
+      /* Quedarse en «no se puede» deja al colaborador sin saber qué hacer.
+         Se le ofrecen las dos salidas reales: alargar el bloque o pedirlo
+         como excepción, que es un camino distinto y más lento. */
+      estado.bloqueMinimo = Number(err.detalle.bloque_minimo);
+      $("texto-excepcion").textContent =
+        `Menos de ${estado.bloqueMinimo} días exige explicar el motivo y adjuntar el ` +
+        `respaldo. La autoriza Talento Humano y después su jefe, así que demora más.`;
+      $("campo-excepcion").classList.remove("hidden");
+      $("campo-justificacion").classList.remove("hidden");
+      $("campo-adjuntos").classList.remove("hidden");
+      const inicio = $("fecha-inicio").value;
+      if (inicio) {
+        const fin = new Date(`${inicio}T00:00:00`);
+        fin.setDate(fin.getDate() + estado.bloqueMinimo - 1);
+        error.innerHTML += `<button type="button" id="btn-aplicar-sugerido"
+            class="mt-2 block rounded-lg bg-rose-900 px-3 py-1.5 text-xs font-medium text-white">
+            Usar ${estado.bloqueMinimo} días: hasta ${fecha(fin.toISOString().slice(0, 10))}</button>`;
+        $("btn-aplicar-sugerido").addEventListener("click", () => {
+          $("fecha-fin").value = fin.toISOString().slice(0, 10);
+          error.classList.add("hidden");
+          previsualizar();
+        });
+      }
+    } else if (err instanceof ErrorApi && err.detalle?.rango_sugerido) {
       const { inicio, fin } = err.detalle.rango_sugerido;
       error.innerHTML += `<button type="button" id="btn-aplicar-sugerido"
           class="mt-2 block rounded-lg bg-rose-900 px-3 py-1.5 text-xs font-medium text-white">

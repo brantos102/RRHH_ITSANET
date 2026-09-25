@@ -82,6 +82,12 @@ export const api = {
   cerrarSesion: () => peticion("/auth/cerrar-sesion", { method: "POST" }),
 
   tiposPermiso: () => peticion("/catalogos/tipos-permiso"),
+  catalogoPermisos: () => peticion("/catalogos/permisos"),
+  candidatosReemplazo: (id) => peticion(`/aprobaciones/${id}/candidatos`),
+  ajustarAusencia: (id, datos) =>
+    peticion(`/aprobaciones/${id}/ajustar`, { method: "POST", body: JSON.stringify(datos) }),
+  ajustesDe: (id) => peticion(`/solicitudes/${id}/ajustes`),
+  calendarioEquipo: (params = "") => peticion(`/jefe/calendario-equipo${params}`),
   feriados: () => peticion("/catalogos/feriados"),
   companeros: () => peticion("/catalogos/companeros"),
   calendario: (desde, hasta) =>
@@ -102,8 +108,11 @@ export const api = {
 
   // Aprobaciones
   pendientes: () => peticion("/aprobaciones/pendientes"),
-  decidir: (id, accion, motivo) =>
-    peticion(`/aprobaciones/${id}/decidir`, { method: "POST", body: JSON.stringify({ accion, motivo }) }),
+  decidir: (id, accion, motivo, reemplazoId = null) =>
+    peticion(`/aprobaciones/${id}/decidir`, {
+      method: "POST",
+      body: JSON.stringify({ accion, motivo, reemplazo_id: reemplazoId }),
+    }),
   // Enlace del correo: no requiere sesión
   verEnlace: (token, rol) => peticion(`/aprobaciones/enlace/${token}?rol=${rol}`),
   decidirEnlace: (token, rol, accion, motivo) =>

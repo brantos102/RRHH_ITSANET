@@ -182,14 +182,22 @@
 
     <div class="space-y-4 px-5 py-4">
       <!-- Tipo de permiso -->
-      <div id="campo-tipo-permiso" class="hidden">
-        <label for="tipo-permiso" class="block text-sm font-medium text-slate-700">Tipo de permiso</label>
-        <select id="tipo-permiso"
-                class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
-                       focus:bg-white focus:ring-2 focus:ring-slate-900">
-          <option value="">Seleccione…</option>
-        </select>
-        <p id="info-permiso" class="mt-2 hidden rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-600"></p>
+      <div id="campo-tipo-permiso" class="hidden space-y-3">
+        <div>
+          <span class="block text-sm font-medium text-slate-700">¿De qué se trata?</span>
+          <div id="pilares" class="mt-2 grid gap-2 sm:grid-cols-3"></div>
+        </div>
+
+        <div id="campo-subtipo" class="hidden">
+          <label for="tipo-permiso" class="block text-sm font-medium text-slate-700">Especifique</label>
+          <select id="tipo-permiso"
+                  class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                         focus:bg-white focus:ring-2 focus:ring-slate-900">
+            <option value="">Seleccione…</option>
+          </select>
+        </div>
+
+        <p id="info-permiso" class="hidden rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-600"></p>
       </div>
 
       <!-- Fechas -->
@@ -227,19 +235,16 @@
       <!-- Previsualización en vivo, con el desglose de los días -->
       <div id="previsualizacion" class="hidden rounded-xl p-3 text-sm"></div>
 
-      <!-- Quién cubre la ausencia -->
-      <div id="campo-reemplazo">
-        <label for="reemplazo" class="block text-sm font-medium text-slate-700">
-          ¿Quién lo cubre? <span class="font-normal text-slate-500">(opcional)</span>
+      <!-- Excepción al bloque mínimo de vacaciones -->
+      <div id="campo-excepcion" class="hidden rounded-xl bg-amber-50 p-3 ring-1 ring-amber-200">
+        <label class="flex items-start gap-2.5 text-sm">
+          <input type="checkbox" id="excepcion-bloque"
+                 class="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900">
+          <span class="text-amber-900">
+            <span class="font-medium">Solicitar como excepción</span><br>
+            <span id="texto-excepcion" class="text-xs"></span>
+          </span>
         </label>
-        <select id="reemplazo"
-                class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
-                       focus:bg-white focus:ring-2 focus:ring-slate-900">
-          <option value="">Nadie asignado</option>
-        </select>
-        <p class="mt-1.5 text-xs text-slate-500">
-          Su jefe decide mejor si sabe quién asume sus funciones.
-        </p>
       </div>
 
       <!-- Descripción -->
@@ -248,10 +253,14 @@
           <label for="descripcion" class="block text-sm font-medium text-slate-700">Descripción</label>
           <span id="contador-desc" class="text-xs text-slate-400">0/200</span>
         </div>
-        <textarea id="descripcion" rows="2" maxlength="200" required
-                  placeholder="Ej.: viaje familiar programado"
+        <p id="mandato" class="mt-1 text-xs leading-relaxed text-slate-500"></p>
+        <textarea id="descripcion" rows="3" maxlength="200" required
+                  placeholder="Motivo, lugar, hora y cuánto tiempo estará ausente"
                   class="mt-1.5 w-full resize-none rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
                          focus:bg-white focus:ring-2 focus:ring-slate-900"></textarea>
+        <div id="ejemplo-descripcion"
+             class="mt-2 hidden rounded-xl bg-cyan-50 p-3 text-xs leading-relaxed text-cyan-900
+                    ring-1 ring-cyan-100"></div>
       </div>
 
       <!-- Justificación (condicional) -->
@@ -268,6 +277,7 @@
       <!-- Adjuntos -->
       <div id="campo-adjuntos" class="hidden">
         <label class="block text-sm font-medium text-slate-700">Respaldo</label>
+        <p id="guia-adjuntos" class="mt-0.5 text-xs leading-relaxed text-slate-600"></p>
         <p class="mt-0.5 text-xs text-slate-500">Foto, escaneo o PDF. Máximo 10 MB por archivo.</p>
         <input type="file" id="adjuntos" multiple accept="image/jpeg,image/png,image/webp,image/heic,application/pdf"
                class="mt-2 block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0
@@ -362,6 +372,37 @@
       <p id="error-firma" class="hidden rounded-xl bg-rose-50 p-3 text-sm text-rose-800" role="alert"></p>
     </div>
   </div>
+</dialog>
+
+<!-- ================= Modal: quién cubre el puesto ================= -->
+<dialog id="modal-reemplazo" class="w-[min(100vw-1.5rem,30rem)] rounded-2xl p-0">
+  <form id="form-reemplazo" method="dialog">
+    <div class="border-b border-slate-200 px-5 py-4">
+      <h2 class="font-semibold">¿Quién cubre el puesto?</h2>
+      <p class="mt-0.5 text-sm text-slate-500">
+        Usted conoce la carga del equipo. Puede dejarlo sin asignar y decidirlo después.
+      </p>
+    </div>
+    <div class="px-5 py-4">
+      <label for="reemplazo-jefe" class="block text-sm font-medium text-slate-700">Reemplazo</label>
+      <select id="reemplazo-jefe"
+              class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                     focus:bg-white focus:ring-2 focus:ring-slate-900">
+        <option value="">Cargando…</option>
+      </select>
+      <p class="mt-1.5 text-xs text-slate-500">
+        Quien también estará ausente en esas fechas aparece bloqueado.
+      </p>
+    </div>
+    <div class="flex gap-3 border-t border-slate-200 px-5 py-4">
+      <button type="button" data-cerrar class="flex-1 rounded-xl bg-slate-100 px-4 py-3 font-medium hover:bg-slate-200">
+        Cancelar
+      </button>
+      <button type="submit" class="flex-1 rounded-xl bg-emerald-600 px-4 py-3 font-medium text-white hover:bg-emerald-700">
+        Aprobar solicitud
+      </button>
+    </div>
+  </form>
 </dialog>
 
 <!-- ================= Modal: rechazar ================= -->
