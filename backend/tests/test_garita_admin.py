@@ -108,7 +108,7 @@ async def test_fuera_de_fecha_se_deniega(cliente, codigos, aprobada, empleado):
     # directamente. Hay que recorrer el flujo para llegar a «aprobado».
     creada = await obtener_uno(
         """insert into public.requests (user_id, tipo, fecha_inicio, fecha_fin, descripcion)
-           values (%s, 'vacacion', current_date + 20, current_date + 25,
+           values (%s, 'vacacion', current_date + 20, current_date + 27,
                    'Autorizacion de fecha futura')
            returning id""",
         (empleado["id"],))

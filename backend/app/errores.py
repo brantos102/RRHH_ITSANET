@@ -44,11 +44,21 @@ def traducir(exc: Exception) -> HTTPException:
     if isinstance(exc, pg.RaiseException):
         mensaje = (exc.diag.message_primary or "").strip()
         detalle: dict = {"mensaje": mensaje}
-        # `sugerencia` viaja en el HINT: "2099-07-13|2099-07-19"
-        pista = exc.diag.message_hint
-        if pista and "|" in pista:
-            inicio, _, fin = pista.partition("|")
-            detalle["rango_sugerido"] = {"inicio": inicio, "fin": fin}
+        # El HINT transporta datos que el formulario necesita para ofrecer una
+        # salida. Lleva etiqueta al inicio para no confundir un caso con otro:
+        # "rango|2099-07-13|2099-07-19"  -> corrección del fin de semana
+        # "bloque_minimo|7"              -> mínimo de días de vacaciones
+        pista = exc.diag.message_hint or ""
+        etiqueta, _, resto = pista.partition("|")
+        if etiqueta == "bloque_minimo" and resto:
+            detalle["bloque_minimo"] = resto
+        elif pista and "|" in pista:
+            # Formato histórico sin etiqueta: dos fechas.
+            partes = [p for p in pista.split("|") if p]
+            if etiqueta == "rango":
+                partes = partes[1:]
+            if len(partes) == 2:
+                detalle["rango_sugerido"] = {"inicio": partes[0], "fin": partes[1]}
         return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detalle)
 
     if isinstance(exc, pg.CheckViolation):

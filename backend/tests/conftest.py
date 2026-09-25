@@ -80,6 +80,12 @@ async def _limpiar() -> None:
         "(select id from public.users where email like %s)", ("%@api.test",))
     await ejecutar("delete from public.audit_logs where cedula = any(%s)",
                    ([CEDULA_PRUEBA, CEDULA_SIN_REGISTRO, "0900000001", "1100000007", "1200000006"],))
+    # Los ajustes apuntan a quien los hizo y la clave foránea es restrictiva a
+    # propósito: en producción las personas se desactivan, no se borran, y la
+    # constancia del ajuste debe sobrevivirlas. Aquí sí hay que quitarlos.
+    await ejecutar(
+        "delete from public.request_adjustments where ajustado_por in "
+        "(select id from public.users where email like %s)", ("%@api.test",))
     await ejecutar("delete from public.visitors where motivo_visita like %s", ("%de prueba%",))
     await ejecutar("delete from public.visitors where nombre like %s", ("Proveedor de prueba%",))
     await ejecutar("delete from public.users where email like %s", ("%@api.test",))

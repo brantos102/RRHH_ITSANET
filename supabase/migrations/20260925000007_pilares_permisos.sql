@@ -330,8 +330,24 @@ create policy request_adjustments_sin_edicion on public.request_adjustments
 
 -- Marca en la solicitud para que garita, informes y calendario distingan una
 -- ausencia ajustada de una original sin tener que cruzar tablas.
+-- `on delete set null` como el resto de columnas de «quién decidió»
+-- (jefe_aprobado_por, rrhh_aprobado_por): si algún día se depura a una
+-- persona, la ausencia no puede desaparecer con ella. La constancia
+-- detallada del ajuste vive en `request_adjustments`, que sí la retiene.
 alter table public.requests add column if not exists ajustada_en timestamptz;
-alter table public.requests add column if not exists ajustada_por uuid references public.users(id);
+alter table public.requests
+  add column if not exists ajustada_por uuid references public.users(id) on delete set null;
+
+do $fk$
+begin
+  if exists (select 1 from pg_constraint
+              where conname = 'requests_ajustada_por_fkey' and confdeltype = 'a') then
+    alter table public.requests drop constraint requests_ajustada_por_fkey;
+    alter table public.requests add constraint requests_ajustada_por_fkey
+      foreign key (ajustada_por) references public.users(id) on delete set null;
+  end if;
+end
+$fk$;
 
 -- ------------------------------------------------- aplicación del ajuste
 -- Todo en una función para que el saldo, las fechas y la constancia se
@@ -478,3 +494,292 @@ select c.id          as categoria_id,
  where c.activo and t.activo;
 
 grant select on public.v_catalogo_permisos to authenticated;
+
+-- =========================================================================
+-- F. El bloque mínimo se hace cumplir en la base
+--
+-- Se valida aquí y no solo en el formulario: la API es la misma para el
+-- navegador, para un script y para cualquier integración futura. Una regla
+-- de negocio que solo vive en el frontend no es una regla, es una sugerencia.
+--
+-- La comprobación es diferida (al COMMIT) porque el respaldo de la excepción
+-- —los adjuntos— se inserta después de la fila de la solicitud.
+-- =========================================================================
+
+create or replace function public.tg_requests_validar_requisitos()
+returns trigger
+language plpgsql
+as $req$
+declare
+  v_pt        public.permission_types%rowtype;
+  v_adjuntos  int;
+  v_firmas    int;
+  v_minimo    numeric;
+begin
+  -- Se ejecuta al COMMIT: la solicitud pudo eliminarse en la misma
+  -- transacción (o por cascada). En ese caso no hay nada que validar.
+  if not exists (select 1 from public.requests where id = new.id) then
+    return null;
+  end if;
+
+  select count(*) into v_adjuntos from public.request_attachments where request_id = new.id;
+  select count(*) into v_firmas   from public.request_signatures
+    where request_id = new.id and rol_firma = 'solicitante';
+
+  if new.tipo = 'permiso' then
+    select * into v_pt from public.permission_types where id = new.permission_type_id;
+
+    if v_pt.requiere_adjunto and v_adjuntos = 0 then
+      raise exception 'El permiso "%" exige adjuntar el respaldo (certificado, cita o documento)', v_pt.nombre;
+    end if;
+
+    if v_pt.requiere_firma and v_firmas = 0 then
+      raise exception 'El permiso "%" exige la firma electrónica del solicitante', v_pt.nombre;
+    end if;
+  end if;
+
+  if new.tipo = 'vacacion' then
+    select coalesce(nullif(valor, '')::numeric, 0) into v_minimo
+      from public.app_config where clave = 'vacaciones_bloque_minimo';
+    v_minimo := coalesce(v_minimo, 0);
+
+    -- El mínimo y la justificación se comprueban al insertar (ver
+    -- `tg_requests_ruta_aprobacion`), que devuelve el error de inmediato.
+    -- Aquí solo queda el adjunto, que llega después de la fila.
+    if v_minimo > 0 and new.dias_solicitados < v_minimo then
+      if v_adjuntos = 0 then
+        raise exception
+          'Para tomar menos de % días debe adjuntar el documento que respalde la excepción.',
+          v_minimo;
+      end if;
+    end if;
+  end if;
+
+  return null;
+end;
+$req$;
+
+-- ------------------------------------------------- ruta de aprobación
+-- Se decide en la base, no en el cliente: un formulario alterado no puede
+-- elegir por dónde pasa su solicitud. Corre después de
+-- `requests_before_insert` —los disparadores se ejecutan en orden
+-- alfabético— que es quien fija el estado inicial.
+create or replace function public.tg_requests_ruta_aprobacion()
+returns trigger
+language plpgsql
+as $ruta$
+declare
+  v_minimo numeric;
+begin
+  new.ruta_aprobacion := 'estandar';
+
+  if new.tipo = 'vacacion' then
+    select coalesce(nullif(valor, '')::numeric, 0) into v_minimo
+      from public.app_config where clave = 'vacaciones_bloque_minimo';
+
+    if coalesce(v_minimo, 0) > 0 and new.dias_solicitados < v_minimo then
+      if not new.bloque_menor_justificado then
+        raise exception
+          'Las vacaciones se toman en bloques de al menos % días y usted pidió %. Si su caso lo amerita, márquelo como excepción, explique el motivo y adjunte el respaldo: la autoriza Talento Humano, no su jefe.',
+          v_minimo, new.dias_solicitados
+          using errcode = 'P0001', hint = 'bloque_minimo|' || v_minimo::text;
+      end if;
+
+      if length(btrim(coalesce(new.justificacion, ''))) < 30 then
+        raise exception
+          'Para tomar menos de % días debe justificarlo por escrito, con al menos 30 caracteres: quien autoriza la excepción necesita entender por qué se aparta de la política.',
+          v_minimo;
+      end if;
+
+      -- Apartarse de la política no lo autoriza la jefatura sino Talento
+      -- Humano. Recién con su visto bueno pasa al jefe, que evalúa la
+      -- cobertura del puesto.
+      new.ruta_aprobacion := 'rrhh_primero';
+      new.estado := 'pendiente_rrhh';
+    end if;
+  else
+    new.bloque_menor_justificado := false;
+  end if;
+
+  return new;
+end;
+$ruta$;
+
+drop trigger if exists requests_ruta_aprobacion on public.requests;
+create trigger requests_ruta_aprobacion
+  before insert on public.requests
+  for each row execute function public.tg_requests_ruta_aprobacion();
+
+-- ------------------------------------------------- excepción para el ajuste
+-- Se reescribe entero el disparador porque PL/pgSQL no permite parchear un
+-- cuerpo existente. Salvo la condición señalada más abajo, es idéntico al
+-- de la migración 0006: validación de transiciones, emisión del QR, consumo
+-- y devolución del saldo, y resolución de anulaciones.
+create or replace function public.tg_requests_before_update()
+returns trigger
+language plpgsql
+as $upd$
+declare
+  v_descuenta boolean := false;
+begin
+  if (new.fecha_inicio, new.fecha_fin, new.tipo) is distinct from (old.fecha_inicio, old.fecha_fin, old.tipo) then
+    -- Una ausencia aprobada no se corrige a mano: la única vía es
+    -- `ajustar_ausencia()`, que deja constancia de quién, cuándo y por qué.
+    -- La puerta es un indicador de transacción que solo esa función levanta;
+    -- no se usa `ajustada_en` como señal porque un UPDATE directo podría
+    -- fijarlo, mientras que este indicador no existe fuera de la función.
+    if old.estado <> 'pendiente_jefe'
+       and coalesce(current_setting('app.ajuste_en_curso', true), '') <> '1' then
+      raise exception 'No se pueden modificar las fechas de una solicitud en estado %', old.estado;
+    end if;
+    new.dias_solicitados := public.calcular_dias(new.tipo, new.fecha_inicio, new.fecha_fin);
+    new.fines_semana     := public.fines_de_semana_completos(new.fecha_inicio, new.fecha_fin);
+  end if;
+
+  if new.estado is distinct from old.estado then
+    if not (
+         (old.estado = 'pendiente_jefe'      and new.estado in ('pendiente_rrhh', 'rechazado', 'cancelado'))
+      -- Cierre de la ruta invertida: el jefe es el segundo y último en
+      -- decidir, así que su visto bueno deja la solicitud aprobada.
+      or (old.estado = 'pendiente_jefe'      and new.estado = 'aprobado'
+          and new.ruta_aprobacion = 'rrhh_primero' and new.rrhh_aprobado_por is not null)
+      or (old.estado = 'pendiente_rrhh'      and new.estado in ('aprobado', 'rechazado', 'cancelado'))
+      -- Ruta invertida: Talento Humano autorizó la excepción al bloque
+      -- mínimo y ahora le toca al jefe confirmar la cobertura del puesto.
+      or (old.estado = 'pendiente_rrhh'      and new.estado = 'pendiente_jefe'
+          and new.ruta_aprobacion = 'rrhh_primero')
+      -- Anular algo aprobado pasa por Talento Humano; cancelarlo directo queda
+      -- reservado a RRHH, que es quien responde por el saldo y por el QR emitido.
+      or (old.estado = 'aprobado'            and new.estado in ('pendiente_anulacion', 'cancelado'))
+      or (old.estado = 'pendiente_anulacion' and new.estado in ('cancelado', 'aprobado'))
+    ) then
+      raise exception 'Transición de estado inválida: % -> %', old.estado, new.estado;
+    end if;
+
+    if new.estado = 'pendiente_rrhh' then
+      new.jefe_aprobado_en := coalesce(new.jefe_aprobado_en, now());
+    end if;
+
+    -- Ruta invertida: el paso a manos del jefe significa que Talento Humano
+    -- ya resolvió. Sin esta marca, su decisión no quedaba fechada.
+    if new.estado = 'pendiente_jefe' and old.estado = 'pendiente_rrhh' then
+      new.rrhh_aprobado_en := coalesce(new.rrhh_aprobado_en, now());
+    end if;
+
+    if new.estado = 'rechazado' then
+      new.rechazado_en := coalesce(new.rechazado_en, now());
+    end if;
+
+    if new.estado = 'pendiente_anulacion' then
+      new.anulacion_solicitada_en := coalesce(new.anulacion_solicitada_en, now());
+    end if;
+
+    -- Anulación denegada: la solicitud vuelve a estar vigente
+    if new.estado = 'aprobado' and old.estado = 'pendiente_anulacion' then
+      new.anulacion_resuelta_en := coalesce(new.anulacion_resuelta_en, now());
+      return new;                      -- el saldo no se tocó, no hay nada que revertir
+    end if;
+
+    if new.tipo = 'vacacion' then
+      v_descuenta := true;
+    else
+      select coalesce(descuenta_vacaciones, false) into v_descuenta
+      from public.permission_types where id = new.permission_type_id;
+    end if;
+
+    if new.estado = 'aprobado' then
+      new.rrhh_aprobado_en := coalesce(new.rrhh_aprobado_en, now());
+      new.qr_hash          := coalesce(new.qr_hash, gen_random_uuid());
+      new.qr_emitido_en    := coalesce(new.qr_emitido_en, now());
+      new.qr_expira_en     := coalesce(new.qr_expira_en, (new.fecha_fin + 1)::timestamptz);
+
+      if v_descuenta then
+        perform public.consumir_vacaciones(
+          new.user_id, new.dias_solicitados, new.id, new.fines_semana, new.rrhh_aprobado_por);
+      end if;
+    end if;
+
+    -- Se devuelve el saldo al cancelar, venga de una aprobada o de una anulación
+    if new.estado = 'cancelado' and old.estado in ('aprobado', 'pendiente_anulacion') and v_descuenta then
+      perform public.reversar_vacaciones(
+        new.user_id, new.dias_solicitados, new.id, new.fines_semana);
+      new.anulacion_resuelta_en := coalesce(new.anulacion_resuelta_en, now());
+      -- Un QR anulado deja de servir en garita
+      new.qr_expira_en := now();
+    end if;
+  end if;
+
+  return new;
+end;
+$upd$;
+
+-- La función de ajuste levanta el indicador, acotado a su transacción.
+create or replace function public.ajustar_ausencia(
+  p_request_id uuid,
+  p_inicio     date,
+  p_fin        date,
+  p_motivo     text,
+  p_resolucion text,
+  p_por        uuid
+) returns public.requests
+language plpgsql
+security definer
+set search_path = public
+as $ajuste$
+declare
+  v_sol  public.requests;
+  v_dias numeric(6,2);
+begin
+  select * into v_sol from public.requests where id = p_request_id for update;
+  if not found then
+    raise exception 'La solicitud no existe';
+  end if;
+
+  if v_sol.estado <> 'aprobado' then
+    raise exception 'Solo se ajusta una ausencia ya aprobada (esta está en %)', v_sol.estado;
+  end if;
+
+  if p_fin < p_inicio then
+    raise exception 'La fecha de fin no puede ser anterior a la de inicio';
+  end if;
+
+  if length(btrim(coalesce(p_motivo, ''))) < 15 or length(btrim(coalesce(p_resolucion, ''))) < 15 then
+    raise exception 'El ajuste exige explicar el caso y la resolución (mínimo 15 caracteres cada uno)';
+  end if;
+
+  v_dias := public.calcular_dias(v_sol.tipo, p_inicio, p_fin);
+
+  -- El saldo solo se mueve en vacaciones; un permiso remunerado no lo toca.
+  if v_sol.tipo = 'vacacion' and v_dias <> v_sol.dias_solicitados then
+    perform public.reversar_vacaciones(v_sol.user_id, v_sol.dias_solicitados,
+                                       v_sol.id, v_sol.fines_semana);
+    perform public.consumir_vacaciones(v_sol.user_id, v_dias, v_sol.id,
+                                       v_sol.fines_semana, p_por);
+  end if;
+
+  insert into public.request_adjustments
+    (request_id, fecha_inicio_ant, fecha_fin_ant, fecha_inicio_nueva, fecha_fin_nueva,
+     dias_ant, dias_nuevos, motivo, resolucion, ajustado_por)
+  values
+    (v_sol.id, v_sol.fecha_inicio, v_sol.fecha_fin, p_inicio, p_fin,
+     v_sol.dias_solicitados, v_dias, btrim(p_motivo), btrim(p_resolucion), p_por);
+
+  -- `true`: vive solo dentro de esta transacción.
+  perform set_config('app.ajuste_en_curso', '1', true);
+
+  update public.requests set
+    fecha_inicio = p_inicio,
+    fecha_fin    = p_fin,
+    qr_expira_en = (p_fin + 1)::timestamptz,   -- garita debe reconocer el nuevo fin
+    ajustada_en  = now(),
+    ajustada_por = p_por,
+    updated_at   = now()
+  where id = v_sol.id
+  returning * into v_sol;
+
+  perform set_config('app.ajuste_en_curso', '0', true);
+  return v_sol;
+end
+$ajuste$;
+
+revoke all on function public.ajustar_ausencia(uuid, date, date, text, text, uuid) from public;

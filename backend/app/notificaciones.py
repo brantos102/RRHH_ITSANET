@@ -170,3 +170,31 @@ async def avisar_rechazo(empleado: dict, solicitud: dict, quien: str, motivo: st
     )
     texto = f"{titulo}\n\n" + "\n".join(f"{e}: {v}" for e, v in filas) + "\n"
     await correo.enviar(empleado["email"], titulo, texto, _marco(titulo, cuerpo))
+
+
+async def avisar_ajuste(destinatarios: list[dict], solicitud: dict, quien: str,
+                        motivo: str, resolucion: str) -> None:
+    """Al colaborador y a su jefe cuando Talento Humano cambia una ausencia.
+
+    Los dos necesitan enterarse por motivos distintos: el colaborador, para
+    saber hasta cuándo está cubierto; el jefe, para no contar con alguien
+    que no va a venir.
+    """
+    titulo = "Se ajustó una ausencia autorizada"
+    filas = _detalle(solicitud) + [
+        ("Nuevas fechas", f"{_fecha(solicitud['fecha_inicio'])} a {_fecha(solicitud['fecha_fin'])}"),
+        ("Ajustada por", quien),
+        ("Caso", motivo),
+        ("Resolución", resolucion),
+    ]
+    cuerpo = (
+        '<p style="margin:0 0 16px;font-size:14px;color:#475569">'
+        "Talento Humano modificó las fechas de una ausencia ya autorizada. "
+        "El registro anterior se conserva en el historial de la solicitud.</p>"
+        + _tabla(filas)
+    )
+    texto = f"{titulo}\n\n" + "\n".join(f"{e}: {v}" for e, v in filas) + "\n"
+
+    for destino in destinatarios:
+        if destino.get("email"):
+            await correo.enviar(destino["email"], titulo, texto, _marco(titulo, cuerpo))

@@ -15,7 +15,7 @@ from psycopg import errors as pg
 from .. import notificaciones
 from ..audit import registrar
 from ..db import conexion, obtener_todos, obtener_uno
-from ..deps import usuario_actual
+from ..deps import exigir_rol, usuario_actual
 from ..errores import traducir
 from ..storage import subir_adjunto
 
@@ -53,7 +53,11 @@ class NuevaSolicitud(BaseModel):
     hora_fin: time | None = None
     descripcion: str = Field(..., min_length=5, max_length=200)
     justificacion: str | None = None
-    reemplazo_id: uuid.UUID | None = None
+    # Vacaciones por debajo del bloque mínimo. Marcarlo no basta: la base
+    # exige justificación y respaldo, y desvía la solicitud a Talento Humano.
+    # Quién cubre la ausencia NO se pide aquí: lo asigna el jefe al aprobar,
+    # que es quien conoce la carga del equipo.
+    bloque_menor_justificado: bool = False
     adjuntos: list[AdjuntoEntrada] = []
     firmar: bool = True
 
@@ -66,19 +70,80 @@ class NuevaSolicitud(BaseModel):
 # --------------------------------------------------------------- catálogo
 @router.get("/catalogos/tipos-permiso")
 async def tipos_permiso(_: Annotated[dict, Depends(usuario_actual)]) -> list[dict]:
-    """Tipos de permiso vigentes, con lo que exige cada uno y su base legal."""
+    """Tipos de permiso vigentes, con lo que exige cada uno y su base legal.
+
+    Se mantiene la lista plana para lo que ya la consume (administración,
+    informes). El formulario del colaborador usa `/catalogos/permisos`, que
+    la entrega agrupada por pilar.
+    """
     return await obtener_todos(
         """
         select pt.id, pt.codigo, pt.nombre, pt.descripcion,
                pt.requiere_adjunto, pt.requiere_justificacion, pt.requiere_firma,
                pt.remunerado, pt.descuenta_vacaciones, pt.max_dias, pt.max_horas,
+               pt.guia_ejemplo, pt.guia_adjuntos,
+               c.codigo as categoria_codigo, c.nombre as categoria_nombre,
                l.norma, l.articulo, l.titulo as articulo_titulo, l.texto as articulo_texto
         from public.permission_types pt
+        left join public.permission_categories c on c.id = pt.category_id
         left join public.legal_references l on l.codigo = pt.legal_ref
         where pt.activo
         order by pt.orden
         """
     )
+
+
+@router.get("/catalogos/permisos")
+async def catalogo_permisos(_: Annotated[dict, Depends(usuario_actual)]) -> dict:
+    """Los tres pilares con sus subtipos y la guía de redacción de cada uno.
+
+    Elegir entre tres preguntas —emergencia del hogar, salud, asunto propio—
+    y luego afinar es mucho más rápido que leer veinte opciones planas. Cada
+    subtipo viaja con su ejemplo: quien decide solo cuenta con lo que el
+    solicitante escriba, así que conviene decirle exactamente qué escribir.
+    """
+    filas = await obtener_todos(
+        """
+        select categoria_id, categoria_codigo, categoria_nombre, categoria_descripcion,
+               categoria_ayuda, categoria_orden,
+               tipo_id, tipo_codigo, tipo_nombre, tipo_descripcion,
+               requiere_adjunto, requiere_justificacion, remunerado, descuenta_vacaciones,
+               max_dias, max_horas, guia_ejemplo, guia_adjuntos
+        from public.v_catalogo_permisos
+        order by categoria_orden, tipo_orden
+        """
+    )
+    mandato = await obtener_uno(
+        "select valor from public.app_config where clave = 'mandato_descripcion'"
+    )
+
+    pilares: list[dict] = []
+    for f in filas:
+        if not pilares or pilares[-1]["codigo"] != f["categoria_codigo"]:
+            pilares.append({
+                "id": f["categoria_id"],
+                "codigo": f["categoria_codigo"],
+                "nombre": f["categoria_nombre"],
+                "descripcion": f["categoria_descripcion"],
+                "ayuda": f["categoria_ayuda"],
+                "subtipos": [],
+            })
+        pilares[-1]["subtipos"].append({
+            "id": f["tipo_id"],
+            "codigo": f["tipo_codigo"],
+            "nombre": f["tipo_nombre"],
+            "descripcion": f["tipo_descripcion"],
+            "requiere_adjunto": f["requiere_adjunto"],
+            "requiere_justificacion": f["requiere_justificacion"],
+            "remunerado": f["remunerado"],
+            "descuenta_vacaciones": f["descuenta_vacaciones"],
+            "max_dias": f["max_dias"],
+            "max_horas": f["max_horas"],
+            "guia_ejemplo": f["guia_ejemplo"],
+            "guia_adjuntos": f["guia_adjuntos"],
+        })
+
+    return {"mandato": mandato["valor"] if mandato else "", "pilares": pilares}
 
 
 @router.get("/catalogos/companeros")
@@ -142,6 +207,83 @@ async def calendario(
     )
 
 
+@router.get("/jefe/calendario-equipo")
+async def calendario_equipo(
+    usuario: Annotated[dict, Depends(exigir_rol("jefe", "rrhh", "admin"))],
+    desde: date | None = None,
+    hasta: date | None = None,
+    departamento: str | None = None,
+) -> dict:
+    """Calendario del equipo a cargo, mes a mes, para planificar la cobertura.
+
+    Un jefe ve a sus reportes directos. Talento Humano y administración ven
+    a todos, con filtro por departamento.
+
+    Se entrega «Vacaciones» o «Permiso», nunca el subtipo: que alguien esté
+    en cita médica es un dato de salud (LOPDP Art. 4) y no corresponde
+    exhibirlo en una grilla mensual. El jefe sí lo ve en la solicitud que él
+    mismo autoriza, que es donde tiene sentido.
+    """
+    inicio = desde or date.today().replace(day=1)
+    fin = hasta or (inicio + timedelta(days=120))
+
+    if usuario["rol"] == "jefe":
+        alcance = "c.jefe_id = %(yo)s"
+        parametros: dict = {"yo": usuario["id"]}
+    else:
+        alcance = "(%(depto)s::text is null or c.departamento = %(depto)s)"
+        parametros = {"depto": departamento}
+
+    ausencias = await obtener_todos(
+        f"""
+        select c.request_id, c.folio, c.user_id, c.nombre, c.cargo, c.departamento,
+               c.fecha_inicio, c.fecha_fin, c.hora_inicio, c.hora_fin,
+               c.dias_solicitados, c.estado, c.motivo_general,
+               c.reemplazo_nombre, c.ajustada_en
+        from public.v_calendario_equipo c
+        where {alcance}
+          and c.fecha_fin >= %(desde)s and c.fecha_inicio <= %(hasta)s
+        order by c.fecha_inicio, c.nombre
+        """,
+        parametros | {"desde": inicio, "hasta": fin},
+    )
+
+    # El equipo completo, aunque nadie falte: un calendario que solo muestra
+    # a los ausentes no deja ver quién queda disponible.
+    equipo = await obtener_todos(
+        """
+        select id, nombre, cargo, departamento
+        from public.users
+        where activo and (
+            (%(rol)s = 'jefe' and jefe_id = %(yo)s)
+            or (%(rol)s <> 'jefe' and (%(depto)s::text is null or departamento = %(depto)s))
+        )
+        order by nombre
+        """,
+        {"rol": usuario["rol"], "yo": usuario["id"], "depto": departamento},
+    )
+
+    dias_libres = await obtener_todos(
+        """select fecha, nombre from public.feriados
+           where activo and fecha between %s and %s order by fecha""",
+        (inicio, fin),
+    )
+
+    return {
+        "desde": str(inicio),
+        "hasta": str(fin),
+        "equipo": [{**p, "id": str(p["id"])} for p in equipo],
+        "ausencias": [
+            {**a, "request_id": str(a["request_id"]), "user_id": str(a["user_id"]),
+             "dias_solicitados": float(a["dias_solicitados"]),
+             "hora_inicio": str(a["hora_inicio"])[:5] if a["hora_inicio"] else None,
+             "hora_fin": str(a["hora_fin"])[:5] if a["hora_fin"] else None}
+            for a in ausencias
+        ],
+        "feriados": [{"fecha": str(f["fecha"]), "nombre": f["nombre"]} for f in dias_libres],
+    }
+
+
 @router.get("/catalogos/feriados")
 async def feriados(_: Annotated[dict, Depends(usuario_actual)]) -> list[dict]:
     """Feriados futuros: el calendario los marca para que no cuenten días."""
@@ -193,9 +335,10 @@ async def crear_solicitud(
                     """
                     insert into public.requests
                         (id, user_id, tipo, permission_type_id, fecha_inicio, fecha_fin,
-                         hora_inicio, hora_fin, descripcion, justificacion, reemplazo_id)
+                         hora_inicio, hora_fin, descripcion, justificacion,
+                         bloque_menor_justificado)
                     values (%(id)s, %(user_id)s, %(tipo)s, %(pt)s, %(inicio)s, %(fin)s,
-                            %(h_ini)s, %(h_fin)s, %(desc)s, %(just)s, %(reemplazo)s)
+                            %(h_ini)s, %(h_fin)s, %(desc)s, %(just)s, %(excepcion)s)
                     returning id, folio, estado, dias_solicitados, horas_solicitadas,
                               fines_semana, es_adelanto, saldo_al_solicitar, created_at
                     """,
@@ -204,7 +347,8 @@ async def crear_solicitud(
                         "pt": datos.permission_type_id, "inicio": datos.fecha_inicio,
                         "fin": datos.fecha_fin, "h_ini": datos.hora_inicio,
                         "h_fin": datos.hora_fin, "desc": datos.descripcion,
-                        "just": datos.justificacion, "reemplazo": datos.reemplazo_id,
+                        "just": datos.justificacion,
+                        "excepcion": datos.bloque_menor_justificado,
                     },
                 )
                 creada = await cur.fetchone()

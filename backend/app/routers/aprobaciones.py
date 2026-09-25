@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import date
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
@@ -22,7 +23,7 @@ from .. import notificaciones, qr
 from ..audit import registrar
 from ..config import get_settings
 from ..db import obtener_todos, obtener_uno
-from ..deps import usuario_actual
+from ..deps import exigir_rol, usuario_actual
 from ..errores import traducir
 
 log = logging.getLogger("rrhh.aprobaciones")
@@ -33,6 +34,7 @@ SQL_SOLICITUD = """
            r.dias_solicitados, r.horas_solicitadas, r.descripcion, r.justificacion,
            r.es_adelanto, r.saldo_al_solicitar, r.fines_semana, r.created_at,
            r.jefe_id, r.jefe_token, r.rrhh_token, r.qr_hash, r.motivo_rechazo,
+           r.ruta_aprobacion, r.bloque_menor_justificado, r.reemplazo_id,
            rp.nombre as reemplazo,
            r.user_id, u.nombre as empleado, u.cedula, u.email, u.departamento, u.cargo,
            u.dias_vacaciones as saldo_actual,
@@ -52,11 +54,28 @@ SQL_SOLICITUD = """
 class Decision(BaseModel):
     accion: Literal["aprobar", "rechazar"]
     motivo: str | None = Field(None, max_length=300)
+    # Quién cubre el puesto. Lo decide el jefe al aprobar, no el solicitante:
+    # es quien conoce la carga del equipo y quién puede asumirla. Se ignora
+    # si lo envía cualquier otro rol.
+    reemplazo_id: uuid.UUID | None = None
 
 
 # --------------------------------------------------------------- utilidades
 def _estado_esperado(rol: str) -> str:
     return "pendiente_jefe" if rol == "jefe" else "pendiente_rrhh"
+
+
+def _siguiente_estado(rol: str, ruta: str) -> str:
+    """A dónde pasa la solicitud cuando este rol aprueba.
+
+    La ruta estándar es jefe → Talento Humano. Una vacación por debajo del
+    bloque mínimo invierte el orden: quien autoriza apartarse de la política
+    es Talento Humano, y recién entonces el jefe evalúa la cobertura del
+    puesto. En ambas rutas aprueba el segundo y queda aprobada.
+    """
+    if ruta == "rrhh_primero":
+        return "pendiente_jefe" if rol != "jefe" else "aprobado"
+    return "pendiente_rrhh" if rol == "jefe" else "aprobado"
 
 
 def _publico(solicitud: dict) -> dict:
@@ -101,20 +120,33 @@ async def _aplicar(solicitud: dict, rol: str, decision: Decision,
             detail={"mensaje": "Indique el motivo del rechazo: el empleado debe saber por qué."},
         )
 
-    nuevo = ("pendiente_rrhh" if rol == "jefe" else "aprobado") if decision.accion == "aprobar" else "rechazado"
+    if decision.reemplazo_id and str(decision.reemplazo_id) == str(solicitud["user_id"]):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"mensaje": "Nadie puede cubrirse a sí mismo."},
+        )
+
+    ruta = solicitud.get("ruta_aprobacion") or "estandar"
+    nuevo = _siguiente_estado(rol, ruta) if decision.accion == "aprobar" else "rechazado"
     columna_quien = "jefe_aprobado_por" if rol == "jefe" else "rrhh_aprobado_por"
 
     try:
         if decision.accion == "aprobar":
+            # El reemplazo solo lo fija el jefe; si no manda uno, se conserva
+            # el que ya hubiera (una segunda vuelta no debe borrarlo).
             actualizada = await obtener_uno(
                 f"""
                 update public.requests
-                   set estado = %(estado)s, {columna_quien} = %(quien)s
+                   set estado = %(estado)s, {columna_quien} = %(quien)s,
+                       reemplazo_id = case when %(fija_reemplazo)s
+                                           then %(reemplazo)s else reemplazo_id end
                  where id = %(id)s and estado = %(esperado)s
                 returning id, estado, qr_hash
                 """,
                 {"estado": nuevo, "quien": decidido_por, "id": solicitud["id"],
-                 "esperado": _estado_esperado(rol)},
+                 "esperado": _estado_esperado(rol),
+                 "fija_reemplazo": rol == "jefe" and decision.reemplazo_id is not None,
+                 "reemplazo": decision.reemplazo_id},
             )
         else:
             actualizada = await obtener_uno(
@@ -149,6 +181,16 @@ async def _aplicar(solicitud: dict, rol: str, decision: Decision,
         )
         tareas.add_task(notificaciones.avisar_a_rrhh, personal_rrhh, completa, quien)
 
+    elif actualizada["estado"] == "pendiente_jefe":
+        # Solo ocurre en la ruta invertida: Talento Humano ya autorizó la
+        # excepción y ahora el jefe decide si puede cubrir el puesto.
+        jefe = await obtener_uno(
+            "select email, nombre from public.users where id = %s and activo",
+            (completa["jefe_id"],),
+        )
+        if jefe:
+            tareas.add_task(notificaciones.avisar_al_jefe, jefe, completa)
+
     elif actualizada["estado"] == "aprobado":
         tareas.add_task(notificaciones.avisar_aprobacion, empleado, completa)
 
@@ -161,6 +203,7 @@ async def _aplicar(solicitud: dict, rol: str, decision: Decision,
         "qr_emitido": actualizada["qr_hash"] is not None,
         "mensaje": {
             "pendiente_rrhh": "Aprobada. Pasó a Talento Humano.",
+            "pendiente_jefe": "Excepción autorizada. Pasó al jefe inmediato para que confirme la cobertura.",
             "aprobado": "Aprobada. Se emitió el código QR y se avisó al empleado.",
             "rechazado": "Solicitud rechazada. Se avisó al empleado.",
         }[actualizada["estado"]],
@@ -174,7 +217,11 @@ async def pendientes(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[
     if usuario["rol"] == "jefe":
         filtro, parametros = "r.jefe_id = %s and r.estado = 'pendiente_jefe'", (usuario["id"],)
     elif usuario["rol"] in ("rrhh", "admin"):
-        filtro, parametros = "r.estado = 'pendiente_rrhh'", ()
+        # Talento Humano y administración también hacen de jefe de su propio
+        # equipo; si no, una excepción devuelta por la ruta invertida a un
+        # jefe con rol rrhh se quedaba sin nadie que la viera.
+        filtro = "(r.estado = 'pendiente_rrhh' or (r.jefe_id = %s and r.estado = 'pendiente_jefe'))"
+        parametros = (usuario["id"],)
     else:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -186,6 +233,7 @@ async def pendientes(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[
         select r.id, r.folio, r.tipo, r.estado, r.fecha_inicio, r.fecha_fin, r.hora_inicio, r.hora_fin,
                r.dias_solicitados, r.horas_solicitadas, r.descripcion, r.justificacion,
                r.es_adelanto, r.saldo_al_solicitar, r.fines_semana, r.created_at, r.motivo_rechazo,
+               r.ruta_aprobacion, r.bloque_menor_justificado, r.reemplazo_id, r.user_id,
                u.nombre as empleado, u.cedula, u.departamento, u.cargo, rp.nombre as reemplazo,
                u.dias_vacaciones as saldo_actual,
                pt.nombre as categoria, j.nombre as jefe_nombre,
@@ -429,4 +477,152 @@ async def qr_png(solicitud_id: uuid.UUID, usuario: Annotated[dict, Depends(usuar
         content=qr.png(str(solicitud["qr_hash"])),
         media_type="image/png",
         headers={"Cache-Control": "private, max-age=300"},
+    )
+
+
+# --------------------------------------------- quién puede cubrir el puesto
+@router.get("/aprobaciones/{solicitud_id}/candidatos")
+async def candidatos_reemplazo(
+    solicitud_id: uuid.UUID, usuario: Annotated[dict, Depends(usuario_actual)]
+) -> list[dict]:
+    """Compañeros que podrían cubrir la ausencia, para que el jefe elija.
+
+    Se calcula sobre el equipo del solicitante, no sobre el de quien consulta:
+    Talento Humano puede estar revisando la solicitud de otra área.
+    """
+    solicitud = await obtener_uno(
+        """select r.user_id, r.jefe_id, r.fecha_inicio, r.fecha_fin, u.departamento
+             from public.requests r join public.users u on u.id = r.user_id
+            where r.id = %s""",
+        (solicitud_id,),
+    )
+    if solicitud is None:
+        raise HTTPException(status_code=404, detail={"mensaje": "La solicitud no existe."})
+
+    if str(solicitud["jefe_id"]) != str(usuario["id"]) and usuario["rol"] not in ("rrhh", "admin"):
+        raise HTTPException(status_code=403, detail={"mensaje": "No le corresponde esta solicitud."})
+
+    # Se marca quién estará ausente en esas mismas fechas: proponer a alguien
+    # que también está de vacaciones es el error más fácil de cometer.
+    return await obtener_todos(
+        """
+        select u.id, u.nombre, u.cargo,
+               exists (
+                 select 1 from public.requests o
+                  where o.user_id = u.id
+                    and o.estado in ('pendiente_jefe', 'pendiente_rrhh', 'aprobado')
+                    and o.fecha_inicio <= %(fin)s and o.fecha_fin >= %(inicio)s
+               ) as tambien_ausente
+        from public.users u
+        where u.activo and u.id <> %(solicitante)s
+          and (u.jefe_id = %(jefe)s or u.departamento = %(depto)s)
+        order by tambien_ausente, u.nombre
+        limit 100
+        """,
+        {"solicitante": solicitud["user_id"], "jefe": solicitud["jefe_id"],
+         "depto": solicitud["departamento"], "inicio": solicitud["fecha_inicio"],
+         "fin": solicitud["fecha_fin"]},
+    )
+
+
+# ------------------------------------- ajuste de una ausencia ya autorizada
+class AjusteAusencia(BaseModel):
+    """Extensión o corrección de una ausencia aprobada.
+
+    El caso que la motiva: un permiso de dos horas por cita médica del que
+    sale un reposo de tres días. Sin esto, garita seguía esperando a la
+    persona y el jefe la daba por presente.
+    """
+    fecha_inicio: date
+    fecha_fin: date
+    motivo: str = Field(..., min_length=15, max_length=600,
+                        description="Qué ocurrió, en palabras de quien ajusta")
+    resolucion: str = Field(..., min_length=15, max_length=600,
+                            description="Qué se resolvió y con qué respaldo")
+
+
+@router.post("/aprobaciones/{solicitud_id}/ajustar")
+async def ajustar_ausencia(
+    solicitud_id: uuid.UUID, datos: AjusteAusencia, request: Request,
+    tareas: BackgroundTasks,
+    usuario: Annotated[dict, Depends(exigir_rol("rrhh", "admin"))],
+) -> dict:
+    """Talento Humano extiende o corrige una ausencia ya aprobada.
+
+    La base mueve fechas, días, saldo y constancia en una sola transacción
+    (`ajustar_ausencia`): un reposo que se alarga no puede dejar el saldo a
+    medias. El ajuste nunca borra el original: queda en `request_adjustments`
+    con autor, momento y la explicación de por qué se hizo.
+    """
+    try:
+        # `from`, no `select (fn(...)).*`: esa forma expande el registro
+        # llamando a la función una vez por columna —46 veces, y 46 ajustes
+        # registrados—. En `from` se evalúa una sola vez.
+        fila = await obtener_uno(
+            """select * from public.ajustar_ausencia(%s, %s, %s, %s, %s, %s)""",
+            (solicitud_id, datos.fecha_inicio, datos.fecha_fin,
+             datos.motivo, datos.resolucion, usuario["id"]),
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise traducir(exc) from exc
+
+    completa = await obtener_uno(SQL_SOLICITUD, (solicitud_id,))
+    await registrar(
+        request, "ausencia_ajustada", user_id=str(usuario["id"]), cedula=usuario["cedula"],
+        entidad="requests", entidad_id=str(solicitud_id),
+        detalle={"folio": completa["folio"], "hasta": str(datos.fecha_fin),
+                 "dias": float(fila["dias_solicitados"])},
+    )
+
+    # El interesado y su jefe deben enterarse: uno para saber hasta cuándo
+    # está cubierto, el otro para no contar con alguien que no vendrá.
+    destinos = [{"email": completa["email"], "nombre": completa["empleado"]}]
+    jefe = await obtener_uno(
+        "select email, nombre from public.users where id = %s and activo",
+        (completa["jefe_id"],),
+    )
+    if jefe:
+        destinos.append(jefe)
+    tareas.add_task(notificaciones.avisar_ajuste, destinos, completa,
+                    usuario["nombre"], datos.motivo, datos.resolucion)
+
+    return {
+        "id": str(solicitud_id),
+        "folio": completa["folio"],
+        "fecha_inicio": str(fila["fecha_inicio"]),
+        "fecha_fin": str(fila["fecha_fin"]),
+        "dias_solicitados": float(fila["dias_solicitados"]),
+        "mensaje": "Ausencia ajustada. Se avisó al colaborador y a su jefe, "
+                   "y garita ya reconoce las nuevas fechas.",
+    }
+
+
+@router.get("/solicitudes/{solicitud_id}/ajustes")
+async def ajustes_de(
+    solicitud_id: uuid.UUID, usuario: Annotated[dict, Depends(usuario_actual)]
+) -> list[dict]:
+    """Historial de ajustes. Lo ve el interesado, su jefe y Talento Humano."""
+    solicitud = await obtener_uno(
+        "select user_id, jefe_id from public.requests where id = %s", (solicitud_id,)
+    )
+    if solicitud is None:
+        raise HTTPException(status_code=404, detail={"mensaje": "La solicitud no existe."})
+
+    propio = str(solicitud["user_id"]) == str(usuario["id"])
+    es_jefe = str(solicitud["jefe_id"]) == str(usuario["id"])
+    if not (propio or es_jefe or usuario["rol"] in ("rrhh", "admin")):
+        raise HTTPException(status_code=403, detail={"mensaje": "No puede ver este historial."})
+
+    return await obtener_todos(
+        """
+        select a.id, a.fecha_inicio_ant, a.fecha_fin_ant,
+               a.fecha_inicio_nueva, a.fecha_fin_nueva,
+               a.dias_ant, a.dias_nuevos, a.motivo, a.resolucion,
+               a.created_at, u.nombre as ajustado_por
+        from public.request_adjustments a
+        join public.users u on u.id = a.ajustado_por
+        where a.request_id = %s
+        order by a.created_at desc
+        """,
+        (solicitud_id,),
     )

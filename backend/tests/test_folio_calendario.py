@@ -10,6 +10,7 @@ from app.db import ejecutar, obtener_todos, obtener_uno
 from tests.conftest import CEDULA_PRUEBA
 
 CEDULA_COMPA = "0900000001"
+CEDULA_JEFE = "1100000007"
 
 
 async def lunes_limpio(semanas: int = 6) -> date:
@@ -51,6 +52,31 @@ async def auth(cliente, codigos, empleado):
            where user_id = %s and not caducado""",
         (empleado["id"],),
     )
+    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
+@pytest.fixture
+async def jefe_auth(cliente, codigos, empleado, companero):
+    """El jefe inmediato del empleado de prueba, con sesión iniciada.
+
+    El compañero creado por el fixture `companero` pasa a ser jefe: así hay
+    a quién asignar como reemplazo y quién decida, sin inventar más gente.
+    """
+    jefe = await obtener_uno(
+        """insert into public.users (cedula, nombre, email, rol, departamento, fecha_ingreso)
+           values (%s, 'API Jefatura', 'jefatura@api.test', 'jefe', 'Operaciones',
+                   current_date - 1500)
+           on conflict (cedula) do update set rol = 'jefe'
+           returning id""",
+        (CEDULA_JEFE,),
+    )
+    await ejecutar("update public.users set jefe_id = %s where id = %s",
+                   (jefe["id"], empleado["id"]))
+
+    await cliente.post("/auth/solicitar-token", json={"cedula": CEDULA_JEFE})
+    r = await cliente.post("/auth/validar-token",
+                           json={"cedula": CEDULA_JEFE, "codigo": codigos[-1]})
+    assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
 
@@ -117,8 +143,23 @@ async def test_el_desglose_cuenta_los_fines_de_semana(cliente, auth):
 
 
 # -------------------------------------------------------------- reemplazo
-async def test_se_registra_quien_cubre_la_ausencia(cliente, auth, companero):
+async def test_el_solicitante_no_puede_elegir_quien_lo_cubre(cliente, auth, companero):
+    """Aunque lo envíe a mano: quien conoce la carga del equipo es el jefe."""
     creada = await _crear(cliente, auth, reemplazo_id=companero)
+    fila = await obtener_uno("select reemplazo_id from public.requests where id = %s",
+                             (creada["id"],))
+    assert fila["reemplazo_id"] is None
+
+
+async def test_el_jefe_asigna_el_reemplazo_al_aprobar(cliente, auth, codigos,
+                                                      companero, jefe_auth):
+    creada = await _crear(cliente, auth)
+    r = await cliente.post(
+        f"/aprobaciones/{creada['id']}/decidir", headers=jefe_auth,
+        json={"accion": "aprobar", "reemplazo_id": companero},
+    )
+    assert r.status_code == 200, r.text
+
     fila = await obtener_uno("select reemplazo_id from public.requests where id = %s",
                              (creada["id"],))
     assert str(fila["reemplazo_id"]) == companero
@@ -127,16 +168,24 @@ async def test_se_registra_quien_cubre_la_ausencia(cliente, auth, companero):
     assert listado[0]["reemplazo"] == "API Compañero"
 
 
-async def test_nadie_se_reemplaza_a_si_mismo(cliente, auth, empleado):
-    lunes = await lunes_limpio()
+async def test_nadie_se_reemplaza_a_si_mismo(cliente, auth, empleado, jefe_auth):
+    creada = await _crear(cliente, auth)
     r = await cliente.post(
-        "/solicitudes", headers=auth,
-        json={"tipo": "vacacion", "fecha_inicio": str(lunes),
-              "fecha_fin": str(lunes + timedelta(days=6)),
-              "descripcion": "Me cubro yo mismo", "firmar": False,
-              "reemplazo_id": empleado["id"]},
+        f"/aprobaciones/{creada['id']}/decidir", headers=jefe_auth,
+        json={"accion": "aprobar", "reemplazo_id": empleado["id"]},
     )
     assert r.status_code == 422
+
+
+async def test_los_candidatos_avisan_quien_tambien_estara_ausente(
+        cliente, auth, companero, jefe_auth):
+    """Proponer a alguien que también falta es el error más fácil de cometer."""
+    creada = await _crear(cliente, auth)
+    r = await cliente.get(f"/aprobaciones/{creada['id']}/candidatos", headers=jefe_auth)
+    assert r.status_code == 200, r.text
+    candidatos = {c["id"]: c for c in r.json()}
+    assert companero in candidatos
+    assert "tambien_ausente" in candidatos[companero]
 
 
 async def test_los_companeros_son_del_mismo_equipo(cliente, auth, companero, empleado):
