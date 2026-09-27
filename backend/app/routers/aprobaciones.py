@@ -34,7 +34,7 @@ SQL_SOLICITUD = """
            r.dias_solicitados, r.horas_solicitadas, r.descripcion, r.justificacion,
            r.es_adelanto, r.saldo_al_solicitar, r.fines_semana, r.created_at,
            r.jefe_id, r.jefe_token, r.rrhh_token, r.qr_hash, r.motivo_rechazo,
-           r.ruta_aprobacion, r.bloque_menor_justificado, r.reemplazo_id,
+           r.ruta_aprobacion, r.bloque_menor_justificado, r.reemplazo_id, r.region,
            rp.nombre as reemplazo,
            r.user_id, u.nombre as empleado, u.cedula, u.email, u.departamento, u.cargo,
            u.dias_vacaciones as saldo_actual,
@@ -176,8 +176,11 @@ async def _aplicar(solicitud: dict, rol: str, decision: Decision,
     )
 
     if actualizada["estado"] == "pendiente_rrhh":
+        # Al grupo de la región, no a un buzón concreto: si alguien está de
+        # vacaciones, la solicitud igual se resuelve.
         personal_rrhh = await obtener_todos(
-            "select email, nombre from public.users where rol in ('rrhh','admin') and activo"
+            "select email, nombre from public.rrhh_de_region(%s)",
+            (completa.get("region") or "sierra",),
         )
         tareas.add_task(notificaciones.avisar_a_rrhh, personal_rrhh, completa, quien)
 
@@ -216,10 +219,20 @@ async def pendientes(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[
     """Lo que le toca decidir a quien consulta, según su rol."""
     if usuario["rol"] == "jefe":
         filtro, parametros = "r.jefe_id = %s and r.estado = 'pendiente_jefe'", (usuario["id"],)
-    elif usuario["rol"] in ("rrhh", "admin"):
-        # Talento Humano y administración también hacen de jefe de su propio
-        # equipo; si no, una excepción devuelta por la ruta invertida a un
-        # jefe con rol rrhh se quedaba sin nadie que la viera.
+    elif usuario["rol"] == "rrhh":
+        # Talento Humano resuelve lo de SU región: quien atiende a la gente de
+        # Quito tiene sus papeles a mano y la conoce. Cualquier miembro de esa
+        # región puede decidir, así que nadie espera a una persona concreta.
+        # Y también hace de jefe de su propio equipo: sin esto, una excepción
+        # devuelta por la ruta invertida a un jefe con rol rrhh se quedaba sin
+        # nadie que la viera.
+        filtro = """(
+            (r.estado = 'pendiente_rrhh' and coalesce(r.region, 'sierra') = %s)
+            or (r.jefe_id = %s and r.estado = 'pendiente_jefe')
+        )"""
+        parametros = (usuario.get("region") or "sierra", usuario["id"])
+    elif usuario["rol"] == "admin":
+        # Administración ve todas las regiones: es quien cubre los huecos.
         filtro = "(r.estado = 'pendiente_rrhh' or (r.jefe_id = %s and r.estado = 'pendiente_jefe'))"
         parametros = (usuario["id"],)
     else:
@@ -234,6 +247,7 @@ async def pendientes(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[
                r.dias_solicitados, r.horas_solicitadas, r.descripcion, r.justificacion,
                r.es_adelanto, r.saldo_al_solicitar, r.fines_semana, r.created_at, r.motivo_rechazo,
                r.ruta_aprobacion, r.bloque_menor_justificado, r.reemplazo_id, r.user_id,
+               r.region,
                u.nombre as empleado, u.cedula, u.departamento, u.cargo, rp.nombre as reemplazo,
                u.dias_vacaciones as saldo_actual,
                pt.nombre as categoria, j.nombre as jefe_nombre,

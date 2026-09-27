@@ -13,6 +13,9 @@ window.RRHH_CONFIG = {
   PUERTO_API: 8000,
   EMPRESA: "ITSANET",
   SISTEMA: "Permisos y Vacaciones",
-  // Sustituya img/logo.svg por el logo real (o apunte aquí a un .png)
-  LOGO: "img/logo.svg",
+  // El logo tiene dos versiones porque «net» va en negro: sobre la barra
+  // oscura no se vería. LOGO se usa en fondo claro, LOGO_OSCURO en la barra.
+  LOGO: "img/logo.png",
+  LOGO_OSCURO: "img/logo-oscuro.png",
+  COLOR_MARCA: "#1c58d7",
 };

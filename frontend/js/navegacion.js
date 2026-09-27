@@ -68,7 +68,8 @@ export function montarNavegacion(contenedor, { activo = "panel", contadores = {}
     <div class="bg-slate-900 text-slate-100">
       <div class="mx-auto flex max-w-6xl items-center gap-2 px-3 py-2">
         <a href="dashboard.html" class="flex shrink-0 items-center gap-2 rounded-lg px-1 py-1">
-          <img src="${esc(cfg.LOGO || "img/logo.svg")}" alt="${esc(cfg.EMPRESA || "")}" class="h-7 w-auto">
+          <img src="${esc(cfg.LOGO_OSCURO || cfg.LOGO || "img/logo-oscuro.png")}"
+               alt="${esc(cfg.EMPRESA || "")}" class="h-7 w-auto">
         </a>
 
         <nav class="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto" aria-label="Módulos">
