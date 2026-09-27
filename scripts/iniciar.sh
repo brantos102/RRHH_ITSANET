@@ -50,7 +50,7 @@ PID_API=$!
 
 sleep 3
 echo "Frontend → http://localhost:$PUERTO_WEB"
-( cd frontend && exec python3 -m http.server "$PUERTO_WEB" --bind 0.0.0.0 >/dev/null 2>&1 ) &
+( exec python3 "$RAIZ/scripts/frontend.py" --puerto "$PUERTO_WEB" >/dev/null 2>&1 ) &
 PID_WEB=$!
 
 echo

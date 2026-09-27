@@ -176,9 +176,17 @@ python scripts\servidor.py
 Ventana 2 — frontend:
 
 ```powershell
-cd C:\ruta\al\proyecto\RRHH_ITSANET\frontend
-python -m http.server 5500
+python scripts\frontend.py
 ```
+
+Da igual desde qué carpeta se ejecute: el lanzador deduce dónde está la
+interfaz. Si el 5500 está ocupado, `python scripts\frontend.py --puerto 5501`.
+
+> **Evite `python -m http.server`** aunque funcione. Es fácil quedarse a medio
+> camino: estando ya dentro de `frontend`, añadir `--directory frontend` sirve
+> `frontend\frontend`, que no existe. El servidor arranca sin quejarse y el
+> navegador solo dice «Error code: 404 – File not found», sin ninguna pista de
+> que el problema es la carpeta.
 
 Y abra **`http://127.0.0.1:5500`** (no `localhost`, para que coincida con el `--host 127.0.0.1` del backend: en Windows `localhost` a veces resuelve a IPv6 y la conexión se rechaza).
 
@@ -254,6 +262,8 @@ update public.requests set fecha_inicio = current_date, fecha_fin = current_date
 | «Demasiados intentos» | Son 5 códigos por cédula y hora. Espere, o `delete from public.auth_otp where cedula = '…'` |
 | `pool initialization incomplete` | `DATABASE_URL` incorrecta, o falta la contraseña en la URI |
 | `Psycopg cannot use the 'ProactorEventLoop'` (Windows) | Arranque con `python scripts\servidor.py` en vez de llamar a uvicorn directamente |
+| En el navegador **`Error code: 404 – File not found`** y la terminal del frontend registra `code 404, message File not found` | El servidor de estáticos apunta a una carpeta equivocada. Ocurre al combinar las dos formas: estando dentro de `frontend`, `python -m http.server 5500 --directory frontend` busca `frontend\frontend`. Use `python scripts\frontend.py`, que encuentra la carpeta solo |
+| `ModuleNotFoundError: No module named 'app'` | Llamó a `uvicorn app.main:app` desde la raíz del proyecto; el paquete `app` vive dentro de `backend`. Use `python scripts\servidor.py` desde donde sea, o `cd backend` antes de invocar uvicorn |
 | `Field required: database_url` | No encuentra `backend/.env`. Compruebe que el archivo exista **dentro de la carpeta `backend`** y que se llame `.env`, no `.env.txt` (el Bloc de notas añade la extensión si no la pone entre comillas al guardar) |
 
 ---

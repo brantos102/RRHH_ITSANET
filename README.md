@@ -19,6 +19,13 @@ python scripts/verificar.py              # dice qué falta y cómo resolverlo
 ./scripts/iniciar.sh                     # backend en :8000, frontend en :5500
 ```
 
+En Windows, una ventana para cada uno (ambos funcionan desde cualquier carpeta):
+
+```powershell
+python scripts\servidor.py    # backend  → http://127.0.0.1:8000
+python scripts\frontend.py    # interfaz → http://127.0.0.1:5500
+```
+
 Antes necesita un usuario con el que entrar: edite `supabase/crear_mi_usuario.sql` con su cédula y correo, y ejecútelo en Supabase. Guía completa en **[docs/probar.md](docs/probar.md)**.
 
 Con `EMAIL_BACKEND=console` el código de acceso se imprime en la terminal, así puede probar sin configurar correo.
