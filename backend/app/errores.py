@@ -52,6 +52,8 @@ def traducir(exc: Exception) -> HTTPException:
         etiqueta, _, resto = pista.partition("|")
         if etiqueta == "bloque_minimo" and resto:
             detalle["bloque_minimo"] = resto
+        elif etiqueta == "anticipacion" and resto:
+            detalle["anticipacion_dias"] = resto
         elif pista and "|" in pista:
             # Formato histórico sin etiqueta: dos fechas.
             partes = [p for p in pista.split("|") if p]

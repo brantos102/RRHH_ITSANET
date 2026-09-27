@@ -108,7 +108,8 @@ async def catalogo_permisos(_: Annotated[dict, Depends(usuario_actual)]) -> dict
                categoria_ayuda, categoria_orden,
                tipo_id, tipo_codigo, tipo_nombre, tipo_descripcion,
                requiere_adjunto, requiere_justificacion, remunerado, descuenta_vacaciones,
-               max_dias, max_horas, guia_ejemplo, guia_adjuntos
+               max_dias, max_horas, guia_ejemplo, guia_adjuntos,
+               admite_horas, horas_antes, horas_despues
         from public.v_catalogo_permisos
         order by categoria_orden, tipo_orden
         """
@@ -141,6 +142,11 @@ async def catalogo_permisos(_: Annotated[dict, Depends(usuario_actual)]) -> dict
             "max_horas": f["max_horas"],
             "guia_ejemplo": f["guia_ejemplo"],
             "guia_adjuntos": f["guia_adjuntos"],
+            # Un permiso por horas dentro de un mismo día es el caso más
+            # frecuente: una cita a las 13:00 no es un día de ausencia.
+            "admite_horas": f["admite_horas"],
+            "horas_antes": float(f["horas_antes"]),
+            "horas_despues": float(f["horas_despues"]),
         })
 
     return {"mandato": mandato["valor"] if mandato else "", "pilares": pilares}
@@ -281,6 +287,37 @@ async def calendario_equipo(
             for a in ausencias
         ],
         "feriados": [{"fecha": str(f["fecha"]), "nombre": f["nombre"]} for f in dias_libres],
+    }
+
+
+@router.get("/catalogos/antiguedad")
+async def tabla_antiguedad(_: Annotated[dict, Depends(usuario_actual)]) -> dict:
+    """Tabla oficial de días por años laborados, con los lineamientos internos.
+
+    El colaborador debe poder ver la regla que le están aplicando, venga del
+    Código del Trabajo o de una política de la empresa. La tabla aclara algo
+    que genera dudas todos los años: los días son calendario e incluyen los
+    fines de semana que caen dentro.
+    """
+    filas = await obtener_todos(
+        """select rango, anios_desde, anios_hasta, dias_gozar,
+                  dias_laborables, dias_no_laborables
+             from public.v_antiguedad_referencia"""
+    )
+    lineamientos = await obtener_todos(
+        """select codigo, articulo, titulo, texto, categoria
+             from public.legal_references
+            where starts_with(codigo, 'ITSANET_') order by orden"""
+    )
+    parametros = await obtener_todos(
+        """select clave, valor from public.app_config
+            where clave in ('vacaciones_bloque_minimo', 'vacaciones_bloque_sugerido',
+                            'vacaciones_anticipacion_dias')"""
+    )
+    return {
+        "tabla": filas,
+        "lineamientos": lineamientos,
+        "parametros": {p["clave"]: p["valor"] for p in parametros},
     }
 
 

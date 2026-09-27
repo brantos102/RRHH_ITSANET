@@ -161,6 +161,8 @@ async def revisar_base() -> int:
         ("0004 normativa y alertas", "public.notifications"),
         ("0005 folio y calendario", "public.v_calendario_equipo"),
         ("0006 anulación y administración", "public.v_informe_solicitudes"),
+        ("0007 pilares de permiso", "public.v_catalogo_permisos"),
+        ("0008 lineamientos y antigüedad", "public.v_antiguedad_referencia"),
     ]
     for nombre, objeto in migraciones:
         fila = await obtener_uno("select to_regclass(%s) is not null as existe", (objeto,))

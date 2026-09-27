@@ -6,7 +6,8 @@ import { montarNavegacion } from "./navegacion.js";
 const $ = (id) => document.getElementById(id);
 const estado = {
   tipos: [], catalogo: null, pilarActual: null, firma: null, adjuntos: [],
-  tipoActual: null, saldo: null, bloqueMinimo: null,
+  tipoActual: null, saldo: null, bloqueMinimo: null, modalidad: null,
+  reglas: null,
   solicitudes: [], pendientes: [], anulaciones: [], calendario: [],
   mes: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
 };
@@ -47,19 +48,26 @@ async function cargar() {
   $("pestanas").classList.toggle("hidden", !aprueba);
   $("pestana-anulaciones").classList.toggle("hidden", !resuelveAnulaciones);
 
-  const [saldo, notificaciones, solicitudes, catalogo, firma, calendario,
+  const [saldo, notificaciones, solicitudes, catalogo, reglas, firma, calendario,
          pendientes, anulaciones] =
     await Promise.all([
       api.saldo().catch(() => null),
       api.notificaciones().catch(() => []),
       api.misSolicitudes().catch(() => []),
       api.catalogoPermisos().catch(() => ({ mandato: "", pilares: [] })),
+      api.tablaAntiguedad().catch(() => null),
       api.miFirma().catch(() => ({ registrada: false })),
       api.calendario().catch(() => []),
       aprueba ? api.pendientes().catch(() => []) : Promise.resolve([]),
       resuelveAnulaciones ? api.anulacionesPendientes().catch(() => []) : Promise.resolve([]),
     ]);
 
+  estado.reglas = reglas ? {
+    anticipacion: reglas.parametros?.vacaciones_anticipacion_dias,
+    sugerido: reglas.parametros?.vacaciones_bloque_sugerido,
+    minimo: reglas.parametros?.vacaciones_bloque_minimo,
+    tabla: reglas.tabla, lineamientos: reglas.lineamientos,
+  } : null;
   Object.assign(estado, { firma, saldo, solicitudes, calendario, pendientes, anulaciones });
   montarNavegacion($("barra"), {
     activo: "panel",
@@ -767,6 +775,22 @@ function montarPilares(catalogo) {
   estado.tipos = (catalogo.pilares || []).flatMap((p) => p.subtipos);
   $("mandato").textContent = catalogo.mandato || "";
 
+  /* Un catálogo vacío significa que la base no tiene la migración de los
+     pilares. Antes el formulario salía mudo —sin tipo, sin subtipo y sin
+     horas— y no había forma de saber por qué. Ahora lo dice. */
+  if (!(catalogo.pilares || []).length) {
+    $("pilares").innerHTML = `
+      <div class="sm:col-span-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-800 ring-1 ring-rose-200">
+        <p class="font-medium">No se pudo cargar el catálogo de permisos.</p>
+        <p class="mt-1 text-xs leading-relaxed">
+          Falta aplicar una migración en la base de datos. Quien administre el
+          sistema debe ejecutar <code class="font-mono">supabase/migrations/</code>
+          hasta la última. Mientras tanto no es posible solicitar permisos.
+        </p>
+      </div>`;
+    return;
+  }
+
   $("pilares").innerHTML = (catalogo.pilares || []).map((p) => `
     <button type="button" data-pilar="${esc(p.codigo)}"
             class="rounded-xl p-3 text-left ring-1 ring-slate-200 hover:ring-slate-400">
@@ -829,6 +853,12 @@ function abrirFormulario(tipo) {
   $("campo-subtipo").classList.add("hidden");
   $("campo-excepcion").classList.add("hidden");
   $("excepcion-bloque").checked = false;
+  $("campo-modalidad").classList.add("hidden");
+  $("campo-cita").classList.add("hidden");
+  $("total-horas").classList.add("hidden");
+  $("fecha-fin").disabled = false;
+  $("fecha-fin").parentElement.classList.remove("opacity-50");
+  estado.modalidad = null;
   estado.pilarActual = null;
   $("pilares").querySelectorAll("[data-pilar]").forEach((b) => {
     b.className = "rounded-xl p-3 text-left ring-1 ring-slate-200 hover:ring-slate-400";
@@ -840,9 +870,26 @@ function abrirFormulario(tipo) {
   $("lista-adjuntos").innerHTML = "";
   $("contador-desc").textContent = "0/200";
 
-  const manana = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
-  $("fecha-inicio").min = manana;
-  $("fecha-fin").min = manana;
+  /* La anticipación mínima no es una molestia administrativa: es el tiempo
+     que la jefatura necesita para organizar quién cubre el puesto. Se
+     impide elegir antes en vez de dejar que la solicitud se rechace. */
+  const aviso = tipo === "vacacion" ? Number(estado.reglas?.anticipacion || 10) : 1;
+  const primera = new Date(Date.now() + aviso * 86400000).toISOString().slice(0, 10);
+  $("fecha-inicio").min = primera;
+  $("fecha-fin").min = primera;
+
+  if (tipo === "vacacion") {
+    // Se propone el período completo: la regla general es tomarlo entero,
+    // no fraccionarlo. Quien quiera menos, lo acorta.
+    const bloque = Number(estado.reglas?.sugerido || 15);
+    const fin = new Date(Date.now() + (aviso + bloque - 1) * 86400000);
+    $("fecha-inicio").value = primera;
+    $("fecha-fin").value = fin.toISOString().slice(0, 10);
+    $("aviso-vacaciones").classList.remove("hidden");
+    setTimeout(previsualizar, 50);
+  } else {
+    $("aviso-vacaciones").classList.add("hidden");
+  }
 
   $("aviso-sin-firma").classList.toggle("hidden", !!estado.firma?.registrada);
   $("firmar").checked = !!estado.firma?.registrada;
@@ -896,15 +943,113 @@ $("tipo-permiso").addEventListener("change", (e) => {
   $("guia-adjuntos").textContent = tipo.guia_adjuntos || "";
   $("campo-adjuntos").classList.toggle("hidden", !tipo.requiere_adjunto);
   $("campo-justificacion").classList.toggle("hidden", !tipo.requiere_justificacion);
-  $("campo-horas").classList.toggle("hidden", !tipo.max_horas);
-  $("campo-horas").classList.toggle("grid", !!tipo.max_horas);
+
+  /* Una cita a las 13:00 no es «un día de permiso», son tres horas. Los
+     subtipos que admiten esa modalidad la ofrecen; los que por naturaleza
+     ocupan el día —un reposo, un duelo— no la muestran. */
+  $("campo-modalidad").classList.toggle("hidden", !tipo.admite_horas);
+  if (!tipo.admite_horas) elegirModalidad("dias");
+  else if (!estado.modalidad) elegirModalidad("horas");
+  else elegirModalidad(estado.modalidad);
+
   previsualizar();
 });
+
+/* ------------------------------------------- días completos u horas sueltas */
+function elegirModalidad(modo) {
+  estado.modalidad = modo;
+  const porHoras = modo === "horas";
+
+  document.querySelectorAll("[data-modalidad]").forEach((b) => {
+    const activo = b.dataset.modalidad === modo;
+    b.className = `rounded-xl px-3 py-2.5 text-sm ring-1 ${activo
+      ? "bg-slate-900 text-white ring-slate-900"
+      : "ring-slate-200 hover:ring-slate-400"}`;
+  });
+
+  $("campo-cita").classList.toggle("hidden", !porHoras);
+  $("campo-horas").classList.toggle("hidden", !porHoras);
+  $("campo-horas").classList.toggle("grid", porHoras);
+
+  // Por horas es siempre el mismo día: la fecha de fin sigue a la de inicio
+  // y se bloquea, porque un permiso de 13:00 a 15:00 del martes al jueves
+  // no significa nada.
+  $("fecha-fin").disabled = porHoras;
+  if (porHoras && $("fecha-inicio").value) $("fecha-fin").value = $("fecha-inicio").value;
+  $("fecha-fin").parentElement.classList.toggle("opacity-50", porHoras);
+  if (porHoras) calcularHorario();
+}
+
+document.querySelectorAll("[data-modalidad]").forEach((b) =>
+  b.addEventListener("click", () => elegirModalidad(b.dataset.modalidad))
+);
+
+/* Del horario de la cita sale el rango del permiso: antes hay que llegar y
+   después hay que volver. Los márgenes dependen del subtipo —un trámite en
+   una entidad pública no se resuelve en una hora como una consulta—. */
+function calcularHorario() {
+  const tipo = estado.tipoActual;
+  const cita = $("hora-cita").value;
+  if (!tipo || !cita) return mostrarTotalHoras();
+
+  const [h, m] = cita.split(":").map(Number);
+  const enMinutos = h * 60 + m;
+  const antes = Math.round((tipo.horas_antes ?? 1) * 60);
+  const despues = Math.round((tipo.horas_despues ?? 2) * 60);
+
+  const reloj = (min) => {
+    const acotado = Math.max(0, Math.min(23 * 60 + 59, min));
+    return `${String(Math.floor(acotado / 60)).padStart(2, "0")}:${
+      String(acotado % 60).padStart(2, "0")}`;
+  };
+
+  $("hora-inicio").value = reloj(enMinutos - antes);
+  $("hora-fin").value = reloj(enMinutos + despues);
+  mostrarTotalHoras();
+}
+
+function mostrarTotalHoras() {
+  const caja = $("total-horas");
+  const ini = $("hora-inicio").value, fin = $("hora-fin").value;
+  if (!ini || !fin) return caja.classList.add("hidden");
+
+  const min = (t) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+  const total = min(fin) - min(ini);
+  if (total <= 0) {
+    caja.textContent = "La hora de fin debe ser posterior a la de inicio.";
+    caja.className = "col-span-2 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-800";
+    return caja.classList.remove("hidden");
+  }
+
+  const horas = Math.floor(total / 60), minutos = total % 60;
+  const tope = estado.tipoActual?.max_horas;
+  const texto = `Permiso de ${horas} hora(s)${minutos ? ` y ${minutos} minutos` : ""}` +
+                ` el ${$("fecha-inicio").value || "día indicado"}.`;
+  const excede = tope && total / 60 > Number(tope);
+  caja.textContent = excede
+    ? `${texto} Este permiso admite hasta ${Number(tope)} horas: revise el rango.`
+    : texto;
+  caja.className = `col-span-2 rounded-xl px-3 py-2 text-xs ${excede
+    ? "bg-amber-50 text-amber-900" : "bg-cyan-50 text-cyan-900"}`;
+  caja.classList.remove("hidden");
+}
+
+$("hora-cita").addEventListener("change", calcularHorario);
+["hora-inicio", "hora-fin"].forEach((id) =>
+  $(id).addEventListener("change", mostrarTotalHoras)
+);
 
 /* ---- Previsualización en vivo ---- */
 let esperando;
 ["fecha-inicio", "fecha-fin"].forEach((id) =>
   $(id).addEventListener("change", () => {
+    // Un permiso por horas ocurre dentro de un mismo día. Si la fecha de
+    // inicio se elige DESPUÉS de activar la modalidad, la de fin quedaba
+    // vacía y el envío fallaba sin explicación.
+    if (estado.modalidad === "horas" && $("fecha-inicio").value) {
+      $("fecha-fin").value = $("fecha-inicio").value;
+      mostrarTotalHoras();
+    }
     clearTimeout(esperando);
     esperando = setTimeout(previsualizar, 250);
   })

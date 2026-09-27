@@ -90,6 +90,7 @@ export const api = {
 
   tiposPermiso: () => peticion("/catalogos/tipos-permiso"),
   catalogoPermisos: () => peticion("/catalogos/permisos"),
+  tablaAntiguedad: () => peticion("/catalogos/antiguedad"),
   candidatosReemplazo: (id) => peticion(`/aprobaciones/${id}/candidatos`),
   ajustarAusencia: (id, datos) =>
     peticion(`/aprobaciones/${id}/ajustar`, { method: "POST", body: JSON.stringify(datos) }),

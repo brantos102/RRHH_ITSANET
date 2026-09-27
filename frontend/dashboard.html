@@ -200,6 +200,48 @@
         <p id="info-permiso" class="hidden rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-600"></p>
       </div>
 
+      <!-- Lineamientos de vacaciones, a la vista de quien solicita -->
+      <div id="aviso-vacaciones"
+           class="hidden rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-600 ring-1 ring-slate-200">
+        <p class="font-medium text-slate-800">Antes de enviar, tenga presente:</p>
+        <ul class="mt-1.5 list-disc space-y-1 pl-4">
+          <li>Se proponen <strong>15 días</strong>, que es el período completo. La regla es tomarlo entero.</li>
+          <li>Se comunican con <strong>10 días de anticipación</strong>, para que su jefe organice la cobertura.</li>
+          <li>Registrar una fecha <strong>no significa que estén aprobadas</strong>: deciden su jefe y Talento Humano.</li>
+          <li>Los días son <strong>calendario</strong>: incluyen los fines de semana que caigan dentro.</li>
+          <li>Para un asunto personal de un día, corresponde un <strong>permiso</strong>, no vacaciones.</li>
+        </ul>
+      </div>
+
+      <!-- Duración: día completo o unas horas del mismo día -->
+      <div id="campo-modalidad" class="hidden">
+        <span class="block text-sm font-medium text-slate-700">¿Cuánto tiempo necesita?</span>
+        <div class="mt-2 grid grid-cols-2 gap-2">
+          <button type="button" data-modalidad="dias"
+                  class="rounded-xl px-3 py-2.5 text-sm ring-1 ring-slate-200 hover:ring-slate-400">
+            Uno o más días completos
+          </button>
+          <button type="button" data-modalidad="horas"
+                  class="rounded-xl px-3 py-2.5 text-sm ring-1 ring-slate-200 hover:ring-slate-400">
+            Unas horas del mismo día
+          </button>
+        </div>
+      </div>
+
+      <!-- Hora del compromiso: de ahí sale el horario sugerido -->
+      <div id="campo-cita" class="hidden">
+        <label for="hora-cita" class="block text-sm font-medium text-slate-700">
+          ¿A qué hora es su cita o compromiso?
+        </label>
+        <input type="time" id="hora-cita"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
+        <p class="mt-1.5 text-xs text-slate-500">
+          Con esa hora le proponemos el rango de permiso, contando traslado y espera.
+          Puede ajustarlo.
+        </p>
+      </div>
+
       <!-- Fechas -->
       <div class="grid grid-cols-2 gap-3">
         <div>
@@ -216,7 +258,7 @@
         </div>
       </div>
 
-      <!-- Horas (solo permisos) -->
+      <!-- Horas (solo permisos por horas) -->
       <div id="campo-horas" class="hidden grid-cols-2 gap-3">
         <div>
           <label for="hora-inicio" class="block text-sm font-medium text-slate-700">Hora de inicio</label>
@@ -230,6 +272,7 @@
                  class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
                         focus:bg-white focus:ring-2 focus:ring-slate-900">
         </div>
+        <p id="total-horas" class="col-span-2 hidden rounded-xl bg-cyan-50 px-3 py-2 text-xs text-cyan-900"></p>
       </div>
 
       <!-- Previsualización en vivo, con el desglose de los días -->
