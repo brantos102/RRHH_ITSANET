@@ -24,7 +24,8 @@ const avisar = (texto, error = false) => {
 /* --------------------------------------------------------------- secciones */
 const CARGADORES = {
   usuarios: cargarUsuarios, tipos: cargarTipos, feriados: cargarFeriados,
-  antiguedades: cargarAntiguedades, configuracion: cargarConfiguracion, bitacora: cargarBitacora,
+  antiguedades: cargarAntiguedades, configuracion: cargarConfiguracion,
+  bitacora: cargarBitacora, cotejo: cargarCotejo,
 };
 
 function mostrar(seccion) {
@@ -405,4 +406,69 @@ $("filtro-bitacora").addEventListener("input", () => cargarBitacora());
 
 /* --------------------------------------------------------------- arranque */
 const seccionInicial = location.hash.slice(1);
+/* --------------------------------------------- cotejo de la carga inicial
+   Con trescientas cincuenta personas, revisar la carga dentro del sistema —de
+   una en una— no es viable. Aquí se baja la tabla entera para compararla con
+   el archivo del que salió. */
+async function cargarCotejo() {
+  const usuarios = await api.adminUsuarios("");
+  const total = usuarios.length;
+  const sinCorreo = usuarios.filter((u) => u.correo_pendiente).length;
+  const sinJefe = usuarios.filter((u) => !u.jefe_nombre && u.rol === "empleado").length;
+
+  const tarjeta = (etiqueta, valor, pista, alerta = false) => `
+    <article class="rounded-xl p-3.5 ring-1 ${alerta && valor > 0
+      ? "bg-amber-50 ring-amber-200" : "bg-slate-50 ring-slate-200"}">
+      <p class="text-xs uppercase tracking-wide text-slate-500">${etiqueta}</p>
+      <p class="mt-1 text-2xl font-semibold tabular-nums">${valor}</p>
+      <p class="mt-0.5 text-xs leading-snug text-slate-500">${pista}</p>
+    </article>`;
+
+  $("cotejo-resumen").innerHTML =
+    tarjeta("Personas activas", total, "cargadas en el sistema") +
+    tarjeta("Sin correo real", sinCorreo, "completan su ficha al primer ingreso", true) +
+    tarjeta("Sin jefe asignado", sinJefe, "sus solicitudes no avisan a nadie", true) +
+    tarjeta("Saldos descuadrados", "—", "se comprueban al bajar el archivo");
+
+  // El departamento se llena con lo que hay, no con una lista fija: así
+  // acompaña a la planilla que esté cargada.
+  const select = $("cotejo-departamento");
+  if (select.options.length <= 1) {
+    const areas = [...new Set(usuarios.map((u) => u.departamento).filter(Boolean))].sort();
+    select.insertAdjacentHTML("beforeend",
+      areas.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join(""));
+  }
+}
+
+async function descargarCotejo(formato) {
+  const boton = document.querySelector(`[data-cotejo="${formato}"]`);
+  const antes = boton.textContent;
+  boton.disabled = true;
+  boton.textContent = "…";
+  try {
+    const parametros = new URLSearchParams();
+    if ($("cotejo-solo-revisar").checked) parametros.set("solo_revisar", "true");
+    if ($("cotejo-departamento").value) parametros.set("departamento", $("cotejo-departamento").value);
+
+    const respuesta = await fetch(`${api.base}/admin/cotejo.${formato}?${parametros}`,
+                                  { headers: { Authorization: `Bearer ${sesion.token}` } });
+    if (!respuesta.ok) throw new Error("No se pudo generar el archivo.");
+
+    const cabecera = respuesta.headers.get("content-disposition") || "";
+    const nombre = /filename="([^"]+)"/.exec(cabecera)?.[1] || `cotejo.${formato}`;
+    const url = URL.createObjectURL(await respuesta.blob());
+    Object.assign(document.createElement("a"), { href: url, download: nombre }).click();
+    URL.revokeObjectURL(url);
+    avisar(`Descargado: ${nombre}`);
+  } catch (err) {
+    avisar(err.message, true);
+  } finally {
+    boton.disabled = false;
+    boton.textContent = antes;
+  }
+}
+
+document.querySelectorAll("[data-cotejo]").forEach((b) =>
+  b.addEventListener("click", () => descargarCotejo(b.dataset.cotejo)));
+
 mostrar(seccionInicial in CARGADORES ? seccionInicial : "usuarios");

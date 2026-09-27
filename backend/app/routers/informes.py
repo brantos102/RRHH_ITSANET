@@ -1,4 +1,4 @@
-"""Informes con filtros combinables y descarga en CSV.
+"""Informes con filtros combinables y descarga en CSV, Excel o PDF.
 
 Cada filtro es opcional y se acumula con los demás. El número de solicitud
 manda: si se indica, se ignoran los otros, que es lo que espera quien busca
@@ -6,18 +6,18 @@ un caso concreto.
 """
 from __future__ import annotations
 
-import csv
-import io
 from datetime import date
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, Response
 from psycopg import sql
 
+from fastapi import Request
+
 from ..audit import registrar
 from ..db import obtener_todos, obtener_uno
 from ..deps import exigir_rol
-from fastapi import Request
+from ..exportar import Informe, entregar
 
 router = APIRouter(prefix="/informes", tags=["Informes"])
 
@@ -161,10 +161,40 @@ async def informe_solicitudes(
                                            "user_id": str(f["user_id"])} for f in filas]}
 
 
-@router.get("/solicitudes.csv")
-async def informe_csv(
+def _describir_filtros(
+    folio, campo_fecha, desde, hasta, estado, tipo, departamento, cargo,
+    solicitante, jefe, cedula,
+) -> list[tuple[str, str]]:
+    """El filtro aplicado, en claro, para que vaya dentro del archivo.
+
+    Un informe que no dice de qué está hablando no sustenta nada: dentro de
+    tres meses, una tabla sin contexto no se puede defender ante nadie.
+    """
+    if folio:
+        return [("Solicitud", f"Nº {folio}")]
+
+    etiqueta_fecha = {"creado": "Fecha de solicitud", "inicio": "Fecha de inicio",
+                      "fin": "Fecha de fin"}[campo_fecha]
+    filtros: list[tuple[str, str]] = []
+    if desde or hasta:
+        filtros.append((etiqueta_fecha,
+                        f"{desde:%d/%m/%Y} al {hasta:%d/%m/%Y}" if desde and hasta
+                        else (f"desde {desde:%d/%m/%Y}" if desde else f"hasta {hasta:%d/%m/%Y}")))
+    for titulo, valores in (("Estado", estado), ("Tipo", tipo),
+                            ("Departamento", departamento), ("Cargo", cargo),
+                            ("Solicitante", solicitante), ("Jefe", jefe)):
+        if valores:
+            filtros.append((titulo, ", ".join(valores)))
+    if cedula:
+        filtros.append(("Cédula", cedula))
+    return filtros or [("Alcance", "Todas las solicitudes visibles")]
+
+
+@router.get("/solicitudes.{formato}")
+async def descargar_informe(
     request: Request,
     usuario: Analista,
+    formato: Literal["csv", "xlsx", "pdf"],
     folio: int | None = None,
     campo_fecha: Literal["creado", "inicio", "fin"] = "creado",
     desde: date | None = None,
@@ -177,28 +207,33 @@ async def informe_csv(
     jefe: list[str] | None = Query(None),
     cedula: str | None = None,
 ) -> Response:
-    """Mismo informe, listo para abrir en Excel."""
+    """El mismo informe que se ve en pantalla, en el formato que haga falta.
+
+    CSV para seguir trabajándolo, Excel para entregarlo con formato, PDF para
+    firmar o archivar. Lo que se descarga es exactamente lo filtrado: el
+    alcance del rol ya lo aplica `_consultar`, así que un jefe se lleva solo a
+    su equipo aunque manipule la dirección.
+    """
     filas = await _consultar(usuario, folio, campo_fecha, desde, hasta, estado, tipo,
                              departamento, cargo, solicitante, jefe, cedula, 5000)
 
-    memoria = io.StringIO()
-    # Punto y coma: es lo que Excel en español espera como separador
-    escritor = csv.writer(memoria, delimiter=";", quoting=csv.QUOTE_MINIMAL)
-    escritor.writerow([etiqueta for _, etiqueta in COLUMNAS_CSV])
-    for f in filas:
-        escritor.writerow([f.get(clave) if f.get(clave) is not None else "" for clave, _ in COLUMNAS_CSV])
-
-    await registrar(request, "informe_descargado", user_id=str(usuario["id"]),
-                    cedula=usuario["cedula"], detalle={"filas": len(filas)})
-
-    # BOM para que Excel reconozca los acentos
-    contenido = "﻿" + memoria.getvalue()
-    return Response(
-        content=contenido.encode("utf-8"),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition":
-                 f'attachment; filename="solicitudes-{date.today():%Y-%m-%d}.csv"'},
+    informe = Informe(
+        titulo="Solicitudes de permisos y vacaciones",
+        columnas=COLUMNAS_CSV,
+        filas=filas,
+        filtros=_describir_filtros(folio, campo_fecha, desde, hasta, estado, tipo,
+                                   departamento, cargo, solicitante, jefe, cedula),
+        generado_por=f"{usuario['nombre']} ({usuario['rol']})",
     )
+
+    # Queda en la bitácora quién se llevó qué: son datos personales saliendo
+    # del sistema (LOPDP Art. 10), y eso se registra.
+    await registrar(request, "informe_descargado", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"],
+                    detalle={"filas": len(filas), "formato": formato,
+                             "filtros": dict(informe.filtros)})
+
+    return entregar(informe, formato)
 
 
 @router.get("/resumen-departamentos")

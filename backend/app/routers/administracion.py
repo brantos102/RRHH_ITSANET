@@ -9,7 +9,7 @@ import uuid
 from datetime import date
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from ..audit import registrar
@@ -17,6 +17,7 @@ from ..cedula import es_cedula_valida, normalizar_cedula
 from ..db import obtener_todos, obtener_uno
 from ..deps import exigir_rol
 from ..errores import traducir
+from ..exportar import Informe, entregar
 
 router = APIRouter(tags=["Administración"])
 
@@ -304,6 +305,86 @@ async def cambiar_parametro(clave: str, cambio: CambioParametro,
                     cedula=usuario["cedula"], entidad="app_config", entidad_id=clave,
                     detalle={"antes": anterior["valor"], "ahora": cambio.valor})
     return {"mensaje": f"«{clave}» pasó de {anterior['valor']} a {cambio.valor}."}
+
+
+# ------------------------------------------------- cotejo con el archivo de origen
+COLUMNAS_COTEJO = [
+    ("cedula", "Cédula"), ("nombre", "Nombre"), ("email", "Correo"),
+    ("rol", "Perfil"), ("cargo", "Cargo"), ("departamento", "Departamento"),
+    ("bodega", "Bodega"), ("centro_costo", "Centro de costo"), ("cliente", "Cliente"),
+    ("ciudad", "Ciudad"), ("region", "Región"), ("fecha_ingreso", "Fecha de ingreso"),
+    ("anios_servicio", "Años"), ("jefe_nombre", "Jefe inmediato"),
+    ("saldo_mostrado", "Saldo en el sistema"), ("dias_ganados", "Días ganados"),
+    ("dias_en_curso", "Días del año en curso"), ("dias_caducados", "Días caducados"),
+    ("periodos", "Períodos"), ("telefono", "Teléfono"),
+    ("correo_pendiente", "Correo por completar"), ("activo", "Activo"),
+]
+
+
+@router.get("/admin/cotejo.{formato}")
+async def exportar_cotejo(
+    request: Request, usuario: RRHH, formato: Literal["csv", "xlsx", "pdf"],
+    departamento: str | None = None,
+    solo_revisar: bool = False,
+) -> Response:
+    """Lo que quedó cargado, para compararlo con el archivo de origen.
+
+    Una carga masiva puede traer errores —una cédula mal tecleada, un jefe que
+    no existe en la planilla, una fecha de ingreso distinta entre hojas— y
+    revisarlos dentro del sistema, de uno en uno, no es viable con trescientas
+    cincuenta personas. Esto baja la tabla completa para cotejarla contra el
+    Excel del que salió.
+
+    Con `solo_revisar` se acota a lo que ya se sabe que está incompleto: sin
+    correo real, sin jefe, o con el saldo descuadrado.
+    """
+    condiciones = ["u.activo"]
+    parametros: dict = {}
+    if departamento:
+        condiciones.append("u.departamento = %(depto)s")
+        parametros["depto"] = departamento
+    if solo_revisar:
+        condiciones.append(
+            "(u.correo_pendiente or u.jefe_id is null"
+            " or u.dias_vacaciones is distinct from d.dias_ganados + d.dias_en_curso)")
+
+    filas = await obtener_todos(
+        f"""
+        select u.cedula, u.nombre, u.email, u.rol::text as rol, u.cargo, u.departamento,
+               u.bodega, u.centro_costo, u.cliente, u.ciudad, u.region::text as region,
+               u.fecha_ingreso, public.anios_cumplidos(u.fecha_ingreso) as anios_servicio,
+               j.nombre as jefe_nombre, u.telefono, u.correo_pendiente, u.activo,
+               u.dias_vacaciones as saldo_mostrado,
+               d.dias_ganados, d.dias_en_curso, d.dias_caducados,
+               (select count(*) from public.vacation_periods p
+                 where p.user_id = u.id and not p.caducado) as periodos
+        from public.users u
+        left join public.users j on j.id = u.jefe_id
+        cross join lateral public.saldo_desglosado(u.id) d
+        where {' and '.join(condiciones)}
+        order by u.departamento nulls last, u.nombre
+        """,
+        parametros,
+    )
+
+    informe = Informe(
+        titulo="Cotejo de la carga inicial",
+        columnas=COLUMNAS_COTEJO,
+        filas=filas,
+        filtros=[("Alcance", departamento or "Toda la planilla activa"),
+                 ("Filas", "Solo las que requieren revisión" if solo_revisar else "Todas")],
+        generado_por=f"{usuario['nombre']} ({usuario['rol']})",
+        nota=("Compare estas filas con el archivo del que salió la carga. «Saldo en el "
+              "sistema» debe ser la suma de «Días ganados» y «Días del año en curso»; "
+              "si no lo es, avise para recalcularlo."),
+    )
+
+    await registrar(request, "cotejo_exportado", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"],
+                    detalle={"filas": len(filas), "formato": formato,
+                             "solo_revisar": solo_revisar})
+
+    return entregar(informe, formato)
 
 
 @router.get("/admin/bitacora")

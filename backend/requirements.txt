@@ -11,6 +11,12 @@ python-multipart==0.0.20
 qrcode==8.0
 pillow==11.0.0
 
+# Descarga de informes: Excel y PDF. El CSV no necesita nada.
+openpyxl==3.1.5
+reportlab==4.2.5
+
 # desarrollo
 pytest==8.3.4
 pytest-asyncio==0.25.0
+# Lee el PDF generado para comprobar que dice lo que debe decir.
+pypdf==5.1.0

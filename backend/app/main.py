@@ -62,9 +62,12 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
     # Sin esto el navegador oculta la cabecera a JavaScript cuando el frontend
     # y la API están en orígenes distintos, que es justo el caso en desarrollo.
-    # Se expone para poder leer el código de la petición desde las
-    # herramientas del navegador aunque no haya habido error.
-    expose_headers=["X-Peticion-Id"],
+    # `X-Peticion-Id` para poder leer el código de la petición desde las
+    # herramientas del navegador aunque no haya habido error, y
+    # `Content-Disposition` para que las descargas conserven el nombre que
+    # pone el servidor: sin exponerla, el archivo bajaba como «cotejo.xlsx»
+    # en vez de «cotejo-de-la-carga-inicial-2026-09-27.xlsx».
+    expose_headers=["X-Peticion-Id", "Content-Disposition"],
     max_age=600,
 )
 

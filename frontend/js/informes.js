@@ -95,7 +95,6 @@ function construirParametros() {
 $("filtros").addEventListener("submit", async (e) => {
   e.preventDefault();
   const parametros = construirParametros();
-  $("btn-csv").href = api.informeCsvUrl(parametros.toString());
   try {
     const r = await api.informe(parametros.toString());
     estado.filas = r.filas;
@@ -114,25 +113,44 @@ $("btn-limpiar").addEventListener("click", () => {
   );
 });
 
-/* La descarga necesita el token, así que se pide con fetch y se guarda como blob */
-$("btn-csv").addEventListener("click", async (e) => {
-  e.preventDefault();
+/* La descarga lleva el token, así que se pide con fetch y se guarda como blob:
+   un enlace normal iría sin cabecera de sesión y el servidor lo rechazaría.
+
+   Los tres formatos salen del mismo informe filtrado, para que lo descargado
+   sea exactamente lo que se está viendo. */
+const NOMBRE_FORMATO = { pdf: "PDF", xlsx: "Excel", csv: "CSV" };
+
+async function descargar(formato) {
+  const boton = document.querySelector(`[data-descargar="${formato}"]`);
+  const antes = boton.textContent;
+  boton.disabled = true;
+  boton.textContent = "…";
   try {
-    const respuesta = await fetch(api.informeCsvUrl(construirParametros().toString()), {
-      headers: { Authorization: `Bearer ${sesion.token}` },
-    });
+    const respuesta = await fetch(
+      `${api.base}/informes/solicitudes.${formato}?${construirParametros()}`,
+      { headers: { Authorization: `Bearer ${sesion.token}` } });
     if (!respuesta.ok) throw new Error("No se pudo generar el archivo.");
+
+    // El nombre lo pone el servidor, que sabe la fecha y el tipo de informe.
+    const cabecera = respuesta.headers.get("content-disposition") || "";
+    const nombre = /filename="([^"]+)"/.exec(cabecera)?.[1]
+      || `solicitudes-${new Date().toISOString().slice(0, 10)}.${formato}`;
+
     const url = URL.createObjectURL(await respuesta.blob());
-    const enlace = Object.assign(document.createElement("a"), {
-      href: url, download: `solicitudes-${new Date().toISOString().slice(0, 10)}.csv`,
-    });
+    const enlace = Object.assign(document.createElement("a"), { href: url, download: nombre });
     enlace.click();
     URL.revokeObjectURL(url);
-    avisar("Archivo descargado.");
+    avisar(`${NOMBRE_FORMATO[formato]} descargado: ${nombre}`);
   } catch (err) {
     avisar(err.message, true);
+  } finally {
+    boton.disabled = false;
+    boton.textContent = antes;
   }
-});
+}
+
+document.querySelectorAll("[data-descargar]").forEach((boton) =>
+  boton.addEventListener("click", () => descargar(boton.dataset.descargar)));
 
 /* ---------------------------------------------------------------- resumen */
 function pintarResumen(r) {

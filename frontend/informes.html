@@ -93,10 +93,15 @@
                 class="rounded-xl bg-slate-900 px-6 py-2.5 font-medium text-white hover:bg-slate-800">
           Filtrar
         </button>
-        <a id="btn-csv" href="#" download
-           class="rounded-xl bg-white px-5 py-2.5 font-medium ring-1 ring-slate-300 hover:bg-slate-50">
-          ↓ Descargar CSV
-        </a>
+        <div class="flex items-center gap-1.5 rounded-xl bg-white p-1 ring-1 ring-slate-300">
+          <span class="pl-2.5 pr-1 text-sm text-slate-500">Descargar</span>
+          <button type="button" data-descargar="pdf"
+                  class="rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-100">PDF</button>
+          <button type="button" data-descargar="xlsx"
+                  class="rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-100">Excel</button>
+          <button type="button" data-descargar="csv"
+                  class="rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-100">CSV</button>
+        </div>
         <p class="ml-auto text-xs text-slate-500">
           Mantenga Ctrl (o Cmd) para elegir varios
         </p>

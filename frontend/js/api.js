@@ -97,6 +97,9 @@ async function peticion(ruta, opciones = {}) {
 }
 
 export const api = {
+  // La dirección base, para las descargas: van con `fetch` y su cabecera de
+  // sesión, no con un enlace normal, que iría sin token.
+  base: API,
   solicitarToken: (cedula) =>
     peticion("/auth/solicitar-token", { method: "POST", body: JSON.stringify({ cedula }) }),
   validarToken: (cedula, codigo) =>
@@ -195,7 +198,6 @@ export const api = {
   // Informes
   dimensiones: () => peticion("/informes/dimensiones"),
   informe: (parametros) => peticion(`/informes/solicitudes?${parametros}`),
-  informeCsvUrl: (parametros) => `${API}/informes/solicitudes.csv?${parametros}`,
   resumenDepartamentos: (anio) =>
     peticion("/informes/resumen-departamentos" + (anio ? `?anio=${anio}` : "")),
 
