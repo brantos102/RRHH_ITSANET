@@ -163,9 +163,29 @@ async def revisar_base() -> int:
         ("0006 anulación y administración", "public.v_informe_solicitudes"),
         ("0007 pilares de permiso", "public.v_catalogo_permisos"),
         ("0008 lineamientos y antigüedad", "public.v_antiguedad_referencia"),
+        ("0009 campos de la planilla", "public.v_sin_correo"),
+        ("0010 devengo mensual", None),          # es una función, no una tabla
+        ("0011 carga masiva", None),
+        ("0012 regiones de atención", "public.regiones"),
+        ("0013 ficha y alta guiada", "public.campos_ficha"),
+        ("0014 chat con Talento Humano", "public.conversaciones"),
     ]
+
+    # Las migraciones que solo cambian funciones se comprueban por la función.
+    funciones = {
+        "0010 devengo mensual": "dias_devengados_en_curso",
+        "0011 carga masiva": "caducar_periodos_de",
+    }
     for nombre, objeto in migraciones:
-        fila = await obtener_uno("select to_regclass(%s) is not null as existe", (objeto,))
+        if objeto is None:
+            fila = await obtener_uno(
+                """select exists (select 1 from pg_proc p
+                                    join pg_namespace n on n.oid = p.pronamespace
+                                   where n.nspname = 'public' and p.proname = %s) as existe""",
+                (funciones[nombre],),
+            )
+        else:
+            fila = await obtener_uno("select to_regclass(%s) is not null as existe", (objeto,))
         if fila["existe"]:
             print(f"  {OK} Migración {nombre}")
         else:

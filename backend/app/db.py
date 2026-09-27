@@ -37,7 +37,22 @@ async def abrir_pool() -> AsyncConnectionPool:
             min_size=1,
             max_size=10,
             open=False,
-            kwargs={"row_factory": dict_row, "application_name": "rrhh-api"},
+            kwargs={
+                "row_factory": dict_row,
+                "application_name": "rrhh-api",
+                # Sin sentencias preparadas.
+                #
+                # psycopg prepara una consulta tras repetirla cinco veces, y
+                # a partir de ahí la invoca por nombre. Eso da por supuesto
+                # que la sesión de PostgreSQL es siempre la misma, y con el
+                # pooler de Supabase en modo transacción —el puerto 6543, el
+                # recomendado— no lo es: cada consulta puede salir por una
+                # conexión distinta, donde ese nombre ya está tomado por otra
+                # o no existe. El síntoma es «prepared statement "_pg3_0"
+                # already exists», y aparece de golpe cuando algún bucle
+                # cruza la quinta repetición.
+                "prepare_threshold": None,
+            },
         )
         await _pool.open(wait=True, timeout=10)
     return _pool
