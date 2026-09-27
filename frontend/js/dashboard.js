@@ -88,7 +88,6 @@ async function cargar() {
 
   pintarResumen(perfil, saldo);
   pintarAlertas(notificaciones);
-  pintarNotificaciones(notificaciones);
   pintarLogros(perfil.logros);
   pintarSolicitudes();
   pintarFirma(firma);
@@ -117,19 +116,79 @@ function mostrarPestana(cual) {
   location.hash = cual === "panel" ? "" : `#${cual}`;
 }
 
+/* El empleado no lee decimales. «8.75 días» no significa nada cuando uno
+   planifica una semana; y redondear hacia arriba prometería un día que no
+   existe, así que se trunca: lo que se muestra siempre se puede pedir.
+   Talento Humano sí ve la cifra exacta, en sus propias pantallas. */
+function diasEnteros(valor) {
+  return Math.floor(Number(valor || 0));
+}
+
+function plural(n, singular, plural_) {
+  return `${n} ${n === 1 ? singular : plural_}`;
+}
+
 function pintarResumen(perfil, saldo) {
-  $("saldo-dias").textContent = Number(perfil.dias_vacaciones).toFixed(1).replace(/\.0$/, "");
+  // El número grande es lo EXIGIBLE HOY: los años de servicio ya cumplidos
+  // (Art. 69 CT), que además se pueden acumular hasta tres años (Art. 75 CT).
+  //
+  // Antes se mostraba `perfil.dias_vacaciones`, que suma también lo que se
+  // lleva acumulado del año en marcha. De ahí salía un titular de «45 días»
+  // encima de un detalle que decía «año 6 (8.75)»: dos cosas distintas
+  // presentadas como si fueran la misma, y ninguna de las dos se entendía.
+  const ganados = saldo?.dias_ganados ?? perfil.dias_vacaciones;
+  const enCurso = Number(saldo?.dias_en_curso || 0);
+
+  $("saldo-dias").textContent = diasEnteros(ganados);
+  $("saldo-unidad").textContent = diasEnteros(ganados) === 1 ? "día" : "días";
   $("antiguedad").textContent =
     perfil.anios_servicio === 1 ? "1 año" : `${perfil.anios_servicio} años`;
   $("fecha-ingreso").textContent = `Ingresó el ${fecha(perfil.fecha_ingreso)}`;
-  $("fds-pendientes").textContent = saldo ? saldo.fines_semana_pendientes : "—";
 
-  // De qué períodos vienen esos días: es lo que RRHH audita
-  const vigentes = (saldo?.periodos || []).filter((p) => !p.caducado && Number(p.saldo) > 0);
-  $("periodos-resumen").textContent = vigentes.length
-    ? `De ${vigentes.length} período(s): ` +
-      vigentes.map((p) => `año ${p.periodo} (${Number(p.saldo)})`).join(", ")
-    : "Sin días acumulados disponibles";
+  const fds = saldo ? saldo.fines_semana_pendientes : null;
+  $("fds-pendientes").textContent = fds === null ? "—" : fds;
+  if (fds !== null) {
+    $("fds-detalle").textContent = fds === 0
+      ? "ya cumplió los de su período"
+      : `obligatorios por consumir: ${plural(fds * 2, "día", "días")} dentro de su descanso`;
+  }
+
+  const periodos = saldo?.periodos || [];
+  const ganadosVivos = periodos.filter((p) => !p.caducado && p.devengado && Number(p.saldo) > 0);
+  $("periodos-resumen").textContent = ganadosVivos.length
+    ? `De ${plural(ganadosVivos.length, "año cumplido", "años cumplidos")}: ` +
+      ganadosVivos.map((p) => `año ${p.periodo} (${diasEnteros(p.saldo)})`).join(", ")
+    : "Aún no tiene días de años cumplidos";
+
+  // Lo del año en marcha, aparte y dicho como lo que es.
+  const curso = $("saldo-en-curso");
+  curso.classList.toggle("hidden", diasEnteros(enCurso) < 1);
+  if (diasEnteros(enCurso) >= 1) {
+    curso.textContent =
+      `Además lleva ${plural(diasEnteros(enCurso), "día acumulado", "días acumulados")} ` +
+      `del año en curso. Para tomarlos antes de cumplir el año, los autoriza Talento Humano.`;
+  }
+
+  // Lo que se pierde si no se toma: es la única cifra que exige actuar.
+  const porVencer = $("saldo-por-vencer");
+  const vence = saldo?.proximo_vence_en;
+  const enRiesgo = diasEnteros(saldo?.proximo_dias);
+  porVencer.classList.toggle("hidden", !vence || enRiesgo < 1);
+  if (vence && enRiesgo >= 1) {
+    porVencer.textContent =
+      `${plural(enRiesgo, "día vence", "días vencen")} el ${fecha(vence)} (Art. 75).`;
+  }
+
+  // Si el saldo guardado no cuadra con los períodos, el titular estaría
+  // mintiendo. Mejor decirlo que mostrar un número en el que no se puede
+  // confiar.
+  const aviso = $("saldo-aviso");
+  aviso.classList.toggle("hidden", !saldo?.saldo_desalineado);
+  if (saldo?.saldo_desalineado) {
+    aviso.textContent =
+      "Sus días registrados no cuadran con sus períodos. Talento Humano debe revisarlo " +
+      "antes de que usted solicite vacaciones.";
+  }
 }
 
 /* ------------------------------------------------------------------ alertas */
@@ -158,42 +217,6 @@ function pintarAlertas(notificaciones) {
     .join("");
 }
 
-function pintarNotificaciones(notificaciones) {
-  const sinLeer = notificaciones.filter((n) => !n.leida_en).length;
-  $("punto-campana").classList.toggle("hidden", sinLeer === 0);
-
-  $("contenido-notificaciones").innerHTML = notificaciones.length
-    ? notificaciones
-        .map(
-          (n) => `
-        <article class="px-5 py-4 ${n.leida_en ? "opacity-60" : ""}">
-          <div class="flex items-start gap-3">
-            <span class="mt-1.5 h-2 w-2 shrink-0 rounded-full ${
-              n.severidad === "critica" ? "bg-rose-500" : n.severidad === "advertencia" ? "bg-amber-500" : "bg-sky-500"
-            }"></span>
-            <div class="min-w-0">
-              <p class="font-medium">${esc(n.titulo)}</p>
-              <p class="mt-1 text-sm leading-relaxed text-slate-600">${esc(n.mensaje)}</p>
-              ${
-                n.articulo_texto
-                  ? `<details class="mt-2">
-                       <summary class="cursor-pointer text-xs font-medium text-slate-500">
-                         ${esc(n.norma)} · ${esc(n.articulo)}
-                       </summary>
-                       <p class="mt-1.5 rounded-lg bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
-                         ${esc(n.articulo_texto)}
-                       </p>
-                     </details>`
-                  : ""
-              }
-              <p class="mt-1.5 text-xs text-slate-400">${fechaHora(n.created_at)}</p>
-            </div>
-          </div>
-        </article>`
-        )
-        .join("")
-    : `<p class="px-5 py-8 text-center text-sm text-slate-500">No tiene notificaciones.</p>`;
-}
 
 function pintarLogros(logros) {
   if (!logros?.length) return;
@@ -706,7 +729,6 @@ $("btn-detalle-saldo").addEventListener("click", () => {
   abrir("modal-saldo");
 });
 
-$("btn-campana").addEventListener("click", () => abrir("modal-notificaciones"));
 
 /* ------------------------------------------------------------------- firma */
 let panel = null;
@@ -1093,25 +1115,61 @@ async function previsualizar() {
       d.dias_no_laborables ? `${d.dias_no_laborables} no laborable(s)` : null,
     ].filter(Boolean);
 
-    caja.className = `rounded-xl p-3 text-sm ${tono}`;
+    // Por debajo del bloque mínimo esto NO son vacaciones ordinarias, y
+    // mostrar «2 días a descontar · saldo después: 6.75» hace creer que basta
+    // con enviar el formulario. Es una excepción a la política: la resuelve
+    // Talento Humano, puede negarla, y hasta entonces no se descuenta nada.
+    const minimo = Number(estado.reglas?.minimo || 0);
+    const diasEnRango = Number(d.total_calendario ?? p.dias);
+    const esExcepcion =
+      $("form-solicitud").dataset.tipo === "vacacion" && minimo > 0 && diasEnRango < minimo;
+
+    caja.className = `rounded-xl p-3 text-sm ${esExcepcion
+      ? "bg-amber-50 text-amber-900 ring-1 ring-amber-200" : tono}`;
     caja.innerHTML =
-      `<p><strong>${Number(p.dias)} día(s) a descontar</strong>` +
-      ` · saldo después: <strong>${Number(p.saldo_despues)}</strong></p>` +
+      (esExcepcion
+        ? `<p><strong>${plural(diasEnRango, "día", "días")}: por debajo del bloque de ${minimo}</strong></p>
+           <p class="mt-1">Esto no se tramita como vacaciones ordinarias. Es una
+           <strong>excepción</strong> que autoriza Talento Humano, y solo si la aprueba se
+           descuentan los días y queda registrada como <strong>vacaciones emergentes</strong>.</p>`
+        : `<p><strong>${plural(diasEnteros(p.dias), "día a descontar", "días a descontar")}</strong>` +
+          ` · le quedarían <strong>${diasEnteros(p.saldo_despues)}</strong></p>`) +
       `<p class="mt-1 text-xs opacity-75">${esc(lineas.join(" · "))}</p>` +
       ((d.feriados || []).length
         ? `<p class="mt-1.5 text-xs">Feriados en el rango: ${
             d.feriados.map((f) => `${esc(f.nombre)} (${fecha(f.fecha, false)})`).join(", ")}</p>`
         : "") +
-      (p.avisos?.length
-        ? `<ul class="mt-2 list-disc space-y-1 pl-4">${p.avisos.map((a) => `<li>${esc(a)}</li>`).join("")}</ul>`
-        : "") +
+      // En una excepción se callan los avisos del descanso anual completo: la
+      // previsualización no sabe que esto va por otra vía, y le respondía
+      // «use del 7 al 10» —cuatro días— a quien pide dos porque no puede más.
+      (() => {
+        const avisos = (p.avisos || []).filter(
+          (a) => !esExcepcion || !/fin\(es\) de semana obligatorio|bloques? de/i.test(a));
+        return avisos.length
+          ? `<ul class="mt-2 list-disc space-y-1 pl-4">${avisos.map((a) => `<li>${esc(a)}</li>`).join("")}</ul>`
+          : "";
+      })() +
       (!p.valido && p.rango_sugerido?.fin !== fin
         ? `<button type="button" id="btn-corregir"
                    class="mt-2 rounded-lg bg-amber-900 px-3 py-1.5 text-xs font-medium text-white">
              Usar ${fecha(p.rango_sugerido.inicio, false)} – ${fecha(p.rango_sugerido.fin)}
            </button>`
+        : "") +
+      (esExcepcion
+        ? `<button type="button" id="btn-pedir-excepcion"
+                   class="mt-2.5 rounded-lg bg-amber-900 px-3 py-1.5 text-xs font-medium text-white">
+             Solicitar a Talento Humano
+           </button>`
         : "");
     caja.classList.remove("hidden");
+
+    // Se ofrece de entrada y no después de un envío rechazado: el colaborador
+    // no tiene por qué chocar con un error para enterarse de que su caso tiene
+    // otro camino.
+    $("btn-pedir-excepcion")?.addEventListener("click", () => {
+      estado.bloqueMinimo = minimo;
+      abrirExcepcion(diasEnRango, minimo);
+    });
 
     $("btn-corregir")?.addEventListener("click", () => {
       $("fecha-inicio").value = p.rango_sugerido.inicio;
@@ -1134,6 +1192,122 @@ $("adjuntos").addEventListener("change", (e) => {
       </li>`
     )
     .join("");
+});
+
+/* ------------------------------------------- vacaciones emergentes (excepción)
+   Pedir menos días de los que fija la política no es un trámite ordinario: lo
+   resuelve Talento Humano. Este modal arma la solicitud formal con el respaldo
+   y la manda al equipo de la región, con copia al correo del propio
+   solicitante para que le quede constancia. */
+const excepcion = { adjuntos: [], dias: 0 };
+
+async function abrirExcepcion(dias, minimo) {
+  excepcion.dias = dias;
+  excepcion.adjuntos = [];
+  $("excepcion-lista-adjuntos").innerHTML = "";
+  $("excepcion-adjuntos").value = "";
+  $("excepcion-motivo").value = "";
+  $("excepcion-contador").textContent = "0";
+  $("excepcion-error").classList.add("hidden");
+
+  $("excepcion-encabezado").textContent =
+    `Pide ${plural(dias, "día", "días")} y la política fija bloques de ${minimo}.`;
+  $("excepcion-desde").textContent = fecha($("fecha-inicio").value);
+  $("excepcion-hasta").textContent = fecha($("fecha-fin").value);
+  $("excepcion-dias").textContent = plural(dias, "día", "días");
+  $("excepcion-mi-correo").textContent = sesion.perfil?.email || "su correo";
+
+  abrir("modal-excepcion");
+
+  // Quién lo va a resolver, con nombre: una solicitud que se manda «a un
+  // departamento» se siente perdida; saber a qué personas llega, no.
+  try {
+    const { equipo, region, sede } = await api.chatContactos();
+    $("excepcion-area").textContent = `Talento Humano ${sede || ""}`.trim();
+    $("excepcion-destinatarios").textContent = equipo?.length
+      ? `${region}: ${equipo.map((p) => p.nombre).join(", ")}.`
+      : "No hay personal de Talento Humano registrado en su región. " +
+        "Avise a administración: su solicitud quedará registrada pero nadie recibirá el aviso.";
+  } catch {
+    $("excepcion-destinatarios").textContent =
+      "No se pudo consultar el equipo de su región; la solicitud se registra igual.";
+  }
+}
+
+$("excepcion-motivo").addEventListener("input", (e) => {
+  $("excepcion-contador").textContent = e.target.value.length;
+});
+
+$("excepcion-adjuntos").addEventListener("change", (e) => {
+  excepcion.adjuntos = [...e.target.files];
+  $("excepcion-lista-adjuntos").innerHTML = excepcion.adjuntos
+    .map((a) => `<li class="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+        <span>📎</span><span class="truncate">${esc(a.name)}</span>
+        <span class="ml-auto shrink-0 text-xs text-slate-500">${Math.round(a.size / 1024)} KB</span>
+      </li>`)
+    .join("");
+});
+
+$("form-excepcion").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const boton = $("btn-enviar-excepcion");
+  const error = $("excepcion-error");
+  error.classList.add("hidden");
+
+  const motivo = $("excepcion-motivo").value.trim();
+  if (motivo.length < 30) {
+    error.textContent =
+      "Explique el motivo en al menos 30 caracteres: quien autoriza la excepción " +
+      "necesita entender por qué su caso se aparta de la política.";
+    error.classList.remove("hidden");
+    return;
+  }
+  // El respaldo lo exige la base, y sin este aviso el rechazo llegaba después
+  // de subir el formulario entero, sin decir a tiempo que faltaba un archivo.
+  if (!excepcion.adjuntos.length) {
+    error.textContent =
+      "Adjunte el documento que respalda el caso: el certificado, la cita o la citación. " +
+      "Sin respaldo la solicitud no se puede registrar.";
+    error.classList.remove("hidden");
+    return;
+  }
+
+  boton.disabled = true;
+  boton.textContent = "Enviando…";
+  const solicitudId = crypto.randomUUID();
+  try {
+    const adjuntosSubidos = [];
+    for (const archivo of excepcion.adjuntos) {
+      adjuntosSubidos.push(await api.subirAdjunto(solicitudId, archivo));
+    }
+
+    // Va por la misma vía que cualquier solicitud: así hereda el folio, la
+    // bitácora, el control de solapes y el descuento de días si se aprueba.
+    // Lo único distinto es la marca de excepción, que es la que hace que la
+    // base la mande a Talento Humano antes que al jefe.
+    const respuesta = await api.crearSolicitud({
+      id: solicitudId,
+      tipo: "vacacion",
+      fecha_inicio: $("fecha-inicio").value,
+      fecha_fin: $("fecha-fin").value,
+      descripcion: motivo.slice(0, 200),
+      justificacion: motivo,
+      bloque_menor_justificado: true,
+      adjuntos: adjuntosSubidos,
+      firmar: false,
+    });
+
+    $("modal-excepcion").close();
+    $("modal-solicitud").close();
+    avisar(respuesta.mensaje);
+    await cargar();
+  } catch (err) {
+    error.innerHTML = esc(err.message);
+    error.classList.remove("hidden");
+  } finally {
+    boton.disabled = false;
+    boton.textContent = "Enviar a Talento Humano";
+  }
 });
 
 /* ---- Envío ---- */

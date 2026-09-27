@@ -131,6 +131,76 @@ async def avisar_a_rrhh(destinatarios: list[dict], solicitud: dict, jefe: str) -
             log.exception("No se pudo avisar a %s", persona["email"])
 
 
+async def avisar_excepcion_a_rrhh(
+    destinatarios: list[dict], solicitud: dict, empleado_email: str | None
+) -> None:
+    """Vacaciones fuera de la política: lo decide Talento Humano, no el jefe.
+
+    Un bloque por debajo del mínimo, o días que todavía no se han ganado, se
+    apartan de lo pactado, y eso no lo autoriza la jefatura inmediata. Antes
+    la solicitud quedaba correctamente en `pendiente_rrhh` pero el correo se
+    enviaba al jefe —que no podía hacer nada con ella— y a Talento Humano no
+    le llegaba ninguno: la solicitud se quedaba esperando a que alguien
+    entrara a mirar la bandeja.
+
+    El empleado va en copia y como dirección de respuesta: así tiene la
+    constancia formal en su propio buzón y Talento Humano puede contestarle
+    directamente, que es como se resuelven estos casos.
+    """
+    url = _enlace(str(solicitud["rrhh_token"]), "rrhh")
+    emergente = bool(solicitud.get("bloque_menor_justificado"))
+    titulo = (
+        f"Vacaciones emergentes por autorizar: {solicitud['empleado']}"
+        if emergente else
+        f"Adelanto de vacaciones por autorizar: {solicitud['empleado']}"
+    )
+
+    motivo = (
+        "Pide menos días seguidos de los que fija la política, así que no son "
+        "vacaciones ordinarias: requieren la autorización de Talento Humano."
+        if emergente else
+        "Solicita días que todavía no ha ganado. El adelanto lo autoriza "
+        "Talento Humano antes que la jefatura."
+    )
+    filas = _detalle(solicitud)
+    if solicitud.get("jefe_nombre"):
+        filas.append(("Jefe inmediato", solicitud["jefe_nombre"]))
+    if empleado_email:
+        filas.append(("Responder a", empleado_email))
+
+    cuerpo = (
+        f'<p style="margin:0 0 16px;font-size:14px;color:#475569">{motivo}</p>'
+        + _tabla(filas)
+        + '<p style="margin:16px 0 0;font-size:13px;color:#64748b">'
+        "Si la autoriza, pasa al jefe inmediato para que confirme la cobertura "
+        "del puesto y queda registrada como vacaciones emergentes, con su "
+        "descuento de días.</p>"
+    )
+    texto = (
+        f"{titulo}\n\n{motivo}\n\n"
+        + "\n".join(f"{e}: {v}" for e, v in filas)
+        + f"\n\nDecida aquí:\n{url}\n"
+    )
+    html = _marco(titulo, cuerpo, ("Revisar solicitud", url))
+
+    copia = [empleado_email] if empleado_email else None
+    for persona in destinatarios:
+        try:
+            await correo.enviar(persona["email"], titulo, texto, html,
+                                responder_a=empleado_email, copia=copia)
+            # La copia al empleado va una sola vez, con el primer destinatario:
+            # recibir el mismo aviso tantas veces como gente haya en Talento
+            # Humano no es constancia, es ruido.
+            copia = None
+        except Exception:  # noqa: BLE001
+            log.exception("No se pudo avisar a %s", persona["email"])
+
+    if not destinatarios:
+        log.warning(
+            "La solicitud %s necesita a Talento Humano y no hay nadie registrado "
+            "en su región: nadie recibió el aviso", solicitud.get("folio"))
+
+
 async def avisar_aprobacion(empleado: dict, solicitud: dict) -> None:
     """Al empleado, con su código QR incrustado y adjunto."""
     imagen = qr.png(str(solicitud["qr_hash"]))

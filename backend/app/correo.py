@@ -48,6 +48,8 @@ async def enviar(
     *,
     imagenes: dict[str, bytes] | None = None,
     adjuntos: list[tuple[str, bytes, str]] | None = None,
+    responder_a: str | None = None,
+    copia: list[str] | None = None,
 ) -> None:
     """Envía un correo.
 
@@ -55,17 +57,30 @@ async def enviar(
     referencia en el HTML como <img src="cid:qr">. Los clientes de correo
     bloquean las data URI, pero muestran las imágenes incrustadas así.
     `adjuntos` es una lista de (nombre, contenido, mime).
+
+    `responder_a` pone la dirección del empleado en Reply-To: cuando Talento
+    Humano contesta un aviso del sistema, la respuesta debe llegarle a la
+    persona y no a un buzón que nadie lee. `copia` deja constancia en el
+    correo de quien pidió algo, que es lo que le permite darle seguimiento
+    desde su propia bandeja.
     """
     settings = get_settings()
 
     if settings.email_backend == "console":
-        log.info("=== CORREO (modo consola) ===\nPara: %s\nAsunto: %s\n%s",
-                 destinatario, asunto, texto)
+        log.info("=== CORREO (modo consola) ===\nPara: %s%s%s\nAsunto: %s\n%s",
+                 destinatario,
+                 f"\nCopia: {', '.join(copia)}" if copia else "",
+                 f"\nResponder a: {responder_a}" if responder_a else "",
+                 asunto, texto)
         return
 
     mensaje = EmailMessage()
     mensaje["From"] = settings.smtp_remitente
     mensaje["To"] = destinatario
+    if copia:
+        mensaje["Cc"] = ", ".join(copia)
+    if responder_a:
+        mensaje["Reply-To"] = responder_a
     mensaje["Subject"] = asunto
     mensaje.set_content(texto)
     if html:
@@ -82,6 +97,10 @@ async def enviar(
 
     await aiosmtplib.send(
         mensaje,
+        # `recipients` explícito: aiosmtplib toma los destinatarios de las
+        # cabeceras, pero conviene no depender de que interprete Cc igual que
+        # To. Sin esto, una copia podía quedarse sin entregar en silencio.
+        recipients=[destinatario, *(copia or [])],
         hostname=settings.smtp_host,
         port=settings.smtp_port,
         username=settings.smtp_user or None,

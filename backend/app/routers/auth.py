@@ -313,6 +313,25 @@ async def mis_notificaciones(usuario: Annotated[dict, Depends(usuario_actual)]) 
     )
 
 
+@router.post("/mis-notificaciones/leidas")
+async def marcar_notificaciones_leidas(
+    usuario: Annotated[dict, Depends(usuario_actual)],
+) -> dict:
+    """Marca como leídas las notificaciones propias.
+
+    Solo las propias: el filtro por `user_id` no es una comodidad sino el
+    control de acceso, porque el backend entra con credenciales de servicio y
+    no pasa por las políticas de la base.
+    """
+    filas = await obtener_todos(
+        """update public.notifications set leida_en = now()
+            where user_id = %s and leida_en is null
+        returning id""",
+        (usuario["id"],),
+    )
+    return {"marcadas": len(filas)}
+
+
 # `response_model=None` explícito: con `from __future__ import annotations`
 # el `-> None` llega como la cadena "None", y al resolverla FastAPI obtiene
 # NoneType —que es un tipo, no un None— y concluye que la respuesta lleva

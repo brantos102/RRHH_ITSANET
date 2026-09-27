@@ -170,6 +170,8 @@ async def revisar_base() -> int:
         ("0013 ficha y alta guiada", "public.campos_ficha"),
         ("0014 chat con Talento Humano", "public.conversaciones"),
         ("0015 sin ausencias solapadas", None),
+        ("0016 saldo comprensible", None),
+        ("0017 excepción sin regla de fin de semana", None),
     ]
 
     # Las migraciones que solo cambian funciones se comprueban por la función.
@@ -177,9 +179,27 @@ async def revisar_base() -> int:
         "0010 devengo mensual": "dias_devengados_en_curso",
         "0011 carga masiva": "caducar_periodos_de",
         "0015 sin ausencias solapadas": "ausencia_solapada",
+        "0016 saldo comprensible": "saldo_desglosado",
+    }
+
+    # Hay migraciones que no crean nada: solo cambian el cuerpo de una función
+    # que ya existía. Comprobar que la función existe no diría nada, así que se
+    # busca la marca del cambio dentro de su código.
+    dentro_de = {
+        "0017 excepción sin regla de fin de semana":
+            ("tg_requests_before_insert", "bloque_menor_justificado"),
     }
     for nombre, objeto in migraciones:
-        if objeto is None:
+        if nombre in dentro_de:
+            funcion, marca = dentro_de[nombre]
+            fila = await obtener_uno(
+                """select coalesce(position(%s in prosrc) > 0, false) as existe
+                     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                    where n.nspname = 'public' and p.proname = %s""",
+                (marca, funcion),
+            )
+            fila = fila or {"existe": False}
+        elif objeto is None:
             fila = await obtener_uno(
                 """select exists (select 1 from pg_proc p
                                     join pg_namespace n on n.oid = p.pronamespace

@@ -104,6 +104,8 @@ export const api = {
   perfil: () => peticion("/auth/me"),
   saldo: () => peticion("/auth/mi-saldo"),
   notificaciones: () => peticion("/auth/mis-notificaciones"),
+  marcarNotificacionesLeidas: () =>
+    peticion("/auth/mis-notificaciones/leidas", { method: "POST" }),
   cerrarSesion: () => peticion("/auth/cerrar-sesion", { method: "POST" }),
   necesitaFicha: (cedula) =>
     peticion("/auth/necesita-ficha", { method: "POST", body: JSON.stringify({ cedula }) }),

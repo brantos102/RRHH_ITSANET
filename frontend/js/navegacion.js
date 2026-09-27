@@ -193,12 +193,133 @@ export function montarNavegacion(contenedor, { activo = "panel", contadores = {}
   window.addEventListener("scroll", cerrar, { passive: true, capture: true });
   paneles.forEach((p) => p.addEventListener("click", (e) => e.stopPropagation()));
 
+  montarNotificaciones(contenedor);
+
   contenedor.querySelector("#nav-salir").addEventListener("click", async () => {
     const { api } = await import("./api.js");
     try { await api.cerrarSesion(); } catch { /* el token se descarta igual */ }
     sesion.borrar();
     location.href = "index.html";
   });
+}
+
+/* --------------------------------------------------------- notificaciones
+   Había dos campanas: esta, presente en todas las pantallas pero sin
+   manejador, y otra en la cabecera del panel que sí funcionaba pero solo
+   existía ahí. El resultado era que en el calendario, los informes o
+   administración no había forma de ver un aviso, y en el panel había dos
+   campanas de las que una no respondía.
+
+   Queda una sola, la de la barra, que acompaña a todas las pantallas. */
+const TONO_PUNTO = {
+  critica: "bg-rose-500", advertencia: "bg-amber-500", info: "bg-sky-500",
+};
+
+function fechaHora(valor) {
+  if (!valor) return "";
+  return new Date(valor).toLocaleString("es-EC", {
+    day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+  });
+}
+
+function montarNotificaciones(contenedor) {
+  const boton = contenedor.querySelector("#nav-campana");
+  const punto = contenedor.querySelector("#nav-punto");
+  if (!boton) return;
+
+  // El diálogo se inyecta aquí y no en cada HTML: una sola copia, y las
+  // pantallas que no lo tenían pasan a tenerlo sin tocarlas.
+  const dialogo = document.createElement("dialog");
+  dialogo.id = "modal-notificaciones";
+  dialogo.className = "w-[min(100vw-1.5rem,34rem)] rounded-2xl p-0 text-slate-900";
+  dialogo.innerHTML = `
+    <div class="max-h-[85dvh] overflow-y-auto">
+      <header class="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
+        <h2 class="font-semibold">Notificaciones</h2>
+        <div class="flex items-center gap-2">
+          <button type="button" id="nav-marcar-leidas"
+                  class="hidden rounded-lg px-2.5 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100">
+            Marcar todas como leídas
+          </button>
+          <button type="button" id="nav-cerrar-notif"
+                  class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100" aria-label="Cerrar">✕</button>
+        </div>
+      </header>
+      <div id="nav-buscar-notif-caja" class="border-b border-slate-100 px-5 py-2.5">
+        <input type="search" id="nav-buscar-notif" placeholder="Buscar en sus notificaciones"
+               class="w-full rounded-lg border-slate-300 text-sm focus:border-slate-900 focus:ring-slate-900">
+      </div>
+      <div id="nav-lista-notif" class="divide-y divide-slate-100"></div>
+    </div>`;
+  document.body.appendChild(dialogo);
+
+  let notificaciones = [];
+
+  const pintar = (filtro = "") => {
+    const aguja = filtro.trim().toLowerCase();
+    const visibles = aguja
+      ? notificaciones.filter((n) =>
+          `${n.titulo} ${n.mensaje} ${n.norma || ""} ${n.articulo || ""}`
+            .toLowerCase().includes(aguja))
+      : notificaciones;
+
+    dialogo.querySelector("#nav-lista-notif").innerHTML = visibles.length
+      ? visibles.map((n) => `
+        <article class="px-5 py-4 ${n.leida_en ? "opacity-60" : ""}">
+          <div class="flex items-start gap-3">
+            <span class="mt-1.5 h-2 w-2 shrink-0 rounded-full ${
+              TONO_PUNTO[n.severidad] || TONO_PUNTO.info}"></span>
+            <div class="min-w-0">
+              <p class="font-medium">${esc(n.titulo)}</p>
+              <p class="mt-1 text-sm leading-relaxed text-slate-600">${esc(n.mensaje)}</p>
+              ${n.articulo_texto ? `<details class="mt-2">
+                   <summary class="cursor-pointer text-xs font-medium text-slate-500">
+                     ${esc(n.norma)} · ${esc(n.articulo)}</summary>
+                   <p class="mt-1.5 rounded-lg bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
+                     ${esc(n.articulo_texto)}</p>
+                 </details>` : ""}
+              <p class="mt-1.5 text-xs text-slate-400">${fechaHora(n.created_at)}</p>
+            </div>
+          </div>
+        </article>`).join("")
+      : `<p class="px-5 py-8 text-center text-sm text-slate-500">${
+           aguja ? "Nada coincide con esa búsqueda." : "No tiene notificaciones."}</p>`;
+  };
+
+  const refrescar = async () => {
+    const { api } = await import("./api.js");
+    try {
+      notificaciones = await api.notificaciones();
+    } catch {
+      return;   // Sin conexión no se molesta al usuario: el punto se queda como esté.
+    }
+    const sinLeer = notificaciones.filter((n) => !n.leida_en).length;
+    punto.classList.toggle("hidden", sinLeer === 0);
+    boton.setAttribute("aria-label",
+      sinLeer ? `Notificaciones: ${sinLeer} sin leer` : "Notificaciones");
+    dialogo.querySelector("#nav-marcar-leidas").classList.toggle("hidden", sinLeer === 0);
+    pintar(dialogo.querySelector("#nav-buscar-notif").value);
+  };
+
+  boton.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    await refrescar();
+    dialogo.showModal();
+  });
+
+  dialogo.querySelector("#nav-cerrar-notif").addEventListener("click", () => dialogo.close());
+  dialogo.querySelector("#nav-buscar-notif").addEventListener("input", (e) => pintar(e.target.value));
+  dialogo.querySelector("#nav-marcar-leidas").addEventListener("click", async () => {
+    const { api } = await import("./api.js");
+    try {
+      await api.marcarNotificacionesLeidas();
+      await refrescar();
+    } catch { /* si falla, quedan sin leer: no se finge lo contrario */ }
+  });
+
+  // Al abrir la pantalla se consulta una vez, para que el punto sea fiable
+  // desde el primer momento y no solo después de pulsar la campana.
+  refrescar();
 }
 
 export const ROL_TEXTO = {

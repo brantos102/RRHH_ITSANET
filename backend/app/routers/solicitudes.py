@@ -421,12 +421,13 @@ async def crear_solicitud(
                     cedula=usuario["cedula"], entidad="requests", entidad_id=str(datos.id),
                     detalle={"tipo": datos.tipo, "dias": float(creada["dias_solicitados"])})
 
-    # El correo al jefe va en segundo plano: el SMTP no debe hacer esperar al empleado
+    # El correo va en segundo plano: el SMTP no debe hacer esperar al empleado
     completa = await obtener_uno(
         """
-        select r.id, r.tipo, r.fecha_inicio, r.fecha_fin, r.hora_inicio, r.hora_fin,
-               r.dias_solicitados, r.descripcion, r.justificacion, r.es_adelanto, r.jefe_token,
-               u.nombre as empleado, pt.nombre as categoria,
+        select r.id, r.tipo, r.folio, r.fecha_inicio, r.fecha_fin, r.hora_inicio, r.hora_fin,
+               r.dias_solicitados, r.descripcion, r.justificacion, r.es_adelanto,
+               r.jefe_token, r.rrhh_token, r.estado, r.bloque_menor_justificado, r.region,
+               u.nombre as empleado, u.email as empleado_email, pt.nombre as categoria,
                j.email as jefe_email, j.nombre as jefe_nombre
         from public.requests r
         join public.users u on u.id = r.user_id
@@ -436,7 +437,24 @@ async def crear_solicitud(
         """,
         (datos.id,),
     )
-    if completa and completa["jefe_email"]:
+
+    # A quién se avisa lo decide el estado en que la base dejó la solicitud, no
+    # el tipo de trámite. Una excepción al bloque mínimo, o un adelanto, nacen
+    # en `pendiente_rrhh`: avisar al jefe ahí le pide decidir algo que todavía
+    # no le toca, y deja a Talento Humano sin enterarse de lo único que sí
+    # tiene que resolver.
+    destino = "su jefe inmediato"
+    if completa and completa["estado"] == "pendiente_rrhh":
+        personal_rrhh = await obtener_todos(
+            "select email, nombre from public.rrhh_de_region(%s)",
+            (completa["region"],),
+        )
+        tareas.add_task(
+            notificaciones.avisar_excepcion_a_rrhh,
+            personal_rrhh, completa, completa["empleado_email"],
+        )
+        destino = "Talento Humano"
+    elif completa and completa["jefe_email"]:
         tareas.add_task(
             notificaciones.avisar_al_jefe,
             {"email": completa["jefe_email"], "nombre": completa["jefe_nombre"]},
@@ -445,6 +463,7 @@ async def crear_solicitud(
     elif completa:
         log.warning("La solicitud %s no tiene jefe asignado: nadie recibió el aviso", datos.id)
 
+    emergente = bool(completa and completa["bloque_menor_justificado"])
     return {
         "id": str(creada["id"]),
         "folio": creada["folio"],
@@ -453,7 +472,12 @@ async def crear_solicitud(
         "horas_solicitadas": float(creada["horas_solicitadas"]) if creada["horas_solicitadas"] else None,
         "fines_semana": creada["fines_semana"],
         "es_adelanto": creada["es_adelanto"],
-        "mensaje": f"Solicitud Nº {creada['folio']} enviada a su jefe inmediato.",
+        "emergente": emergente,
+        "mensaje": (
+            f"Solicitud Nº {creada['folio']} enviada a {destino}."
+            + (" Quedó registrada como vacaciones emergentes; recibirá copia en su correo."
+               if emergente else "")
+        ),
     }
 
 
