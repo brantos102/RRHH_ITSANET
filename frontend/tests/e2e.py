@@ -6,10 +6,9 @@ el mouse, previsualización en vivo y envío de una solicitud.
 
 Requiere, en tres terminales:
     1. PostgreSQL con las migraciones aplicadas
-    2. cd backend && EMAIL_BACKEND=console uvicorn app.main:app --port 8099
+    2. cd backend && EMAIL_BACKEND=console uvicorn app.main:app --port 8000
        (el código OTP se lee del log del servidor, en /tmp/uvicorn.log)
     3. cd frontend && python -m http.server 8100
-       con config.js apuntando a http://localhost:8099
 
     python frontend/tests/e2e.py
 

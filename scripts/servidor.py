@@ -32,7 +32,8 @@ sys.path.insert(0, str(RAIZ / "backend"))
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Arranca el backend del sistema.")
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--host", default="",
+                        help="Dirección concreta. Por omisión atiende 127.0.0.1 y ::1")
     parser.add_argument("--puerto", type=int, default=8000)
     parser.add_argument("--sin-recarga", action="store_true",
                         help="No vigilar cambios en el código (como en producción)")
@@ -48,17 +49,84 @@ def main() -> int:
         print("No existe backend/.env.  Cópielo de backend/.env.example", file=sys.stderr)
         return 1
 
-    print(f"Backend en http://{args.host}:{args.puerto}   (documentación en /docs)")
-    print("Ctrl+C para detener.\n")
-    uvicorn.run(
-        "app.main:app",
-        host=args.host,
-        port=args.puerto,
-        reload=not args.sin_recarga,
-        reload_dirs=[str(RAIZ / "backend")],
-        app_dir=str(RAIZ / "backend"),
-    )
+    recarga = not args.sin_recarga
+    # `app_dir` solo lo entiende uvicorn.run(), no Config: por eso va aparte.
+    # La carpeta ya está en sys.path desde el inicio de este script.
+    carpeta = str(RAIZ / "backend")
+    comunes: dict = {"reload": recarga, "port": args.puerto}
+    if recarga:
+        # Pasar reload_dirs sin recarga hace que uvicorn avise de una
+        # configuración incoherente en cada arranque.
+        comunes["reload_dirs"] = [carpeta]
+
+    if args.host:                      # host explícito: se respeta tal cual
+        print(f"Backend en http://{args.host}:{args.puerto}   (documentación en /docs)")
+        print("Ctrl+C para detener.\n")
+        uvicorn.run("app.main:app", host=args.host, app_dir=carpeta, **comunes)
+        return 0
+
+    # Sin --host: se escucha en las DOS direcciones de bucle local.
+    #
+    # En Windows «localhost» suele resolverse primero a ::1 (IPv6) y
+    # «127.0.0.1» es IPv4. Son la misma máquina pero sockets distintos: un
+    # backend atado solo a 127.0.0.1 rechaza al navegador que entró por
+    # localhost, y la pantalla dice «No se pudo conectar con el servidor»
+    # sin que el servidor registre nada. Atendiendo ambas, da igual cuál
+    # escriba el usuario. Solo bucle local: no se expone en la red.
+    print(f"Backend en http://127.0.0.1:{args.puerto} y http://localhost:{args.puerto}")
+    print("Documentación interactiva en /docs.  Ctrl+C para detener.\n")
+
+    sockets = _sockets_de_bucle_local(args.puerto)
+    if len(sockets) < 2:
+        for s in sockets:
+            s.close()
+        # Si algo impide abrir ambos, se sigue por el camino simple en vez
+        # de no arrancar: es preferible un backend en IPv4 que ninguno.
+        uvicorn.run("app.main:app", host="127.0.0.1", app_dir=carpeta, **comunes)
+        return 0
+
+    try:
+        from uvicorn import Config, Server
+        from uvicorn.supervisors import ChangeReload
+
+        config = Config("app.main:app", **comunes)
+        servidor = Server(config)
+        if recarga:
+            ChangeReload(config, target=servidor.run, sockets=sockets).run()
+        else:
+            servidor.run(sockets=sockets)
+    except ImportError:
+        # uvicorn cambió de estructura interna: mejor arrancar que fallar.
+        for abierto in sockets:
+            abierto.close()
+        uvicorn.run("app.main:app", host="127.0.0.1", app_dir=carpeta, **comunes)
     return 0
+
+
+def _sockets_de_bucle_local(puerto: int) -> list:
+    """Un socket escuchando en 127.0.0.1 y otro en ::1, si el equipo lo admite."""
+    import socket
+
+    abiertos = []
+    for familia, direccion in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")):
+        try:
+            s = socket.socket(familia, socket.SOCK_STREAM)
+            if familia == socket.AF_INET6 and hasattr(socket, "IPV6_V6ONLY"):
+                # Cada socket atiende su propia familia: sin esto, en Linux el
+                # de IPv6 reclamaría también el puerto IPv4 y el otro fallaría.
+                s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            s.bind((direccion, puerto))
+            s.listen(2048)
+            s.set_inheritable(True)
+            abiertos.append(s)
+        except OSError as exc:
+            if familia == socket.AF_INET:
+                print(f"No se pudo escuchar en 127.0.0.1:{puerto} — {exc}", file=sys.stderr)
+                for a in abiertos:
+                    a.close()
+                return []
+            # Un equipo sin IPv6 es perfectamente válido: se sigue con IPv4.
+    return abiertos
 
 
 if __name__ == "__main__":

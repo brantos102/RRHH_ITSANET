@@ -6,8 +6,8 @@ bandeja, el empleado abre su código QR y el enlace del jefe queda inservible.
 
 Requiere, como la otra prueba de extremo a extremo:
     cd backend && EMAIL_BACKEND=console APP_URL=http://localhost:8100 \
-        uvicorn app.main:app --port 8099        # los correos van a /tmp/uvicorn.log
-    cd frontend && python -m http.server 8100   # con config.js apuntando a :8099
+        uvicorn app.main:app --port 8000        # los correos van a /tmp/uvicorn.log
+    cd frontend && python -m http.server 8100   # el frontend deduce la API sola
 
     python frontend/tests/e2e_flujo_aprobacion.py
 

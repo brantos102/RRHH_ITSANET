@@ -1,7 +1,16 @@
-/* Configuración del frontend. Editar antes de desplegar. */
+/* Configuración del frontend.
+
+   API vacío significa «dedúcelo del navegador»: mismo host que esta página,
+   puerto PUERTO_API. Así no hay que editar este archivo para trabajar en
+   local —que es como terminó publicado apuntando a un puerto de pruebas— y
+   desaparece el desajuste entre abrir localhost y abrir 127.0.0.1.
+
+   Al publicar, escriba aquí la URL real del backend:
+       API: "https://api.permisos.itsanet.com.ec",
+*/
 window.RRHH_CONFIG = {
-  // URL del backend FastAPI
-  API: "http://localhost:8099",
+  API: "",
+  PUERTO_API: 8000,
   EMPRESA: "ITSANET",
   SISTEMA: "Permisos y Vacaciones",
   // Sustituya img/logo.svg por el logo real (o apunte aquí a un .png)

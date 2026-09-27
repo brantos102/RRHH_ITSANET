@@ -1,5 +1,12 @@
 /* Cliente de la API y utilidades compartidas. */
-const API = (window.RRHH_CONFIG && window.RRHH_CONFIG.API) || "http://localhost:8000";
+/* Si config.js no fija una URL, se deduce del navegador: el mismo host desde
+   el que se sirve esta página y el puerto del backend. Evita dos problemas
+   que ya costaron tiempo: un puerto de pruebas quedando fijo en el archivo
+   del repositorio, y la diferencia entre abrir localhost y abrir 127.0.0.1,
+   que para el navegador son hosts distintos. */
+const CFG = window.RRHH_CONFIG || {};
+const API = (CFG.API || `${location.protocol}//${location.hostname}:${CFG.PUERTO_API || 8000}`)
+  .replace(/\/+$/, "");
 const CLAVE_SESION = "rrhh_sesion";
 
 /* ------------------------------------------------------------------ sesión */

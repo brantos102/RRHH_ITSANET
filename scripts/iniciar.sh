@@ -24,11 +24,12 @@ if [ ! -f backend/.env ]; then
   exit 1
 fi
 
-# --- el frontend debe apuntar al backend que se va a levantar ---
-if ! grep -q "localhost:$PUERTO_API" frontend/config.js; then
-  echo "Ajustando frontend/config.js para apuntar al puerto $PUERTO_API…"
-  sed -i.bak -E "s|API: \"[^\"]*\"|API: \"http://localhost:$PUERTO_API\"|" frontend/config.js
-  rm -f frontend/config.js.bak
+# El frontend deduce la URL del backend del propio navegador, así que este
+# script ya NO edita frontend/config.js. Lo hacía, y un puerto de pruebas
+# terminó publicado en el repositorio dejando la aplicación sin conectar.
+if [ "$PUERTO_API" != "8000" ]; then
+  echo "Aviso: el backend irá al puerto $PUERTO_API, pero el frontend busca el 8000."
+  echo "       Ponga PUERTO_API en frontend/config.js o use el puerto 8000."
 fi
 
 DETENIDO=0

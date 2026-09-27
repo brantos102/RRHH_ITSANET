@@ -3,8 +3,8 @@ equipo, pestañas por rol, filtro de solicitudes y etiqueta de quién rechazó.
 
 Requiere, como las otras pruebas de extremo a extremo:
     cd backend && EMAIL_BACKEND=console APP_URL=http://localhost:8100 \
-        uvicorn app.main:app --port 8099
-    cd frontend && python -m http.server 8100   # config.js apuntando a :8099
+        uvicorn app.main:app --port 8000
+    cd frontend && python -m http.server 8100   # el frontend deduce la API sola
 
     python frontend/tests/e2e_interfaz.py
 
