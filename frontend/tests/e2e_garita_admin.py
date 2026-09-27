@@ -50,6 +50,15 @@ async def main():
         barra = await emp.inner_text("#barra")
         print("  menús que ve un empleado:", " | ".join(x for x in barra.split("\n") if x.strip())[:70])
 
+        # Saldo suficiente, sin depender de lo que dejaron corridas anteriores.
+        import subprocess as _sp
+        _sp.run(["psql","-p","55432","-U","postgres","-d","rrhh_v4","-tAc",
+                 "select public.cargar_saldo_inicial("
+                 "(select id from public.users where cedula='0926687856'), 25, 2)"],
+                capture_output=True, text=True,
+                env={"PGHOST": "/var/lib/pgtest", "PATH": "/usr/bin:/bin"})
+        await emp.reload(); await emp.wait_for_timeout(2000)
+
         await emp.click("[data-nueva='vacacion']", force=True)
         await emp.wait_for_selector("#modal-solicitud[open]")
         lunes = dt.date.today() + dt.timedelta(weeks=14)
@@ -59,6 +68,10 @@ async def main():
         await emp.wait_for_timeout(1100)
         await emp.fill("#descripcion", "Solicitud para el recorrido completo")
         await emp.click("#btn-enviar-solicitud", force=True)
+        await emp.wait_for_timeout(2500)
+        if await emp.locator("#modal-solicitud[open]").count():
+            raise AssertionError(
+                "la solicitud no se envió: " + (await emp.inner_text("#error-solicitud"))[:200])
         await emp.wait_for_function("!document.getElementById('modal-solicitud').open", timeout=12000)
         await emp.wait_for_timeout(1500)
         folio = re.search(r"Nº (\d+)", await emp.inner_text("#lista-solicitudes")).group(1)

@@ -31,10 +31,21 @@ function abrir(id) { $(id).showModal(); }
 document.addEventListener("click", (e) => {
   if (e.target.closest("[data-cerrar]")) e.target.closest("dialog")?.close();
 });
-// Cerrar al pulsar fuera del cuadro
-document.querySelectorAll("dialog").forEach((d) =>
-  d.addEventListener("click", (e) => { if (e.target === d) d.close(); })
-);
+/* Cerrar al pulsar fuera del cuadro, pero solo si el gesto EMPEZÓ fuera.
+
+   Cerraba con cualquier clic que aterrizara en el diálogo, incluido el que
+   empieza dentro —al arrastrar para seleccionar texto, o al soltar el dedo
+   un poco más allá del borde en un teléfono— y se perdía todo lo escrito en
+   el formulario. Exigir que el gesto nazca y muera en el fondo elimina el
+   cierre accidental sin quitar el atajo a quien sí quiere salir. */
+document.querySelectorAll("dialog").forEach((d) => {
+  let empezoFuera = false;
+  d.addEventListener("pointerdown", (e) => { empezoFuera = e.target === d; });
+  d.addEventListener("click", (e) => {
+    if (e.target === d && empezoFuera) d.close();
+    empezoFuera = false;
+  });
+});
 
 /* ------------------------------------------------------------------- carga */
 async function cargar() {

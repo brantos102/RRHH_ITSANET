@@ -113,7 +113,10 @@ async def main():
         await pagina.screenshot(path="/tmp/capturas/6-aviso-fin-de-semana.png")
 
         if await pagina.locator("#btn-corregir").count():
-            await pagina.click("#btn-corregir", force=True)
+            # Sin force: en teléfono el botón queda bajo el pliegue y hace
+            # falta que el navegador lo acerque antes de pulsar. Con force el
+            # clic aterrizaba en la ✕ de la cabecera y cerraba el formulario.
+            await pagina.click("#btn-corregir")
             await pagina.wait_for_timeout(1000)
             print("✓ rango corregido a:", await pagina.input_value("#fecha-inicio"),
                   "–", await pagina.input_value("#fecha-fin"))

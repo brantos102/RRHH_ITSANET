@@ -8,3 +8,7 @@ __pycache__/
 
 # Dependencias del compilador de estilos (no hacen falta para ejecutar)
 build/node_modules/
+
+# La carga generada lleva datos personales de la planilla (LOPDP): se
+# genera en cada máquina con scripts/importar_planilla.py y no se versiona.
+supabase/carga_inicial.sql

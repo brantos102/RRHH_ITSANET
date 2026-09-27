@@ -72,15 +72,36 @@ function pintar() {
   const hoy = iso(new Date());
   const diasFeriados = new Map((feriados || []).map((f) => [f.fecha, f.nombre]));
 
+  const MAX_COMODO = 40;
   $("subtitulo").textContent = equipo.length
-    ? `${equipo.length} persona(s) a su cargo · ${ausencias.length} ausencia(s) este mes`
-    : "Todavía no hay nadie asignado a su cargo";
+    ? (esRRHH
+        ? `${equipo.length} persona(s)${estado.departamento ? " en " + estado.departamento : ""} · ${ausencias.length} ausencia(s) este mes`
+        : `${equipo.length} persona(s) a su cargo · ${ausencias.length} ausencia(s) este mes`)
+    : (esRRHH ? "No hay personal en este filtro" : "Todavía no hay nadie asignado a su cargo");
 
   if (!equipo.length) {
     $("rejilla").innerHTML =
-      `<p class="px-5 py-12 text-center text-sm text-slate-500">
-         Nadie tiene a esta persona registrada como jefe inmediato.
-         Talento Humano lo asigna en Administración → Usuarios.</p>`;
+      `<p class="px-5 py-12 text-center text-sm text-slate-500">${esRRHH
+        ? "Ningún colaborador coincide con el departamento elegido."
+        : "Nadie tiene a esta persona registrada como jefe inmediato. " +
+          "Talento Humano lo asigna en Administración → Usuarios."}</p>`;
+    return;
+  }
+
+  /* Trescientas cincuenta filas en una grilla mensual no se leen. Talento
+     Humano ve toda la empresa, así que se le pide elegir un departamento
+     antes de dibujar: un calendario ilegible no informa nada. */
+  if (esRRHH && !estado.departamento && equipo.length > MAX_COMODO) {
+    $("rejilla").innerHTML = `
+      <div class="px-5 py-12 text-center">
+        <p class="text-sm font-medium text-slate-700">
+          ${equipo.length} personas en toda la empresa.</p>
+        <p class="mx-auto mt-1 max-w-md text-sm text-slate-500">
+          Un calendario de ese tamaño no se lee. Elija un departamento en el
+          filtro de arriba para ver su cobertura mes a mes.</p>
+        <p class="mt-3 text-xs text-slate-400">
+          ${ausencias.length} ausencia(s) registradas este mes en toda la empresa.</p>
+      </div>`;
     return;
   }
 
