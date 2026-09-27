@@ -198,3 +198,26 @@ async def avisar_ajuste(destinatarios: list[dict], solicitud: dict, quien: str,
     for destino in destinatarios:
         if destino.get("email"):
             await correo.enviar(destino["email"], titulo, texto, _marco(titulo, cuerpo))
+
+
+async def avisar_alta_completada(destinatarios: list[dict], nombre: str,
+                                 cedula: str, email: str) -> None:
+    """A Talento Humano cuando alguien registra su correo por primera vez.
+
+    El sistema ya verifica la dirección de vuelta —sin recibir el código no
+    se entra—, pero un correo que alguien declara de sí mismo merece que
+    quien lleva el expediente lo mire. Sobre todo si no es el institucional.
+    """
+    titulo = "Un colaborador completó su ficha"
+    filas = [("Colaborador", nombre), ("Cédula", cedula),
+             ("Correo registrado", email)]
+    cuerpo = (
+        '<p style="margin:0 0 16px;font-size:14px;color:#475569">'
+        "Esta persona no tenía correo registrado y acaba de completar sus datos "
+        "para poder acceder. Verifique que la dirección corresponda.</p>"
+        + _tabla(filas)
+    )
+    texto = f"{titulo}\n\n" + "\n".join(f"{e}: {v}" for e, v in filas) + "\n"
+    for destino in destinatarios:
+        if destino.get("email"):
+            await correo.enviar(destino["email"], titulo, texto, _marco(titulo, cuerpo))

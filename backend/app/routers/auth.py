@@ -10,14 +10,20 @@ Decisiones de seguridad:
 from __future__ import annotations
 
 import logging
-from typing import Annotated
+import re
+import uuid
+from datetime import date
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
-from .. import correo
+from .. import correo, notificaciones
 from ..audit import ip_del_cliente, registrar
+from ..cedula import normalizar_cedula
 from ..config import get_settings
-from ..db import obtener_todos, obtener_uno
+from ..db import conexion, obtener_todos, obtener_uno
+from ..errores import traducir
 from ..deps import usuario_actual
 from ..schemas import Perfil, RespuestaEnvio, Sesion, SolicitudToken, ValidacionToken
 from ..security import comparar_hash, emitir_token, generar_otp, hash_otp
@@ -316,3 +322,212 @@ async def cerrar_sesion(request: Request, usuario: Annotated[dict, Depends(usuar
     """El token es sin estado: el cliente lo descarta. Aquí queda el registro."""
     await registrar(request, "sesion_cerrada", user_id=str(usuario["id"]),
                     cedula=usuario["cedula"])
+
+
+# ---------------------------------------------------------------- alta guiada
+# 230 de las 351 personas de la planilla no tienen correo registrado, y el
+# acceso es por código al correo. No se les puede avisar en la pantalla de
+# acceso sin revelar qué cédulas existen, así que la salida es que completen
+# su ficha ellas mismas.
+#
+# El riesgo es evidente: la cédula es un dato casi público en Ecuador. Si
+# bastara con conocerla para fijar un correo, cualquiera se apropiaría de una
+# cuenta. Por eso hay tres barreras:
+#
+#   1. Solo alcanza a quien NO tiene correo real. Quien ya lo tiene queda
+#      fuera de este camino, de modo que no sirve para secuestrar cuentas.
+#   2. Hay que probar la identidad con dos datos del expediente que Talento
+#      Humano ya tiene: fecha de nacimiento y fecha de ingreso.
+#   3. El correo se verifica de vuelta: para entrar hay que recibir el código
+#      en la dirección declarada. Y Talento Humano recibe aviso de cada alta.
+
+class PruebaIdentidad(BaseModel):
+    cedula: str
+    fecha_nacimiento: date
+    fecha_ingreso: date
+
+    @field_validator("cedula")
+    @classmethod
+    def validar(cls, v: str) -> str:
+        return normalizar_cedula(v)
+
+
+class FichaInicial(BaseModel):
+    token: uuid.UUID
+    email: EmailStr
+    telefono: str = Field(..., min_length=7, max_length=20,
+                          description="Personal. Obligatorio: es como se ubica a la persona")
+    emergencia_nombre: str = Field(..., min_length=3, max_length=120)
+    # La base guarda el parentesco como enumerado: se acota aquí para que un
+    # valor libre dé un mensaje claro y no un error interno.
+    emergencia_parentesco: Literal[
+        "conyuge", "conviviente", "hijo", "padre", "madre", "hermano",
+        "abuelo", "nieto", "suegro", "cunado", "otro",
+    ] | None = None
+    emergencia_telefono: str = Field(..., min_length=7, max_length=20)
+    direccion: str | None = Field(None, max_length=200)
+    tipo_sangre: str | None = None
+
+    @field_validator("telefono", "emergencia_telefono")
+    @classmethod
+    def solo_digitos(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        limpio = re.sub(r"\D", "", v)
+        if len(limpio) < 7:
+            raise ValueError("El teléfono debe tener al menos 7 dígitos")
+        return limpio
+
+
+@router.post("/necesita-ficha")
+async def necesita_ficha(datos: SolicitudToken, request: Request) -> dict:
+    """¿Esta cédula debe completar su ficha antes de poder entrar?
+
+    Responde lo mismo —falso— tanto si la cédula no existe como si ya tiene
+    correo: quien pregunta no aprende nada que no supiera.
+    """
+    fila = await obtener_uno(
+        "select public.puede_completar_ficha(%s) as puede", (datos.cedula,)
+    )
+    return {"necesita": bool(fila and fila["puede"])}
+
+
+@router.post("/probar-identidad")
+async def probar_identidad(datos: PruebaIdentidad, request: Request) -> dict:
+    """Dos datos del expediente a cambio de un permiso de 30 minutos."""
+    settings = get_settings()
+    ip = ip_del_cliente(request)
+
+    intentos = await obtener_uno(
+        """select count(*) as n from public.audit_logs
+            where accion = 'alta_identidad_fallida' and ip = %s
+              and created_at > now() - interval '1 hour'""",
+        (ip,),
+    )
+    if intentos and intentos["n"] >= 10:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Demasiados intentos desde esta red. Comuníquese con Talento Humano.",
+        )
+
+    usuario = await obtener_uno(
+        """select u.id, u.nombre from public.users u
+            where u.cedula = %(cedula)s and u.activo
+              and u.correo_pendiente and not u.ficha_completa
+              and u.fecha_nacimiento = %(nacimiento)s
+              and u.fecha_ingreso = %(ingreso)s""",
+        {"cedula": datos.cedula, "nacimiento": datos.fecha_nacimiento,
+         "ingreso": datos.fecha_ingreso},
+    )
+
+    if usuario is None:
+        await registrar(request, "alta_identidad_fallida", cedula=datos.cedula)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"mensaje": "Los datos no coinciden con ningún expediente. "
+                               "Verifíquelos o comuníquese con Talento Humano."},
+        )
+
+    alta = await obtener_uno(
+        """insert into public.altas_pendientes (user_id, cedula, ip)
+           values (%s, %s, %s) returning token, expira_en""",
+        (usuario["id"], datos.cedula, ip),
+    )
+    await registrar(request, "alta_identidad_probada", user_id=str(usuario["id"]),
+                    cedula=datos.cedula)
+
+    return {
+        "token": str(alta["token"]),
+        "nombre": usuario["nombre"],
+        "minutos": 30,
+    }
+
+
+@router.post("/completar-ficha")
+async def completar_ficha(
+    datos: FichaInicial, request: Request, tareas: BackgroundTasks
+) -> dict:
+    """Guarda los datos y deja a la persona en condiciones de entrar.
+
+    El correo declarado NO se da por bueno: para entrar hay que recibir el
+    código en esa dirección. Si alguien intentara poner un correo ajeno, no
+    podría pasar de aquí, y Talento Humano ve el aviso igual.
+    """
+    ip = ip_del_cliente(request)
+    alta = await obtener_uno(
+        """select a.id, a.user_id, a.cedula, u.nombre, u.region
+             from public.altas_pendientes a
+             join public.users u on u.id = a.user_id
+            where a.token = %s and a.usado_en is null and a.expira_en > now()""",
+        (datos.token,),
+    )
+    if alta is None:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail={"mensaje": "El permiso para completar sus datos venció. "
+                               "Vuelva a empezar desde la pantalla de acceso."},
+        )
+
+    ocupado = await obtener_uno(
+        "select 1 as x from public.users where email = %s and id <> %s",
+        (datos.email, alta["user_id"]),
+    )
+    if ocupado:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"mensaje": "Ese correo ya está registrado por otra persona. "
+                               "Use su correo institucional o escriba a Talento Humano."},
+        )
+
+    try:
+        async with conexion() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    update public.users set
+                      email = %(email)s, correo_pendiente = false,
+                      telefono = %(telefono)s,
+                      direccion = coalesce(%(direccion)s, direccion),
+                      tipo_sangre = coalesce(%(sangre)s, tipo_sangre),
+                      ficha_completa = true, ficha_completada_en = now()
+                    where id = %(id)s
+                    """,
+                    {"email": datos.email, "telefono": datos.telefono,
+                     "direccion": datos.direccion, "sangre": datos.tipo_sangre,
+                     "id": alta["user_id"]},
+                )
+                await cur.execute(
+                    """
+                    insert into public.emergency_contacts
+                        (user_id, nombre, parentesco, telefono, es_principal)
+                    values (%s, %s, %s::parentesco, %s, true)
+                    """,
+                    (alta["user_id"], datos.emergencia_nombre.strip(),
+                     datos.emergencia_parentesco or "otro", datos.emergencia_telefono),
+                )
+                await cur.execute(
+                    "update public.altas_pendientes set usado_en = now() where id = %s",
+                    (alta["id"],),
+                )
+    except Exception as exc:  # noqa: BLE001
+        raise traducir(exc) from exc
+
+    await registrar(request, "alta_ficha_completada", user_id=str(alta["user_id"]),
+                    cedula=alta["cedula"], detalle={"correo": datos.email})
+
+    # Talento Humano de su región se entera: un correo que alguien declara de
+    # sí mismo merece una mirada, aunque el sistema ya lo verifique de vuelta.
+    destinos = await obtener_todos(
+        "select email, nombre from public.rrhh_de_region(%s)",
+        (alta.get("region") or "sierra",),
+    )
+    if destinos:
+        tareas.add_task(notificaciones.avisar_alta_completada, destinos,
+                        alta["nombre"], alta["cedula"], datos.email)
+
+    return {
+        "completado": True,
+        "cedula": alta["cedula"],
+        "mensaje": "Datos guardados. Le enviamos el código de acceso al correo "
+                   "que acaba de registrar.",
+    }

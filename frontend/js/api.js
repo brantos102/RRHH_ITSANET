@@ -87,6 +87,15 @@ export const api = {
   saldo: () => peticion("/auth/mi-saldo"),
   notificaciones: () => peticion("/auth/mis-notificaciones"),
   cerrarSesion: () => peticion("/auth/cerrar-sesion", { method: "POST" }),
+  necesitaFicha: (cedula) =>
+    peticion("/auth/necesita-ficha", { method: "POST", body: JSON.stringify({ cedula }) }),
+  probarIdentidad: (cedula, fecha_nacimiento, fecha_ingreso) =>
+    peticion("/auth/probar-identidad", {
+      method: "POST",
+      body: JSON.stringify({ cedula, fecha_nacimiento, fecha_ingreso }),
+    }),
+  completarFicha: (datos) =>
+    peticion("/auth/completar-ficha", { method: "POST", body: JSON.stringify(datos) }),
 
   tiposPermiso: () => peticion("/catalogos/tipos-permiso"),
   catalogoPermisos: () => peticion("/catalogos/permisos"),

@@ -55,6 +55,114 @@
       </p>
     </form>
 
+    <!-- Alta: probar identidad ------------------------------------------- -->
+    <form id="paso-identidad" class="hidden" novalidate>
+      <button type="button" data-volver-acceso
+              class="mb-3 text-sm text-slate-500 hover:text-slate-900">← Volver</button>
+      <h2 class="font-semibold text-slate-900">Complete sus datos</h2>
+      <p class="mt-1 text-sm leading-relaxed text-slate-600">
+        Su cédula está registrada, pero no tenemos un correo donde enviarle el
+        código. Confirme dos datos de su expediente y podrá registrarlo.
+      </p>
+
+      <label for="nacimiento" class="mt-4 block text-sm font-medium text-slate-700">
+        Fecha de nacimiento
+      </label>
+      <input id="nacimiento" type="date" required
+             class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+
+      <label for="ingreso" class="mt-3 block text-sm font-medium text-slate-700">
+        Fecha de ingreso a la empresa
+      </label>
+      <input id="ingreso" type="date" required
+             class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+
+      <p id="error-identidad" class="mt-3 hidden text-sm text-rose-600" role="alert"></p>
+
+      <button type="submit" id="btn-identidad"
+              class="mt-5 w-full rounded-xl bg-slate-900 px-4 py-3 font-medium text-white
+                     hover:bg-slate-800 disabled:opacity-50">
+        Continuar
+      </button>
+      <p class="mt-4 text-center text-xs leading-relaxed text-slate-500">
+        ¿No recuerda alguna fecha? Comuníquese con Talento Humano.
+      </p>
+    </form>
+
+    <!-- Alta: datos de contacto -------------------------------------------- -->
+    <form id="paso-ficha" class="hidden" novalidate>
+      <h2 class="font-semibold text-slate-900">Sus datos de contacto</h2>
+      <p id="ficha-saludo" class="mt-1 text-sm text-slate-600"></p>
+
+      <label for="f-email" class="mt-4 block text-sm font-medium text-slate-700">
+        Correo electrónico <span class="text-rose-600">*</span>
+      </label>
+      <input id="f-email" type="email" required autocomplete="email"
+             placeholder="nombre@itsanet.com.ec"
+             class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+      <p class="mt-1 text-xs text-slate-500">
+        Ahí llegará su código cada vez que entre. Use el institucional si lo tiene.
+      </p>
+
+      <label for="f-telefono" class="mt-3 block text-sm font-medium text-slate-700">
+        Teléfono personal <span class="text-rose-600">*</span>
+      </label>
+      <input id="f-telefono" type="tel" inputmode="numeric" required autocomplete="tel"
+             placeholder="0991234567"
+             class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+
+      <fieldset class="mt-4 rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200">
+        <legend class="px-1 text-sm font-medium text-slate-700">Contacto de emergencia</legend>
+        <p class="mb-2 text-xs text-slate-500">A quién avisamos si algo ocurre en la jornada.</p>
+        <input id="f-emer-nombre" type="text" required placeholder="Nombre completo"
+               class="w-full rounded-lg border-0 bg-white px-3 py-2 text-sm ring-1 ring-slate-300
+                      focus:ring-2 focus:ring-slate-900">
+        <div class="mt-2 grid grid-cols-2 gap-2">
+          <select id="f-emer-parentesco"
+                  class="rounded-lg border-0 bg-white px-3 py-2 text-sm ring-1 ring-slate-300
+                         focus:ring-2 focus:ring-slate-900">
+            <option value="">Parentesco…</option>
+            <option value="conyuge">Cónyuge</option>
+            <option value="conviviente">Conviviente</option>
+            <option value="hijo">Hijo o hija</option>
+            <option value="padre">Padre</option>
+            <option value="madre">Madre</option>
+            <option value="hermano">Hermano o hermana</option>
+            <option value="abuelo">Abuelo o abuela</option>
+            <option value="nieto">Nieto o nieta</option>
+            <option value="suegro">Suegro o suegra</option>
+            <option value="cunado">Cuñado o cuñada</option>
+            <option value="otro">Otro</option>
+          </select>
+          <input id="f-emer-telefono" type="tel" inputmode="numeric" required placeholder="Teléfono"
+                 class="rounded-lg border-0 bg-white px-3 py-2 text-sm ring-1 ring-slate-300
+                        focus:ring-2 focus:ring-slate-900">
+        </div>
+      </fieldset>
+
+      <label for="f-direccion" class="mt-3 block text-sm font-medium text-slate-700">
+        Dirección <span class="font-normal text-slate-500">(opcional)</span>
+      </label>
+      <input id="f-direccion" type="text" autocomplete="street-address"
+             class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+
+      <p id="error-ficha" class="mt-3 hidden text-sm text-rose-600" role="alert"></p>
+
+      <button type="submit" id="btn-ficha"
+              class="mt-5 w-full rounded-xl bg-slate-900 px-4 py-3 font-medium text-white
+                     hover:bg-slate-800 disabled:opacity-50">
+        Guardar y enviarme el código
+      </button>
+      <p class="mt-4 text-center text-xs leading-relaxed text-slate-500">
+        Sus datos se tratan conforme a la Ley Orgánica de Protección de Datos Personales.
+      </p>
+    </form>
+
     <!-- Paso 2: código -->
     <form id="paso-codigo" class="hidden" novalidate>
       <button type="button" id="btn-volver"
@@ -152,6 +260,19 @@ pasoCedula.addEventListener("submit", async (e) => {
   $("btn-enviar").disabled = true;
   $("btn-enviar").textContent = "Enviando…";
   try {
+    /* Antes de pedir el código: ¿esta persona tiene correo registrado? Buena
+       parte de la planilla llegó sin correo, y sin esto se quedaría esperando
+       un mensaje que no puede llegar a ninguna parte. La respuesta es la
+       misma —falso— si la cédula no existe, así que no revela nada. */
+    const { necesita } = await api.necesitaFicha(cedula);
+    if (necesita) {
+      cedulaActual = cedula;
+      pasoCedula.classList.add("hidden");
+      $("paso-identidad").classList.remove("hidden");
+      $("nacimiento").focus();
+      return;
+    }
+
     const r = await api.solicitarToken(cedula);
     cedulaActual = cedula;
     $("correo-destino").textContent = r.correo || "su correo institucional";
@@ -164,6 +285,96 @@ pasoCedula.addEventListener("submit", async (e) => {
   } finally {
     $("btn-enviar").disabled = false;
     $("btn-enviar").textContent = "Enviar código a mi correo";
+  }
+});
+
+/* ---- Alta guiada: identidad y ficha ---- */
+let tokenAlta = null;
+
+document.querySelectorAll("[data-volver-acceso]").forEach((b) =>
+  b.addEventListener("click", () => {
+    $("paso-identidad").classList.add("hidden");
+    $("paso-ficha").classList.add("hidden");
+    pasoCedula.classList.remove("hidden");
+    $("cedula").focus();
+  })
+);
+
+$("paso-identidad").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  mostrarError("identidad", "");
+  const nacimiento = $("nacimiento").value, ingreso = $("ingreso").value;
+  if (!nacimiento || !ingreso) {
+    return mostrarError("identidad", "Complete las dos fechas.");
+  }
+
+  $("btn-identidad").disabled = true;
+  $("btn-identidad").textContent = "Comprobando…";
+  try {
+    const r = await api.probarIdentidad(cedulaActual, nacimiento, ingreso);
+    tokenAlta = r.token;
+    $("ficha-saludo").textContent =
+      `${r.nombre}, registre dónde ubicarlo. Le enviaremos su código al correo que indique.`;
+    $("paso-identidad").classList.add("hidden");
+    $("paso-ficha").classList.remove("hidden");
+    $("f-email").focus();
+  } catch (err) {
+    mostrarError("identidad", err instanceof ErrorApi ? err.message
+      : "No se pudo comprobar. Intente de nuevo.");
+  } finally {
+    $("btn-identidad").disabled = false;
+    $("btn-identidad").textContent = "Continuar";
+  }
+});
+
+["f-telefono", "f-emer-telefono"].forEach((id) =>
+  $(id).addEventListener("input", (e) => {
+    e.target.value = e.target.value.replace(/\D/g, "").slice(0, 13);
+  })
+);
+
+$("paso-ficha").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  mostrarError("ficha", "");
+
+  const email = $("f-email").value.trim();
+  const telefono = $("f-telefono").value.trim();
+  const emerNombre = $("f-emer-nombre").value.trim();
+  const emerTelefono = $("f-emer-telefono").value.trim();
+
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    return mostrarError("ficha", "Escriba un correo válido: ahí llegará su código.");
+  }
+  if (telefono.length < 7) {
+    return mostrarError("ficha", "El teléfono personal es obligatorio.");
+  }
+  if (emerNombre.length < 3 || emerTelefono.length < 7) {
+    return mostrarError("ficha", "Complete el contacto de emergencia: nombre y teléfono.");
+  }
+
+  $("btn-ficha").disabled = true;
+  $("btn-ficha").textContent = "Guardando…";
+  try {
+    await api.completarFicha({
+      token: tokenAlta, email, telefono,
+      emergencia_nombre: emerNombre,
+      emergencia_parentesco: $("f-emer-parentesco").value.trim() || null,
+      emergencia_telefono: emerTelefono,
+      direccion: $("f-direccion").value.trim() || null,
+    });
+    // Con el correo ya registrado, el camino normal funciona.
+    const r = await api.solicitarToken(cedulaActual);
+    $("correo-destino").textContent = r.correo || email;
+    $("paso-ficha").classList.add("hidden");
+    pasoCodigo.classList.remove("hidden");
+    $("codigo").focus();
+    cuentaRegresiva(45);
+  } catch (err) {
+    mostrarError("ficha", err instanceof ErrorApi ? err.message
+      : "No se pudieron guardar sus datos.");
+  } finally {
+    $("btn-ficha").disabled = false;
+    $("btn-ficha").textContent = "Guardar y enviarme el código";
   }
 });
 

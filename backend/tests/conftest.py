@@ -88,6 +88,12 @@ async def _limpiar() -> None:
         "(select id from public.users where email like %s)", ("%@api.test",))
     await ejecutar("delete from public.visitors where motivo_visita like %s", ("%de prueba%",))
     await ejecutar("delete from public.visitors where nombre like %s", ("Proveedor de prueba%",))
+    # También por cédula: una prueba que cambie el correo de un usuario de
+    # prueba lo dejaba fuera de esta limpieza y rompía a las siguientes.
+    await ejecutar(
+        "delete from public.users where cedula = any(%s)",
+        ([CEDULA_PRUEBA, "0900000001", "1100000007", "1200000006",
+          "1700000019", "1700000027", "1700000035"],))
     await ejecutar("delete from public.users where email like %s", ("%@api.test",))
     await ejecutar("delete from public.users where email like %s", ("%@empresa-prueba.com",))
     await ejecutar("delete from auth.users where email like %s", ("%@api.test",))
