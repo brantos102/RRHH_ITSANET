@@ -210,6 +210,10 @@ export const api = {
   ajustarSaldo: (id, saldo) =>
     peticion(`/admin/usuarios/${id}/saldo?saldo=${saldo}`, { method: "POST" }),
   antiguedades: () => peticion("/admin/antiguedades"),
+  periodosDe: (id) => peticion(`/admin/usuarios/${id}/periodos`),
+  corregirFinesSemana: (id, datos) =>
+    peticion(`/admin/usuarios/${id}/fines-semana`,
+             { method: "POST", body: JSON.stringify(datos) }),
   adminTipos: () => peticion("/admin/tipos-permiso"),
   editarTipo: (id, cambios) =>
     peticion(`/admin/tipos-permiso/${id}`, { method: "PATCH", body: JSON.stringify(cambios) }),

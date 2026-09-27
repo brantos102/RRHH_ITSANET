@@ -5,6 +5,7 @@
    entera con un color inequívoco, y Enter cierra y deja listo el siguiente. */
 import { api, sesion, esc, fechaHora, validarCedula } from "./api.js";
 import { montarNavegacion } from "./navegacion.js";
+import { montarBuscador } from "./buscador.js";
 
 const $ = (id) => document.getElementById(id);
 if (!sesion.vigente) location.replace("index.html");
@@ -334,6 +335,14 @@ async function cargarTodo() {
 }
 
 cargarTodo();
+// El guardia tiene delante a alguien y necesita encontrarlo ya. Las listas se
+// refrescan solas cada treinta segundos, y el buscador se reaplica al
+// repintarse: sin eso, el filtro se le borraba en la cara cada medio minuto.
+montarBuscador({ campo: "buscar-autorizado", contenedor: "lista-hoy",
+                 filas: ":scope > *", vacio: "autorizados-vacio" });
+montarBuscador({ campo: "buscar-visita", contenedor: "lista-visitas",
+                 filas: ":scope > *", vacio: "visitas-vacio" });
+
 // Se refresca solo: el guardia no debería tener que recargar la página
 setInterval(cargarTodo, 30000);
 $("entrada-qr").focus();

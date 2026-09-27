@@ -150,3 +150,38 @@ async def test_un_empleado_no_puede_bajar_la_planilla(cliente, auth):
     """Es la nómina entera: nombres, cédulas y saldos de todo el mundo."""
     r = await cliente.get("/admin/cotejo.xlsx", headers=auth)
     assert r.status_code == 403
+
+
+# ------------------------------------------------- protección de datos (LOPDP)
+async def test_el_jefe_no_se_lleva_el_subtipo_medico(cliente, auth, jefe_auth, rrhh_auth,
+                                                     empleado):
+    """Que alguien esté en cita médica es dato de salud (LOPDP Art. 4).
+
+    El sistema ya decidió no mostrárselo a la jefatura en el calendario del
+    equipo. Un informe descargable es la misma vista agregada, y además sale
+    de la aplicación, así que se aplica el mismo criterio: el jefe recibe
+    «Permiso», y ve el subtipo en la solicitud concreta que él autoriza.
+    Talento Humano lo conserva completo: lleva el expediente laboral.
+    """
+    tipos = await obtener_todos(
+        """select id, nombre from public.permission_types
+            where admite_horas and not requiere_adjunto and activo order by id limit 1""")
+    tipo = tipos[0]
+
+    from tests.test_reglas_nuevas import lunes_sin_feriados
+    lunes = await lunes_sin_feriados()
+    creada = await cliente.post("/solicitudes", headers=auth, json={
+        "tipo": "permiso", "permission_type_id": tipo["id"],
+        "fecha_inicio": str(lunes), "fecha_fin": str(lunes),
+        "hora_inicio": "09:00", "hora_fin": "11:00",
+        "descripcion": "Diligencia de la manana",
+        "justificacion": "Turno asignado esa manana.", "firmar": False})
+    assert creada.status_code == 201, creada.text
+
+    del_jefe = (await cliente.get("/informes/solicitudes.csv", headers=jefe_auth)).content.decode()
+    de_rrhh = (await cliente.get("/informes/solicitudes.csv", headers=rrhh_auth)).content.decode()
+
+    assert tipo["nombre"] not in del_jefe, \
+        f"el jefe no debe llevarse «{tipo['nombre']}» en un archivo"
+    assert "Permiso" in del_jefe, "pero sí debe saber que hubo un permiso"
+    assert tipo["nombre"] in de_rrhh, "Talento Humano sí lo necesita completo"

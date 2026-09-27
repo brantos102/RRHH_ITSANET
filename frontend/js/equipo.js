@@ -9,6 +9,7 @@
    exhibirlo en una grilla. El jefe lo ve en la solicitud que autoriza. */
 import { api, sesion, esc, fecha } from "./api.js";
 import { montarNavegacion } from "./navegacion.js";
+import { montarBuscador } from "./buscador.js";
 
 const $ = (id) => document.getElementById(id);
 if (!sesion.vigente) location.replace("index.html");
@@ -294,5 +295,11 @@ $("departamento").addEventListener("change", (e) => {
   estado.departamento = e.target.value;
   cargar();
 });
+
+// Con toda la planilla en pantalla, Talento Humano necesita llegar a una
+// persona sin bajar trescientas filas. Filtra las filas ya pintadas, así que
+// sigue funcionando al cambiar de mes.
+montarBuscador({ campo: "buscar-persona", contenedor: "rejilla",
+                 vacio: "equipo-vacio" });
 
 cargar().catch((err) => avisar(err.message, true));

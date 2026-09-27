@@ -94,12 +94,26 @@ async def listar_usuarios(usuario: RRHH, q: str = "", incluir_inactivos: bool = 
         from public.users u
         left join public.users j on j.id = u.jefe_id
         where (%(inactivos)s or u.activo)
-          and (%(q)s = '' or u.nombre ilike %(like)s or u.cedula like %(cedula)s)
+          and (%(q)s = ''
+               or u.nombre ilike %(like)s
+               or u.cargo ilike %(like)s
+               or u.departamento ilike %(like)s
+               or u.email ilike %(like)s
+               -- Solo si la búsqueda trae dígitos. `normalizar_cedula` los
+               -- deja en nada cuando se busca por texto, y el patrón quedaba
+               -- siendo el comodín solo, que coincide con toda la planilla:
+               -- buscar «zzzz» devolvía las trescientas cincuenta personas.
+               -- (Sin el signo de porcentaje en este comentario a propósito:
+               --  psycopg lo lee como marcador de parámetro y rompe la
+               --  consulta aunque esté dentro de un comentario SQL.)
+               or (%(cedula)s <> '' and u.cedula like %(cedula_patron)s))
         order by u.nombre
         limit 500
         """,
         {"inactivos": incluir_inactivos, "q": q.strip(),
-         "like": f"%{q.strip()}%", "cedula": f"{normalizar_cedula(q)}%"},
+         "like": f"%{q.strip()}%",
+         "cedula": normalizar_cedula(q),
+         "cedula_patron": f"{normalizar_cedula(q)}%"},
     )
 
 
@@ -178,6 +192,53 @@ async def ajustar_saldo(user_id: uuid.UUID, saldo: float, request: Request, usua
     await registrar(request, "saldo_ajustado", user_id=str(usuario["id"]), cedula=usuario["cedula"],
                     entidad="users", entidad_id=str(user_id), detalle={"saldo": saldo})
     return {"saldo": float(fila["saldo"]), "mensaje": f"Saldo ajustado a {fila['saldo']} días."}
+
+
+class CorreccionFDS(BaseModel):
+    periodo: int = Field(..., ge=1, le=60)
+    consumidos: int = Field(..., ge=0, le=10)
+    motivo: str = Field(..., min_length=15, max_length=300)
+
+
+@router.get("/admin/usuarios/{user_id}/periodos")
+async def periodos_de(user_id: uuid.UUID, usuario: RRHH) -> list[dict]:
+    """Los períodos de una persona, para revisarlos o corregirlos."""
+    return await obtener_todos(
+        """
+        select periodo, fecha_desde, fecha_hasta, dias_asignados, dias_consumidos,
+               dias_saldo, fines_semana_obligatorios, fines_semana_consumidos,
+               vence_en, caducado, devengado
+        from public.vacation_periods where user_id = %s order by periodo
+        """,
+        (user_id,),
+    )
+
+
+@router.post("/admin/usuarios/{user_id}/fines-semana")
+async def corregir_fines_semana(
+    user_id: uuid.UUID, datos: CorreccionFDS, request: Request, usuario: RRHH,
+) -> dict:
+    """Corrige los fines de semana obligatorios ya consumidos.
+
+    El panel puede decir «le faltan 2 fines de semana» a alguien que ya los
+    tomó antes de que existiera el sistema, y entonces la regla le impide
+    pedir vacaciones normales por un dato que no refleja la realidad. Esto lo
+    arregla, y solo desde aquí: el empleado no toca su propio contador.
+    """
+    try:
+        await obtener_uno(
+            "select public.corregir_fines_semana(%s, %s, %s, %s, %s) as p",
+            (user_id, datos.periodo, datos.consumidos, datos.motivo, usuario["id"]),
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise traducir(exc) from exc
+
+    await registrar(request, "fines_semana_corregidos", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="vacation_periods",
+                    entidad_id=str(user_id),
+                    detalle={"periodo": datos.periodo, "consumidos": datos.consumidos})
+    return {"mensaje": f"Período {datos.periodo}: quedan "
+                       f"{datos.consumidos} fin(es) de semana consumido(s)."}
 
 
 @router.get("/admin/antiguedades")

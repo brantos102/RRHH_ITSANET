@@ -143,6 +143,35 @@ Lo cancelado y lo rechazado liberan las fechas; lo que espera decisión, no.
 - Buckets **privados** con políticas por carpeta: cada quien sube a `<su user_id>/` y solo su jefe y RRHH pueden leerlo.
 - Las vistas de garita filtran por `is_guardia()` internamente, sin exponer columnas sensibles.
 
+## Informes y exportaciones
+
+Todo informe oficial se descarga en **PDF, Excel o CSV**, con el filtro
+aplicado escrito dentro del documento. El alcance del rol se respeta también al
+descargar —un jefe se lleva solo a su equipo— y cada descarga queda en la
+bitácora: son datos personales saliendo del sistema (LOPDP Art. 10).
+
+**Cotejo de la carga** (Administración → Cotejo de la carga) baja lo que quedó
+en el sistema para compararlo con el archivo del que salió: cédula, fecha de
+ingreso, jefe, saldo y su desglose. Con «solo lo que requiere revisión» se acota
+a quien no tiene correo real, no tiene jefe o tiene el saldo descuadrado.
+
+## El saldo de vacaciones, en tres cifras
+
+| Cifra | Qué es | Quién la autoriza |
+|---|---|---|
+| **Días que puede tomar** | Años de servicio ya cumplidos (Art. 69), acumulables hasta tres años (Art. 75) | Su jefe, por la vía normal |
+| **Días del año en curso** | 1,25 por mes trabajado del año que corre | Talento Humano: es un adelanto |
+| **Días que vencen** | Los del período más antiguo, con su fecha | — |
+
+Sumarlas en un solo número era lo que hacía incomprensible la tarjeta: podía
+decir «45 días» encima de un detalle que decía «año 6 (8,75)». Al empleado no se
+le muestran decimales, y se trunca en vez de redondear para no prometer un día
+que no existe.
+
+Si el saldo guardado no cuadra con los períodos, la pantalla lo avisa en vez de
+mostrar un número en el que no se puede confiar. Talento Humano lo ve en
+`v_saldos_desalineados` y lo repara con `recalcular_saldos()`.
+
 ## Rastrear un error
 
 Cuando algo falla, la pantalla entrega un código de referencia. Con él:

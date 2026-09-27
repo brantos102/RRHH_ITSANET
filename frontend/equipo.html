@@ -19,7 +19,10 @@
       <h1 class="text-xl font-semibold">Calendario del equipo</h1>
       <p id="subtitulo" class="text-sm text-slate-500">Quién falta y cuándo, para no dejar un puesto descubierto</p>
     </div>
-    <div class="flex items-center gap-2">
+    <div class="flex flex-wrap items-center gap-2">
+      <input type="search" id="buscar-persona" placeholder="Buscar persona"
+               class="w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900 sm:w-56">
       <div id="filtro-departamento" class="hidden">
         <select id="departamento"
                 class="rounded-xl border-0 bg-white px-3 py-2 text-sm ring-1 ring-slate-300
@@ -41,6 +44,7 @@
     <div id="rejilla" class="overflow-x-auto">
       <p class="px-5 py-12 text-center text-sm text-slate-500">Cargando…</p>
     </div>
+    <p id="equipo-vacio" class="hidden px-5 py-8 text-center text-sm text-slate-500"></p>
     <footer class="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-slate-200 px-5 py-3 text-xs text-slate-600">
       <span class="flex items-center gap-1.5">
         <span class="h-3 w-3 rounded bg-emerald-400"></span> Vacaciones aprobadas</span>

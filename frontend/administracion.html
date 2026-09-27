@@ -100,12 +100,18 @@
 
   <!-- ===== Tipos de solicitud ===== -->
   <section data-panel="tipos" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
-    <header class="border-b border-slate-200 px-5 py-3.5">
-      <h2 class="font-medium">Tipos de solicitud</h2>
-      <p class="mt-0.5 text-sm text-slate-500">
-        Cada tipo define qué exige. Cambiarlo aplica a las solicitudes nuevas, no a las ya enviadas.
-      </p>
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+      <div>
+        <h2 class="font-medium">Tipos de solicitud</h2>
+        <p class="mt-0.5 text-sm text-slate-500">
+          Cada tipo define qué exige. Cambiarlo aplica a las solicitudes nuevas, no a las ya enviadas.
+        </p>
+      </div>
+      <input type="search" id="buscar-tipo" placeholder="Tipo, pilar o código"
+             class="w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900 sm:w-56">
     </header>
+    <p id="tipos-vacio" class="hidden px-5 py-8 text-center text-sm text-slate-500"></p>
     <div id="tabla-tipos" class="overflow-x-auto"></div>
   </section>
 
@@ -116,7 +122,10 @@
         <h2 class="font-medium">Días no laborables</h2>
         <p class="mt-0.5 text-sm text-slate-500">No se descuentan del saldo cuando caen dentro de una ausencia</p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
+        <input type="search" id="buscar-feriado" placeholder="Nombre del día"
+               class="w-44 rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
         <input id="anio-feriados" type="number" min="2020" max="2100"
                class="w-24 rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300">
         <button id="btn-nuevo-feriado"
@@ -125,28 +134,41 @@
         </button>
       </div>
     </header>
+    <p id="feriados-vacio" class="hidden px-5 py-8 text-center text-sm text-slate-500"></p>
     <div id="tabla-feriados" class="overflow-x-auto"></div>
   </section>
 
   <!-- ===== Antigüedades ===== -->
   <section data-panel="antiguedades" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
-    <header class="border-b border-slate-200 px-5 py-3.5">
-      <h2 class="font-medium">Antigüedades y días</h2>
-      <p class="mt-0.5 text-sm text-slate-500">
-        Cuántos días devenga cada persona según sus años de servicio (Art. 69 del Código del Trabajo)
-      </p>
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+      <div>
+        <h2 class="font-medium">Antigüedades y días</h2>
+        <p class="mt-0.5 text-sm text-slate-500">
+          Cuántos días devenga cada persona según sus años de servicio (Art. 69 del Código del Trabajo)
+        </p>
+      </div>
+      <input type="search" id="buscar-antiguedad" placeholder="Nombre, cédula o área"
+             class="w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900 sm:w-56">
     </header>
+    <p id="antiguedades-vacio" class="hidden px-5 py-8 text-center text-sm text-slate-500"></p>
     <div id="tabla-antiguedades" class="overflow-x-auto"></div>
   </section>
 
   <!-- ===== Configuración ===== -->
   <section data-panel="configuracion" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
-    <header class="border-b border-slate-200 px-5 py-3.5">
-      <h2 class="font-medium">Parámetros del sistema</h2>
-      <p class="mt-0.5 text-sm text-slate-500">
-        Deciden derechos de toda la plantilla. Cada cambio queda en la bitácora.
-      </p>
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+      <div>
+        <h2 class="font-medium">Parámetros del sistema</h2>
+        <p class="mt-0.5 text-sm text-slate-500">
+          Deciden derechos de toda la plantilla. Cada cambio queda en la bitácora.
+        </p>
+      </div>
+      <input type="search" id="buscar-parametro" placeholder="Parámetro o valor"
+             class="w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900 sm:w-56">
     </header>
+    <p id="parametros-vacio" class="hidden px-5 py-8 text-center text-sm text-slate-500"></p>
     <div id="lista-configuracion" class="divide-y divide-slate-100"></div>
   </section>
 
@@ -233,5 +255,29 @@
 </div>
 
 <script type="module" src="js/administracion.js"></script>
+
+<!-- ===== Períodos de una persona =====
+     Talento Humano necesita ver de dónde salen los días de alguien y poder
+     corregir los fines de semana obligatorios: el contador puede reclamar los
+     de quien ya los tomó antes de que el sistema existiera, y esa regla le
+     bloquea unas vacaciones normales por un dato que no es cierto. -->
+<dialog id="modal-periodos" class="w-[min(100vw-1.5rem,46rem)] rounded-2xl p-0">
+  <div class="max-h-[85dvh] overflow-y-auto">
+    <header class="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
+      <div>
+        <h2 class="font-semibold">Períodos de vacaciones</h2>
+        <p id="periodos-persona" class="text-sm text-slate-500">—</p>
+      </div>
+      <button type="button" data-cerrar
+              class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100" aria-label="Cerrar">✕</button>
+    </header>
+    <div id="periodos-cuerpo" class="overflow-x-auto"></div>
+    <footer class="border-t border-slate-200 px-5 py-3 text-xs leading-relaxed text-slate-500">
+      Los fines de semana obligatorios son 4 de los 15 días del período (Art. 69 del Código
+      del Trabajo). Corregirlos queda en la bitácora con su nombre y el motivo.
+    </footer>
+  </div>
+</dialog>
+
 </body>
 </html>

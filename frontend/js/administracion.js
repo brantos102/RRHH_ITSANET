@@ -1,6 +1,7 @@
 /* Administración: personal, tipos de solicitud, feriados, parámetros y bitácora. */
 import { api, sesion, esc, fecha, fechaHora, validarCedula } from "./api.js";
 import { montarNavegacion, ROL_TEXTO } from "./navegacion.js";
+import { montarBuscador } from "./buscador.js";
 
 const $ = (id) => document.getElementById(id);
 if (!sesion.vigente) location.replace("index.html");
@@ -308,7 +309,8 @@ async function cargarAntiguedades() {
         <tr><th class="px-3 py-2.5">Nombre</th><th class="px-3 py-2.5">Departamento</th>
             <th class="px-3 py-2.5">Ingreso</th><th class="px-3 py-2.5 text-right">Años</th>
             <th class="px-3 py-2.5 text-right">Días por año</th><th class="px-3 py-2.5 text-right">Saldo</th>
-            <th class="px-3 py-2.5 text-center">Caducados</th></tr>
+            <th class="px-3 py-2.5 text-center">Caducados</th>
+            <th class="px-3 py-2.5 text-right">Períodos</th></tr>
       </thead>
       <tbody class="divide-y divide-slate-100">
         ${gente.map((p) => `
@@ -325,9 +327,105 @@ async function cargarAntiguedades() {
                      ${p.periodos_caducados}</span>`
                 : `<span class="text-slate-300">—</span>`}
             </td>
+            <td class="px-3 py-2.5 text-right">
+              <button type="button" data-periodos="${p.id}" data-nombre="${esc(p.nombre)}"
+                      class="rounded-lg px-2.5 py-1 text-xs font-medium text-slate-600
+                             ring-1 ring-slate-300 hover:bg-slate-100">Ver</button>
+            </td>
           </tr>`).join("")}
       </tbody>
     </table>`;
+
+  $("tabla-antiguedades").querySelectorAll("[data-periodos]").forEach((b) =>
+    b.addEventListener("click", () => abrirPeriodos(b.dataset.periodos, b.dataset.nombre)));
+}
+
+/* ------------------------------------------- períodos y fines de semana
+   El panel del empleado puede decirle «le faltan 2 fines de semana» a quien
+   ya los tomó antes de que existiera el sistema, y entonces la regla le
+   bloquea unas vacaciones normales por un dato que no refleja la realidad.
+   Solo Talento Humano lo corrige, y queda constancia de por qué. */
+async function abrirPeriodos(userId, nombre) {
+  $("periodos-persona").textContent = nombre;
+  $("periodos-cuerpo").innerHTML =
+    `<p class="py-6 text-center text-sm text-slate-500">Cargando…</p>`;
+  $("modal-periodos").showModal();
+
+  try {
+    const periodos = await api.periodosDe(userId);
+    $("periodos-cuerpo").innerHTML = periodos.length ? `
+      <table class="w-full text-left text-sm">
+        <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+          <tr><th class="px-3 py-2">Año</th><th class="px-3 py-2">Desde</th>
+              <th class="px-3 py-2">Hasta</th><th class="px-3 py-2 text-right">Días</th>
+              <th class="px-3 py-2 text-right">Saldo</th>
+              <th class="px-3 py-2 text-center">Fines de semana</th>
+              <th class="px-3 py-2">Estado</th></tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          ${periodos.map((p) => `
+            <tr class="${p.caducado ? "opacity-50" : ""}">
+              <td class="px-3 py-2 font-medium">${p.periodo}</td>
+              <td class="px-3 py-2 whitespace-nowrap text-slate-600">${fecha(p.fecha_desde)}</td>
+              <td class="px-3 py-2 whitespace-nowrap text-slate-600">${fecha(p.fecha_hasta)}</td>
+              <td class="px-3 py-2 text-right tabular-nums">${Number(p.dias_asignados)}</td>
+              <td class="px-3 py-2 text-right tabular-nums">${Number(p.dias_saldo)}</td>
+              <td class="px-3 py-2 text-center">
+                ${p.fines_semana_obligatorios ? `
+                  <span class="tabular-nums">${p.fines_semana_consumidos}/${p.fines_semana_obligatorios}</span>
+                  ${p.caducado ? "" : `
+                    <button type="button" data-fds="${p.periodo}"
+                            data-user="${userId}" data-tope="${p.fines_semana_obligatorios}"
+                            data-actual="${p.fines_semana_consumidos}"
+                            class="ml-1.5 rounded px-1.5 py-0.5 text-xs font-medium text-slate-500
+                                   ring-1 ring-slate-300 hover:bg-slate-100">corregir</button>`}`
+                  : `<span class="text-slate-300">—</span>`}
+              </td>
+              <td class="px-3 py-2 text-xs">
+                ${p.caducado ? '<span class="text-rose-600">caducado</span>'
+                  : p.devengado ? '<span class="text-emerald-700">ganado</span>'
+                  : '<span class="text-slate-500">en curso</span>'}
+              </td>
+            </tr>`).join("")}
+        </tbody>
+      </table>`
+      : `<p class="py-6 text-center text-sm text-slate-500">Sin períodos generados.</p>`;
+
+    $("periodos-cuerpo").querySelectorAll("[data-fds]").forEach((b) =>
+      b.addEventListener("click", () => corregirFDS(b.dataset)));
+  } catch (err) {
+    $("periodos-cuerpo").innerHTML =
+      `<p class="py-6 text-center text-sm text-rose-700">${esc(err.message)}</p>`;
+  }
+}
+
+async function corregirFDS({ user, fds, tope, actual }) {
+  const valor = prompt(
+    `Fines de semana obligatorios ya consumidos en el período ${fds} (de 0 a ${tope}):`,
+    actual);
+  if (valor === null) return;
+  const consumidos = Number(valor);
+  if (!Number.isInteger(consumidos) || consumidos < 0 || consumidos > Number(tope)) {
+    return avisar(`Debe ser un número entero entre 0 y ${tope}.`, true);
+  }
+
+  const motivo = prompt(
+    "¿Por qué se corrige? Queda como constancia (mínimo 15 caracteres):",
+    "Los tomó antes de que el sistema existiera, según el registro de Talento Humano");
+  if (motivo === null) return;
+  if (motivo.trim().length < 15) {
+    return avisar("Explique la corrección en al menos 15 caracteres.", true);
+  }
+
+  try {
+    const r = await api.corregirFinesSemana(user, {
+      periodo: Number(fds), consumidos, motivo: motivo.trim(),
+    });
+    avisar(r.mensaje);
+    await abrirPeriodos(user, $("periodos-persona").textContent);
+  } catch (err) {
+    avisar(err.message, true);
+  }
 }
 
 /* -------------------------------------------------------- configuración */
@@ -467,6 +565,18 @@ async function descargarCotejo(formato) {
     boton.textContent = antes;
   }
 }
+
+/* --------------------------------------------------------------- búsqueda
+   Cada pestaña con su buscador. Filtra sobre lo ya pintado, así que se vuelve
+   a aplicar solo cuando la tabla se recarga —sin eso, al recargar reaparecían
+   las filas que el usuario acababa de descartar. */
+[
+  { campo: "buscar-tipo", contenedor: "tabla-tipos", vacio: "tipos-vacio" },
+  { campo: "buscar-feriado", contenedor: "tabla-feriados", vacio: "feriados-vacio" },
+  { campo: "buscar-antiguedad", contenedor: "tabla-antiguedades", vacio: "antiguedades-vacio" },
+  { campo: "buscar-parametro", contenedor: "lista-configuracion",
+    filas: ":scope > *", vacio: "parametros-vacio" },
+].forEach(montarBuscador);
 
 document.querySelectorAll("[data-cotejo]").forEach((b) =>
   b.addEventListener("click", () => descargarCotejo(b.dataset.cotejo)));

@@ -93,11 +93,27 @@ async def _consultar(
     parametros["limite"] = min(limite, 5000)
     donde = " and ".join(condiciones) if condiciones else "true"
 
-    return await obtener_todos(
+    filas = await obtener_todos(
         f"""select * from public.v_informe_solicitudes
             where {donde} order by folio desc limit %(limite)s""",
         parametros,
     )
+
+    # A la jefatura se le entrega «Permiso», no el subtipo. Que alguien esté
+    # en cita médica, en maternidad o acompañando a una persona con
+    # discapacidad es un dato de salud (LOPDP Art. 4), y el sistema ya tomó
+    # esa decisión para el calendario del equipo: aquí sería incoherente
+    # volcarlo en un archivo descargable que además sale de la aplicación.
+    #
+    # El jefe sí ve el subtipo en la solicitud concreta que él autoriza, que
+    # es donde lo necesita. Talento Humano y administración lo conservan
+    # completo: son quienes llevan el expediente laboral.
+    if usuario["rol"] == "jefe":
+        filas = [
+            {**f, "tipo_detalle": "Vacaciones" if f["tipo"] == "vacacion" else "Permiso"}
+            for f in filas
+        ]
+    return filas
 
 
 @router.get("/dimensiones")
