@@ -98,6 +98,25 @@ Cada tipo define por sí mismo: si exige **adjunto de respaldo**, si exige **jus
 - `request_signatures`: **instantánea** de la firma al momento de firmar. Si el usuario cambia su firma después, las solicitudes ya firmadas conservan la original.
 - La exigencia de adjunto y firma se valida con un **trigger diferido**: el backend inserta solicitud + archivos + firma en una sola transacción y la base rechaza el conjunto incompleto al confirmar.
 
+### Nadie está ausente dos veces los mismos días
+
+Una solicitud que se cruce con otra ausencia viva de la misma persona
+—pendiente o aprobada— se rechaza al crearla, y el mensaje dice con qué
+solicitud choca. Extender una ausencia ya otorgada pasa por la misma
+comprobación.
+
+Se detectó probando con datos acumulados: una misma persona tenía cinco
+ausencias aprobadas empezando el mismo día. El saldo se descuenta una vez por
+solicitud, así que los mismos días se pagaban dos veces; garita aceptaba varios
+QR válidos para la misma fecha; y el calendario del equipo pintaba una
+cualquiera de las solapadas, de modo que el jefe veía un folio y Talento Humano
+otro. Así salió a la luz.
+
+La única convivencia permitida es la de **dos permisos por horas del mismo día
+en horarios que no se pisan** (una cita a las 09:00 y un trámite a las 16:00).
+Salir a las 11:00 de uno y entrar a las 11:00 del otro tampoco es conflicto.
+Lo cancelado y lo rechazado liberan las fechas; lo que espera decisión, no.
+
 ### Flujo y trazabilidad
 
 - Máquina de estados `pendiente_jefe → pendiente_rrhh → aprobado`: cualquier salto se rechaza en la base, no solo en el backend.
@@ -116,6 +135,20 @@ Cada tipo define por sí mismo: si exige **adjunto de respaldo**, si exige **jus
 - `anon` no tiene `SELECT` sobre `users`: el login por cédula pasa siempre por el backend.
 - Buckets **privados** con políticas por carpeta: cada quien sube a `<su user_id>/` y solo su jefe y RRHH pueden leerlo.
 - Las vistas de garita filtran por `is_guardia()` internamente, sin exponer columnas sensibles.
+
+## Rastrear un error
+
+Cuando algo falla, la pantalla entrega un código de referencia. Con él:
+
+```powershell
+python scripts\ver_logs.py --referencia a1b2c3d4   # el rastro de ese caso
+python scripts\ver_logs.py --errores               # solo lo que falló
+python scripts\ver_logs.py --seguir                # en vivo, mientras prueba
+```
+
+Los registros quedan en `backend/logs/` (`sistema.log` y `errores.log`), con
+rotación. Cada línea lleva el código de la petición y la cédula de quien la
+hizo. Detalle en **[docs/registros.md](docs/registros.md)**.
 
 ## Verificación
 

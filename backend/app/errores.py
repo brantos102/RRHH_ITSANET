@@ -48,12 +48,19 @@ def traducir(exc: Exception) -> HTTPException:
         # salida. Lleva etiqueta al inicio para no confundir un caso con otro:
         # "rango|2099-07-13|2099-07-19"  -> corrección del fin de semana
         # "bloque_minimo|7"              -> mínimo de días de vacaciones
+        # "solape|1234"                   -> la solicitud con la que choca
         pista = exc.diag.message_hint or ""
         etiqueta, _, resto = pista.partition("|")
         if etiqueta == "bloque_minimo" and resto:
             detalle["bloque_minimo"] = resto
         elif etiqueta == "anticipacion" and resto:
             detalle["anticipacion_dias"] = resto
+        elif etiqueta == "solape":
+            # Con etiqueta propia y no por la rama de abajo: «solape|1234» tiene
+            # dos partes, así que el formato histórico lo tomaba por un par de
+            # fechas y el formulario ofrecía corregir el rango a «solape»–«1234».
+            if resto:
+                detalle["solapa_con_folio"] = resto
         elif pista and "|" in pista:
             # Formato histórico sin etiqueta: dos fechas.
             partes = [p for p in pista.split("|") if p]

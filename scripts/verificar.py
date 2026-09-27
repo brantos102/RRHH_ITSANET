@@ -169,12 +169,14 @@ async def revisar_base() -> int:
         ("0012 regiones de atención", "public.regiones"),
         ("0013 ficha y alta guiada", "public.campos_ficha"),
         ("0014 chat con Talento Humano", "public.conversaciones"),
+        ("0015 sin ausencias solapadas", None),
     ]
 
     # Las migraciones que solo cambian funciones se comprueban por la función.
     funciones = {
         "0010 devengo mensual": "dias_devengados_en_curso",
         "0011 carga masiva": "caducar_periodos_de",
+        "0015 sin ausencias solapadas": "ausencia_solapada",
     }
     for nombre, objeto in migraciones:
         if objeto is None:

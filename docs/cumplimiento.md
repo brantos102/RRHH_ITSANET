@@ -35,6 +35,7 @@ Este sistema opera en Quito, Ecuador. Lo que sigue documenta qué exige cada nor
 | Art. 10 | Minimización, conservación limitada | No se almacena salario ni datos no usados; `aplicar_retencion()` purga bitácoras según `app_config` |
 | Art. 12-16 | Derechos ARCO, plazo de 15 días | `data_subject_requests` con `vence_en = created_at + 15 días` |
 | Art. 37 | Cifrado y medidas técnicas | OTP guardado solo como hash SHA-256; buckets privados; TLS de Supabase; RLS por rol |
+| Art. 10 | Registros técnicos con datos personales | Los registros de `backend/logs/` llevan la cédula de quien hizo cada petición y la traza de los fallos: se tratan como datos personales, quedan en el servidor, rotan (unas semanas) y `*.log` está en `.gitignore`. No se registran contraseñas, códigos de un solo uso ni cuerpos de peticiones |
 
 ## ISO/IEC 27001:2022
 
@@ -45,6 +46,7 @@ Este sistema opera en Quito, Ecuador. Lo que sigue documenta qué exige cada nor
 | A.8.12 Prevención de fuga de datos | Buckets privados con política por carpeta; vistas de garita sin columnas sensibles |
 | A.8.15 Registro de eventos | `audit_logs` y `access_logs` **inmutables** por trigger; `UPDATE`/`DELETE` revocados |
 | A.8.16 Actividades de seguimiento | Alertas automáticas y vistas de resumen para Talento Humano |
+| A.8.15 Registro de fallos | `backend/logs/` con rotación (5 MB × 10) y un código por petición que aparece también en pantalla; se consulta con `scripts/ver_logs.py` |
 
 ## ISO 9001:2015
 

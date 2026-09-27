@@ -4,6 +4,7 @@ from __future__ import annotations
 import jwt
 import pytest
 
+from app.config import get_settings
 from app.db import obtener_uno
 from app.routers.auth import enmascarar
 from tests.conftest import CEDULA_PRUEBA, CEDULA_SIN_REGISTRO
@@ -56,11 +57,15 @@ async def test_pedir_codigo_nuevo_anula_el_anterior(cliente, codigos, empleado):
 
 
 async def test_limite_de_envios_por_hora(cliente, codigos, empleado):
-    for _ in range(5):
-        assert (await cliente.post(
-            "/auth/solicitar-token", json={"cedula": CEDULA_PRUEBA})).status_code == 200
+    # Se lee el límite configurado en vez de fijar un número: la suite corre
+    # con un tope alto para no bloquearse a sí misma, y esta prueba debe
+    # seguir comprobando la regla y no una cifra que ya no rige.
+    tope = get_settings().otp_max_envios_hora
+    for intento in range(tope):
+        r = await cliente.post("/auth/solicitar-token", json={"cedula": CEDULA_PRUEBA})
+        assert r.status_code == 200, f"el envío {intento + 1} de {tope} debía pasar: {r.text}"
     r = await cliente.post("/auth/solicitar-token", json={"cedula": CEDULA_PRUEBA})
-    assert r.status_code == 429
+    assert r.status_code == 429, f"el envío {tope + 1} debía rechazarse"
 
 
 # --------------------------------------------------------- validación y sesión

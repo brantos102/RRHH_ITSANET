@@ -62,18 +62,38 @@ async def main():
         await jefe.wait_for_timeout(2200)
 
         filas = await jefe.locator("#rejilla tbody tr").count()
-        bloques = await jefe.locator("#rejilla [data-solicitud]").count()
-        print(f"✓ calendario del jefe: {filas} persona(s), {bloques} día(s) de ausencia pintados")
         assert filas > 0, "el jefe debe ver a su equipo aunque nadie falte"
+
+        # Hacen falta dos cosas que antes se daban por supuestas.
+        #
+        # Una, que el mes mostrado tenga ausencias: las de los demás guiones
+        # caen semanas más adelante, y esta prueba solo encontraba algo en el
+        # mes en curso por los datos que quedaban de corridas anteriores.
+        #
+        # Y dos, que la ausencia esté APROBADA: solo lo aprobado se ajusta, y
+        # el calendario pinta también lo pendiente. La rejilla distingue una de
+        # otra por el tono —el tono fuerte es lo aprobado—, así que se busca
+        # por ahí en vez de tomar la primera que aparezca y confiar en la
+        # suerte, que es lo que fallaba.
+        aprobadas = ("#rejilla [data-solicitud].bg-emerald-400, "
+                     "#rejilla [data-solicitud].bg-sky-400")
+        bloques = await jefe.locator(aprobadas).count()
+        for _ in range(4):
+            if bloques:
+                break
+            await jefe.click("#mes-siguiente", force=True)
+            await jefe.wait_for_timeout(1200)
+            bloques = await jefe.locator(aprobadas).count()
+        mes = await jefe.inner_text("#mes-actual")
+        assert bloques, (
+            f"esta prueba necesita una ausencia aprobada en los próximos meses; "
+            f"revisado hasta {mes}. Ejecute antes e2e_flujo_aprobacion.py.")
+        print(f"✓ calendario del jefe: {filas} persona(s), "
+              f"{bloques} día(s) de ausencia aprobada pintados en {mes}")
         leyenda = await jefe.inner_text("#rejilla ~ footer") if await jefe.locator("#rejilla ~ footer").count() else ""
         print("  la vista no revela el motivo:", "nunca el motivo" in (leyenda or ""))
 
-        if not bloques:
-            print("⚠ sin ausencias este mes: el resto de la prueba necesita una")
-            await nav.close()
-            return
-
-        await jefe.locator("#rejilla [data-solicitud]").first.click(force=True)
+        await jefe.locator(aprobadas).first.click(force=True)
         await jefe.wait_for_timeout(700)
         detalle_antes = await jefe.inner_text("#detalle")
         folio = re.search(r"Nº (\d+)", detalle_antes).group(1)
@@ -90,9 +110,19 @@ async def main():
         await rrhh.goto(f"{BASE}/equipo.html")
         await rrhh.wait_for_timeout(2200)
 
+        # Sin respaldo a `.first`: esta prueba ajustaba la primera ausencia de la
+        # rejilla, que en una base con datos de corridas anteriores es otra
+        # solicitud. El ajuste se guardaba —y el paso 3 lo confirmaba— sobre
+        # una ajena, y el fallo aparecía después, al no encontrar el jefe
+        # ningún ajuste en la suya. Mejor que falle aquí y diga cuál falta.
         celda = rrhh.locator(f'#rejilla [data-solicitud][title*="Nº {folio}"]').first
-        if not await celda.count():
-            celda = rrhh.locator("#rejilla [data-solicitud]").first
+        for _ in range(4):
+            if await celda.count():
+                break
+            await rrhh.click("#mes-siguiente", force=True)
+            await rrhh.wait_for_timeout(1200)
+        assert await celda.count(), (
+            f"la rejilla de Talento Humano debe mostrar la solicitud Nº {folio}")
         await celda.click(force=True)
         await rrhh.wait_for_timeout(700)
         assert await rrhh.locator("[data-ajustar]").count() > 0, \
@@ -114,7 +144,8 @@ async def main():
         assert "ajustada" in aviso.lower(), aviso
 
         # ---------- 3. Queda constancia y el jefe ve lo vigente ----------
-        await rrhh.locator("#rejilla [data-solicitud]").first.click(force=True)
+        await rrhh.locator(
+            f'#rejilla [data-solicitud][title*="Nº {folio}"]').first.click(force=True)
         await rrhh.wait_for_timeout(1500)
         detalle = await rrhh.inner_text("#detalle")
         assert "Historial de ajustes" in detalle, "el ajuste debe quedar registrado"
@@ -127,10 +158,12 @@ async def main():
         # quedar en otro día del mes. Se espera a que aparezca en vez de
         # suponer que está donde estaba.
         celda_jefe = jefe.locator(f'#rejilla [data-solicitud][title*="Nº {folio}"]').first
-        try:
-            await celda_jefe.wait_for(state="attached", timeout=8000)
-        except Exception:
-            celda_jefe = jefe.locator("#rejilla [data-solicitud]").first
+        for _ in range(4):
+            if await celda_jefe.count():
+                break
+            await jefe.click("#mes-siguiente", force=True)
+            await jefe.wait_for_timeout(1200)
+        await celda_jefe.wait_for(state="attached", timeout=8000)
         await celda_jefe.click(force=True)
         await jefe.wait_for_timeout(1200)
         detalle_jefe = await jefe.inner_text("#detalle")

@@ -61,6 +61,65 @@ Qué hace cada uno:
 
 > Si cambia el `.env`, **reinicie uvicorn**: `--reload` vigila el código, no el `.env`.
 
+### Antes de repetir las pruebas de navegador
+
+Cada guion de extremo a extremo crea solicitudes en fechas fijas. Como el
+sistema ya no admite que una persona esté ausente dos veces los mismos días,
+la segunda corrida choca con lo que dejó la primera y falla con «Ya tiene una
+ausencia registrada del … al …». No es un defecto: esos guiones nunca fueron
+repetibles, solo lo parecían porque nada impedía duplicar.
+
+Se limpia antes de cada corrida:
+
+```bash
+python scripts/limpiar_pruebas.py            # dice qué haría
+python scripts/limpiar_pruebas.py --aplicar  # cancela las ausencias futuras
+```
+
+Toca solo al personal de prueba (correo `@itsanet.test`) y nunca a la planilla
+real. No borra nada: cancela, que es lo que devuelve el saldo.
+
+**Se limpia una vez, no antes de cada guion.** Los guiones se encadenan: el del
+flujo de aprobación deja una ausencia aprobada que el del calendario y el ajuste
+necesita encontrar. Limpiando entre uno y otro, ese guion se queda sin nada que
+ajustar. El orden es:
+
+```bash
+python scripts/limpiar_pruebas.py --aplicar
+python frontend/tests/e2e.py                  # solicitud desde el móvil
+python frontend/tests/e2e_flujo_aprobacion.py # aprueba y emite el QR
+python frontend/tests/e2e_interfaz.py         # folio, desglose, filtros
+python frontend/tests/e2e_equipo_ajuste.py    # calendario del jefe y ajuste
+python frontend/tests/e2e_garita_admin.py     # garita y administración
+```
+
+### Si al pedir el código sale «Demasiados intentos»
+
+Son **cinco envíos por hora y por persona**, una defensa deliberada contra
+quien intente sonsacar códigos a base de repetir. Al probar se agota rápido:
+cada prueba de extremo a extremo hace su propio ingreso, y encadenar varias
+con el mismo usuario llega al límite. El servidor responde **429** y la
+pantalla dice «Demasiados intentos».
+
+Para un servidor de pruebas se amplía la cuota:
+
+```ini
+OTP_MAX_ENVIOS_HORA=200
+```
+
+No se toque en producción: ahí cinco es lo correcto.
+
+Cómo se sabe que fue eso y no otra cosa —la pantalla solo dice que no pudo—:
+
+```powershell
+python scripts\ver_logs.py --buscar solicitar-token
+```
+
+```
+POST /auth/solicitar-token → 200 en 12 ms
+POST /auth/solicitar-token → 429 en 5 ms     ← aquí se agotó la cuota
+```
+
 ---
 
 ## 3. Compruebe que todo esté en su sitio

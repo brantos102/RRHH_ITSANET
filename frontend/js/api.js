@@ -38,10 +38,27 @@ export const sesion = {
 
 /* --------------------------------------------------------------- peticiones */
 export class ErrorApi extends Error {
-  constructor(mensaje, estado, detalle) {
+  constructor(mensaje, estado, detalle, referencia) {
+    // La referencia se incorpora al mensaje aquí y no en cada pantalla: son
+    // unas cuarenta las que muestran `err.message`, y basta una que se olvide
+    // para que el usuario reporte un error sin el código que lo ubica. El
+    // servidor ya la incluye en el texto de los 500; esto cubre el caso en que
+    // la respuesta no traiga cuerpo (un 502 del proxy, la conexión cortada).
+    //
+    // Solo para lo inesperado. Todas las respuestas llevan el código en la
+    // cabecera, así que sin este filtro «el código es incorrecto» o «debe
+    // justificar el bloque menor» terminarían con un «(referencia a1b2c3d4)»
+    // que no aporta nada: esos mensajes el usuario los resuelve leyéndolos.
+    if (referencia && estado >= 500 && !String(mensaje).includes(referencia)) {
+      mensaje = `${mensaje} (referencia ${referencia})`;
+    }
     super(mensaje);
     this.estado = estado;
     this.detalle = detalle;
+    // Código con el que el servidor marcó esta petición. Va en pantalla para
+    // que quien reporta el problema lo dicte y se pueda buscar el rastro
+    // exacto en los registros.
+    this.referencia = referencia || null;
   }
 }
 
@@ -73,7 +90,8 @@ async function peticion(ruta, opciones = {}) {
     if (typeof d === "string") mensaje = d;
     else if (d && typeof d === "object" && d.mensaje) mensaje = d.mensaje;
     else if (Array.isArray(d) && d[0]?.msg) mensaje = d[0].msg.replace(/^Value error, /, "");
-    throw new ErrorApi(mensaje, respuesta.status, typeof d === "object" ? d : null);
+    const referencia = cuerpo.referencia || respuesta.headers.get("X-Peticion-Id");
+    throw new ErrorApi(mensaje, respuesta.status, typeof d === "object" ? d : null, referencia);
   }
   return cuerpo;
 }

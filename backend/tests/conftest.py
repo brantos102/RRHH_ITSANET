@@ -20,6 +20,14 @@ os.environ.setdefault(
 os.environ.setdefault("SUPABASE_JWT_SECRET", "secreto-de-prueba-suficientemente-largo-1234")
 os.environ.setdefault("EMAIL_BACKEND", "console")
 os.environ.setdefault("ENTORNO", "desarrollo")
+# El límite de envíos de código es por cédula y, multiplicado por cuatro, por
+# IP. Todas las pruebas salen de la misma IP, así que con el valor de
+# producción (5, o sea 20 por IP) la suite se bloqueaba a sí misma en cuanto
+# algo más había iniciado sesión desde esta máquina en la última hora: las
+# pruebas de navegador dejaban el contador alto y aquí empezaban a llover
+# 429 en el arranque de cada prueba. El límite se prueba aparte, leyendo este
+# mismo valor en vez de suponerlo.
+os.environ.setdefault("OTP_MAX_ENVIOS_HORA", "50")
 os.environ.setdefault("SUPABASE_URL", "")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
 

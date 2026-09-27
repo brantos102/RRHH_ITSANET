@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5500,http://127.0.0.1:5500"
     entorno: str = "desarrollo"
 
+    # Registro de actividad
+    nivel_log: str = "INFO"
+    log_a_archivo: bool = True
+
     @property
     def origenes_permitidos(self) -> list[str]:
         return [o.strip().rstrip("/") for o in self.cors_origins.split(",") if o.strip()]

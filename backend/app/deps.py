@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from . import registro
 from .db import obtener_uno
 from .security import leer_token
 
@@ -24,6 +25,7 @@ SQL_PERFIL = """
 
 
 async def usuario_actual(
+    request: Request,
     credenciales: Annotated[HTTPAuthorizationCredentials | None, Depends(esquema)],
 ) -> dict:
     if credenciales is None:
@@ -41,6 +43,15 @@ async def usuario_actual(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuario no encontrado o inactivo.",
         )
+
+    # A partir de aquí cada línea del registro lleva la cédula. Sin esto, un
+    # error solo dice qué ruta falló, y «a alguien le falla aprobar» no se
+    # puede reproducir; con la cédula se sabe qué rol, qué región y qué
+    # solicitudes tenía delante quien lo sufrió.
+    registro.usuario_actual_log.set(perfil["cedula"])
+    # También en el scope: la línea final de cada petición la escribe un
+    # middleware que corre en otro contexto y no vería la variable.
+    request.state.quien = perfil["cedula"]
     return perfil
 
 
