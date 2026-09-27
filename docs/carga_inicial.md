@@ -29,10 +29,36 @@ python scripts\verificar.py
 
 Debe listar las migraciones **0001 a 0011** en verde.
 
-## 3. Pegue la carga
+## 3. Pegue la carga en Supabase
 
-Abra `supabase/carga_inicial.sql`, cópielo entero y ejecútelo en el SQL
-Editor. Al final devuelve dos tablas:
+El archivo `supabase/carga_inicial.sql` queda en la carpeta del proyecto,
+**en su computadora**. No se sube a GitHub a propósito: lleva cédulas,
+nombres, correos y teléfonos de 351 personas, que son datos personales bajo
+la LOPDP. Cada quien lo genera en su máquina.
+
+Para llevarlo a Supabase:
+
+1. Ábralo con el Bloc de notas o VS Code:
+
+   ```powershell
+   notepad supabase\carga_inicial.sql
+   ```
+
+2. Seleccione todo (`Ctrl+E` o `Ctrl+A`) y copie (`Ctrl+C`).
+
+3. En Supabase: **SQL Editor** → **New query** → pegue (`Ctrl+V`) → **Run**.
+
+> **Si el editor se queja de que el texto es muy largo**, no lo parta a la
+> mitad: la carga es una sola transacción y cortarla la deja incompleta.
+> Use en su lugar el cliente de línea de comandos, que no tiene ese límite:
+>
+> ```powershell
+> psql "postgresql://postgres.<ref>:<clave>@aws-0-...pooler.supabase.com:6543/postgres" -f supabase\carga_inicial.sql
+> ```
+>
+> La cadena de conexión es la misma de `DATABASE_URL` en su `backend\.env`.
+
+Al final devuelve dos tablas:
 
 - **Saldos que no se cargaron**, con el motivo. Esas personas entran con el
   saldo que calcula el sistema; revise el caso y corríjalo a mano.

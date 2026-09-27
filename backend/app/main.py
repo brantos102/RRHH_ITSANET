@@ -10,8 +10,8 @@ from fastapi.responses import JSONResponse
 
 from .config import get_settings
 from .db import abrir_pool, cerrar_pool, obtener_uno
-from .routers import (administracion, aprobaciones, auth, firmas, garita, informes,
-                      solicitudes)
+from .routers import (administracion, aprobaciones, auth, chat, ficha, firmas,
+                      garita, informes, solicitudes)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -111,6 +111,8 @@ app.include_router(aprobaciones.router)
 app.include_router(garita.router)
 app.include_router(informes.router)
 app.include_router(administracion.router)
+app.include_router(ficha.router)
+app.include_router(chat.router)
 
 
 @app.get("/salud", tags=["Sistema"])

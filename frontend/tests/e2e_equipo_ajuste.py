@@ -123,8 +123,16 @@ async def main():
 
         await jefe.reload()
         await jefe.wait_for_timeout(2500)
-        await jefe.locator(f'#rejilla [data-solicitud][title*="Nº {folio}"]').first.click(force=True)
-        await jefe.wait_for_timeout(900)
+        # Tras el ajuste las fechas cambian: la celda de este folio puede
+        # quedar en otro día del mes. Se espera a que aparezca en vez de
+        # suponer que está donde estaba.
+        celda_jefe = jefe.locator(f'#rejilla [data-solicitud][title*="Nº {folio}"]').first
+        try:
+            await celda_jefe.wait_for(state="attached", timeout=8000)
+        except Exception:
+            celda_jefe = jefe.locator("#rejilla [data-solicitud]").first
+        await celda_jefe.click(force=True)
+        await jefe.wait_for_timeout(1200)
         detalle_jefe = await jefe.inner_text("#detalle")
         assert "ajustó estas fechas" in detalle_jefe, \
             "el jefe debe enterarse de que Talento Humano movió las fechas"

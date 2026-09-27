@@ -105,6 +105,25 @@ export const api = {
     peticion(`/aprobaciones/${id}/ajustar`, { method: "POST", body: JSON.stringify(datos) }),
   ajustesDe: (id) => peticion(`/solicitudes/${id}/ajustes`),
   calendarioEquipo: (params = "") => peticion(`/jefe/calendario-equipo${params}`),
+  // --- ficha personal ---
+  miFicha: () => peticion("/mi-ficha"),
+  corregirFicha: (datos) => peticion("/mi-ficha", { method: "PATCH", body: JSON.stringify(datos) }),
+  pedirCambioFicha: (datos) =>
+    peticion("/mi-ficha/cambios", { method: "POST", body: JSON.stringify(datos) }),
+  cambiosFichaPendientes: () => peticion("/rrhh/cambios-ficha"),
+  resolverCambioFicha: (id, accion, motivo = null) =>
+    peticion(`/rrhh/cambios-ficha/${id}`, {
+      method: "POST", body: JSON.stringify({ accion, motivo }),
+    }),
+  // --- chat con Talento Humano ---
+  chatContactos: () => peticion("/chat/contactos"),
+  misConversaciones: () => peticion("/chat/mis-conversaciones"),
+  bandejaChat: () => peticion("/chat/bandeja"),
+  leerConversacion: (id) => peticion(`/chat/conversaciones/${id}`),
+  enviarMensaje: (datos) =>
+    peticion("/chat/mensajes", { method: "POST", body: JSON.stringify(datos) }),
+  cerrarConversacion: (id) =>
+    peticion(`/chat/conversaciones/${id}/cerrar`, { method: "POST" }),
   feriados: () => peticion("/catalogos/feriados"),
   companeros: () => peticion("/catalogos/companeros"),
   calendario: (desde, hasta) =>
