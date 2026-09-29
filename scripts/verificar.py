@@ -190,6 +190,7 @@ async def revisar_base() -> int:
         ("0015 sin ausencias solapadas", None),
         ("0016 saldo comprensible", None),
         ("0017 excepción sin regla de fin de semana", None),
+        ("0018 hora real de regreso", "public.v_retornos"),
     ]
 
     # Las migraciones que solo cambian funciones se comprueban por la función.

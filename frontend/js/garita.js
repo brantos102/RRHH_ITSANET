@@ -34,11 +34,27 @@ setInterval(reloj, 1000);
 /* ------------------------------------------------------------- veredicto */
 function mostrarVeredicto(r) {
   const ok = r.autorizado;
+  // El mismo código leído dos veces: la primera es la salida, la segunda el
+  // regreso. Se distinguen en pantalla porque el guardia necesita saber de un
+  // vistazo cuál de los dos acaba de anotar, y si la persona volvió tarde.
+  const retorno = r.movimiento === "retorno";
+  const tarde = retorno && r.retorno && r.retorno.a_tiempo === false;
+
+  const fondo = !ok ? "bg-rose-700"
+    : tarde ? "bg-amber-600"
+    : retorno ? "bg-sky-700"
+    : r.movimiento === "ya_completo" ? "bg-slate-600"
+    : "bg-emerald-600";
   $("veredicto-fondo").className =
-    `flex h-full w-full flex-col items-center justify-center px-6 text-center text-white ${
-      ok ? "bg-emerald-600" : "bg-rose-700"}`;
-  $("veredicto-icono").textContent = ok ? "✅" : "⛔";
-  $("veredicto-titulo").textContent = ok ? "SALIDA AUTORIZADA" : "NO AUTORIZADO";
+    `flex h-full w-full flex-col items-center justify-center px-6 text-center text-white ${fondo}`;
+
+  $("veredicto-icono").textContent = !ok ? "⛔"
+    : tarde ? "⏰" : retorno ? "↩️" : r.movimiento === "ya_completo" ? "✔️" : "✅";
+  $("veredicto-titulo").textContent = !ok ? "NO AUTORIZADO"
+    : tarde ? "REGRESO FUERA DE HORA"
+    : retorno ? "REGRESO REGISTRADO"
+    : r.movimiento === "ya_completo" ? "YA COMPLETO"
+    : "SALIDA AUTORIZADA";
   $("veredicto-motivo").textContent = r.motivo || "";
 
   const filas = [];
@@ -48,7 +64,20 @@ function mostrarVeredicto(r) {
   if (r.folio) filas.push(["Solicitud", `Nº ${r.folio}`]);
   if (r.tipo) filas.push(["Tipo", r.tipo]);
   if (r.hora_inicio) filas.push(["Horario", `${r.hora_inicio} a ${r.hora_fin}`]);
-  if (ok) {
+  if (retorno && r.retorno) {
+    const hora = (v) => v ? new Date(v).toLocaleTimeString("es-EC",
+      { hour: "2-digit", minute: "2-digit" }) : "—";
+    filas.push(["Salió", hora(r.retorno.salio)]);
+    filas.push(["Volvió", hora(r.retorno.volvio)]);
+    filas.push(["Debía volver", hora(r.retorno.esperado)]);
+    const min = r.retorno.exceso_minutos;
+    if (min !== null && min !== undefined && min > 0) {
+      const h = Math.floor(min / 60), m = min % 60;
+      filas.push(["Se pasó", h ? (m ? `${h} h ${m} min` : `${h} h`) : `${m} min`]);
+    } else if (r.retorno.exceso_dias) {
+      filas.push(["Se pasó", `${r.retorno.exceso_dias} día(s)`]);
+    }
+  } else if (ok) {
     // Las firmas que respaldan la salida: es lo que el guardia debe poder mostrar
     filas.push(["Autorizó el jefe", r.autorizo_jefe || "—"]);
     filas.push(["Autorizó Talento Humano", r.autorizo_rrhh || "—"]);

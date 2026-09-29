@@ -75,7 +75,7 @@ async def validar_qr(lectura: LecturaQR, request: Request, guardia: Guardia) -> 
     solicitud = await obtener_uno(
         """
         select r.id, r.folio, r.estado, r.fecha_inicio, r.fecha_fin, r.hora_inicio, r.hora_fin,
-               r.qr_expira_en, r.qr_usado_en, r.tipo,
+               r.qr_expira_en, r.qr_usado_en, r.tipo, r.retorno_en,
                u.id as user_id, u.cedula, u.nombre, u.cargo, u.departamento, u.telefono,
                pt.nombre as categoria,
                j.nombre as autorizo_jefe, h.nombre as autorizo_rrhh,
@@ -127,7 +127,48 @@ async def validar_qr(lectura: LecturaQR, request: Request, guardia: Guardia) -> 
                                 request_id=str(solicitud["id"]))
         return {"autorizado": False, "motivo": motivo, **base}
 
-    # Autorizado: se registra la salida y se cuenta el uso del código
+    # El mismo código leído por segunda vez es el REGRESO, no otra salida.
+    #
+    # Antes, quien volvía y pasaba su código quedaba anotado como si saliera de
+    # nuevo: de un permiso de 12:00 a 15:00 había dos salidas y ningún retorno,
+    # y nadie podía saber si la persona volvió a las 15:00 o a las 18:00. El
+    # guardia no tiene que aprender nada nuevo: pasa el código igual que antes.
+    ya_salio = await obtener_uno(
+        """select 1 as x from public.access_logs
+            where request_id = %s and tipo_acceso = 'salida_empleado' and autorizado
+            limit 1""",
+        (solicitud["id"],),
+    )
+    if ya_salio and solicitud["retorno_en"] is None:
+        detalle = await obtener_uno(
+            "select public.registrar_retorno(%s, %s, %s, %s) as r",
+            (solicitud["id"], guardia["id"], ip_del_cliente(request),
+             (request.headers.get("user-agent") or "")[:500]),
+        )
+        r = detalle["r"]
+        await registrar(request, "garita_retorno_registrado", user_id=str(guardia["id"]),
+                        cedula=guardia["cedula"], entidad="requests",
+                        entidad_id=str(solicitud["id"]),
+                        detalle={"empleado": solicitud["nombre"], "folio": solicitud["folio"],
+                                 "exceso_minutos": r.get("exceso_minutos"),
+                                 "exceso_dias": r.get("exceso_dias")})
+        return {
+            "autorizado": True,
+            "movimiento": "retorno",
+            "motivo": _texto_retorno(r),
+            "retorno": r,
+            **base,
+        }
+
+    if ya_salio and solicitud["retorno_en"] is not None:
+        return {
+            "autorizado": True,
+            "movimiento": "ya_completo",
+            "motivo": "Esta autorización ya tiene su salida y su regreso registrados.",
+            **base,
+        }
+
+    # Primera lectura: se registra la salida y se cuenta el uso del código
     async with conexion() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -152,10 +193,33 @@ async def validar_qr(lectura: LecturaQR, request: Request, guardia: Guardia) -> 
 
     return {
         "autorizado": True,
+        "movimiento": "salida",
         "motivo": "Salida autorizada.",
         "ya_usado_antes": solicitud["qr_usado_en"] is not None,
         **base,
     }
+
+
+def _texto_retorno(r: dict) -> str:
+    """Lo que el guardia necesita leer de un vistazo, sin hacer cuentas."""
+    if r.get("a_tiempo"):
+        return "Regreso registrado. Volvió dentro de lo autorizado."
+
+    minutos = r.get("exceso_minutos")
+    if minutos is not None and minutos > 0:
+        horas, resto = divmod(int(minutos), 60)
+        if horas and resto:
+            atraso = f"{horas} h {resto} min"
+        elif horas:
+            atraso = f"{horas} h"
+        else:
+            atraso = f"{resto} min"
+        return f"Regreso registrado. Volvió {atraso} después de la hora autorizada."
+
+    dias = r.get("exceso_dias") or 0
+    if dias > 0:
+        return (f"Regreso registrado. Volvió {dias} día(s) después de lo autorizado.")
+    return "Regreso registrado."
 
 
 async def _registrar_acceso(request: Request, guardia: dict, *, autorizado: bool,
