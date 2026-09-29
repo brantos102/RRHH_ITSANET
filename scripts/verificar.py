@@ -47,23 +47,36 @@ def revisar_versiones() -> None:
     """
     from importlib.metadata import PackageNotFoundError, version
 
-    criticas = {}
-    for linea in (RAIZ / "backend" / "requirements.txt").read_text().splitlines():
+    # Lo que hace falta para EJECUTAR y lo que solo hace falta para PROBAR se
+    # separan por el encabezado «# desarrollo» del requirements.txt. Sin esta
+    # distinción, faltar `pypdf` —que solo se usa para leer un PDF dentro de
+    # una prueba— bloqueaba el arranque del sistema entero.
+    criticas: dict[str, str] = {}
+    de_pruebas: dict[str, str] = {}
+    destino = criticas
+    for linea in (RAIZ / "backend" / "requirements.txt").read_text(encoding="utf-8").splitlines():
         linea = linea.strip()
+        if linea.lower().startswith("# desarrollo"):
+            destino = de_pruebas
+            continue
         if "==" in linea and not linea.startswith("#"):
             nombre, anclada = linea.split("==", 1)
-            criticas[nombre.split("[")[0]] = anclada
+            destino[nombre.split("[")[0]] = anclada
 
-    desajustes = []
-    faltantes = []
-    for paquete, anclada in criticas.items():
-        try:
-            instalada = version(paquete)
-        except PackageNotFoundError:
-            faltantes.append(paquete)
-            continue
-        if instalada != anclada:
-            desajustes.append(f"{paquete} {instalada} (anclada: {anclada})")
+    def revisar(paquetes: dict[str, str]) -> tuple[list[str], list[str]]:
+        faltan, distintas = [], []
+        for paquete, anclada in paquetes.items():
+            try:
+                instalada = version(paquete)
+            except PackageNotFoundError:
+                faltan.append(paquete)
+                continue
+            if instalada != anclada:
+                distintas.append(f"{paquete} {instalada} (anclada: {anclada})")
+        return faltan, distintas
+
+    faltantes, desajustes = revisar(criticas)
+    faltan_pruebas, _ = revisar(de_pruebas)
 
     if faltantes:
         fallo(f"Faltan librerías: {', '.join(faltantes)}",
@@ -75,6 +88,11 @@ def revisar_versiones() -> None:
         print(f"    {GRIS}→ pip install -r backend/requirements.txt  (si algo falla raro){FIN}")
     else:
         print(f"  {OK} Librerías en las versiones probadas")
+
+    # Las de pruebas no impiden usar el sistema: se avisa y se sigue.
+    if faltan_pruebas and not faltantes:
+        print(f"  {AVISO} Solo para ejecutar las pruebas falta: {', '.join(faltan_pruebas)}")
+        print(f"    {GRIS}→ pip install {' '.join(faltan_pruebas)}   (no hace falta para usar el sistema){FIN}")
 
 
 def main() -> int:
