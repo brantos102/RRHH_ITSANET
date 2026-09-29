@@ -16,8 +16,17 @@ const estado = { abierto: false, conversacion: null, contactos: null, sondeo: nu
 
 const ES_RRHH = ["rrhh", "admin"].includes(sesion.perfil?.rol);
 
+const PAGINA = location.pathname.split("/").pop() || "index.html";
+
 export function montarChat() {
-  if (!sesion.vigente || ES_RRHH) return;   // Talento Humano usa su bandeja
+  if (!sesion.vigente) return;
+  // Se monta desde la barra, que está en todas las pantallas; sin esta
+  // guarda una segunda llamada dejaría dos burbujas superpuestas.
+  if (document.getElementById("chat-burbuja")) return;
+  // Talento Humano no se escribe a sí mismo: su burbuja lleva a la bandeja,
+  // donde lee y responde. Antes no tenía nada —ni burbuja ni bandeja— y por
+  // eso, entrando como administrador, el chat parecía no existir.
+  if (ES_RRHH) return montarAtajoBandeja();
 
   const caja = document.createElement("div");
   caja.innerHTML = `
@@ -191,4 +200,42 @@ function abrirMeet(modo) {
   }).then((r) => { estado.conversacion = r.conversacion_id; cargar(); })
     .catch(() => { /* el aviso es complementario: la sala se abre igual */ });
   window.open(sala, "_blank", "noopener");
+}
+
+/* ------------------------------------------------- burbuja de Talento Humano */
+
+function montarAtajoBandeja() {
+  if (PAGINA === "mensajes.html") return;   // ya está dentro de la bandeja
+
+  const enlace = document.createElement("a");
+  enlace.href = "mensajes.html";
+  enlace.id = "chat-burbuja";
+  enlace.setAttribute("aria-label", "Mensajes de los colaboradores");
+  enlace.className =
+    "fixed bottom-5 right-5 z-40 grid h-14 w-14 place-items-center rounded-full " +
+    "bg-slate-900 text-white shadow-lg transition hover:bg-slate-800";
+  enlace.innerHTML = `
+    <svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round"
+            d="M8 10.5h8M8 14h5m7-1.5a8.5 8.5 0 0 1-12.2 7.7L4 21l.9-3.6A8.5 8.5 0 1 1 20 12.5Z"/>
+    </svg>
+    <span id="chat-punto" class="absolute -right-1 -top-1 hidden min-w-[1.25rem] rounded-full
+          bg-rose-500 px-1 text-center text-[11px] font-bold leading-5 text-white
+          ring-2 ring-white"></span>`;
+  document.body.appendChild(enlace);
+
+  const contar = async () => {
+    try {
+      const hilos = await api.bandejaChat("abierta");
+      const sinLeer = hilos.reduce((n, h) => n + (h.sin_leer || 0), 0);
+      const punto = $("chat-punto");
+      punto.textContent = sinLeer > 99 ? "99+" : sinLeer;
+      punto.classList.toggle("hidden", sinLeer === 0);
+      enlace.setAttribute("aria-label", sinLeer
+        ? `Mensajes de los colaboradores: ${sinLeer} sin leer`
+        : "Mensajes de los colaboradores");
+    } catch { /* sin conexión la burbuja simplemente no avisa */ }
+  };
+  contar();
+  estado.sondeo = setInterval(contar, 60000);
 }

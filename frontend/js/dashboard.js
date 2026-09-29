@@ -2,7 +2,6 @@
 import { api, sesion, fecha, fechaHora, esc, ESTADOS, ErrorApi } from "./api.js";
 import { PanelFirma } from "./firma.js";
 import { montarNavegacion } from "./navegacion.js";
-import { montarChat } from "./chat.js";
 
 const $ = (id) => document.getElementById(id);
 const estado = {
@@ -95,7 +94,6 @@ async function cargar() {
   pintarCalendario();
   pintarPendientes();
   pintarAnulaciones();
-  montarChat();
 }
 
 /* ------------------------------------------------------------- pestañas */

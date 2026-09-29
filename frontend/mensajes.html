@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>Mensajes · Talento Humano</title>
+<link rel="icon" type="image/png" href="img/icono.png">
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="vendor/tailwind.css">
+<script src="config.js"></script>
+</head>
+
+<body class="min-h-dvh bg-slate-100 text-slate-900 antialiased">
+<div id="barra"></div>
+
+<main class="mx-auto max-w-6xl px-4 py-5 pb-24">
+
+  <section class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+      <div>
+        <h1 class="font-medium">Mensajes de los colaboradores</h1>
+        <p id="sub-bandeja" class="mt-0.5 text-sm text-slate-500">Cargando…</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <div class="inline-flex rounded-xl bg-slate-100 p-0.5 text-sm">
+          <button type="button" data-estado="abierta"
+                  class="rounded-lg px-3 py-1.5 font-medium">Abiertas</button>
+          <button type="button" data-estado="cerrada"
+                  class="rounded-lg px-3 py-1.5 text-slate-500">Cerradas</button>
+        </div>
+        <button id="btn-refrescar" title="Actualizar"
+                class="rounded-xl bg-slate-100 px-3 py-2 text-sm font-medium hover:bg-slate-200">
+          Actualizar
+        </button>
+      </div>
+    </header>
+
+    <div class="grid lg:grid-cols-[22rem_1fr]">
+
+      <!-- ===== Lista de conversaciones ===== -->
+      <div class="border-b border-slate-200 lg:border-b-0 lg:border-r">
+        <div class="px-4 py-3">
+          <input type="search" id="buscar-hilo"
+                 placeholder="Nombre, cédula, departamento o texto"
+                 class="w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                        focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </div>
+        <div id="lista-hilos" class="max-h-[32rem] divide-y divide-slate-100 overflow-y-auto lg:max-h-[38rem]">
+          <p class="px-5 py-8 text-center text-sm text-slate-500">Cargando…</p>
+        </div>
+      </div>
+
+      <!-- ===== Conversación ===== -->
+      <div class="flex min-h-[28rem] flex-col">
+        <header id="cabecera-hilo" class="hidden items-start justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+          <div class="min-w-0">
+            <p id="hilo-persona" class="truncate font-medium"></p>
+            <p id="hilo-detalle" class="mt-0.5 truncate text-xs text-slate-500"></p>
+          </div>
+          <div class="flex shrink-0 items-center gap-2">
+            <span id="hilo-estado" class="rounded-full px-2.5 py-1 text-xs font-medium"></span>
+            <button id="btn-cerrar-hilo"
+                    class="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium hover:bg-slate-200">
+              Cerrar consulta
+            </button>
+          </div>
+        </header>
+
+        <div id="hilo-mensajes" class="flex-1 space-y-2 overflow-y-auto bg-slate-50 px-4 py-4">
+          <p class="py-16 text-center text-sm text-slate-500">
+            Elija una consulta de la izquierda para leerla y responder.
+          </p>
+        </div>
+
+        <form id="form-responder" class="hidden items-end gap-2 border-t border-slate-200 p-3">
+          <textarea id="texto-respuesta" rows="1" maxlength="2000" required
+                    placeholder="Escriba su respuesta (Enter envía, Mayús+Enter salta de línea)"
+                    class="max-h-32 min-h-[2.75rem] flex-1 resize-none rounded-xl border-0 bg-slate-50
+                           px-3 py-2.5 text-sm ring-1 ring-slate-300 focus:bg-white
+                           focus:ring-2 focus:ring-slate-900"></textarea>
+          <button type="submit"
+                  class="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-slate-800">
+            Responder
+          </button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <p class="mt-4 px-1 text-xs leading-relaxed text-slate-500">
+    Lo que se escribe aquí queda registrado y es parte del expediente laboral.
+    No pida por este medio datos de salud, afiliación sindical ni otros datos
+    sensibles: la LOPDP exige recabarlos solo por la vía prevista y con su
+    justificación (Arts. 4 y 10).
+  </p>
+</main>
+
+<div class="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4">
+  <p id="aviso" class="hidden max-w-sm rounded-xl bg-slate-900 px-4 py-3 text-center text-sm text-white shadow-lg"></p>
+</div>
+
+<script type="module" src="js/mensajes.js"></script>
+</body>
+</html>

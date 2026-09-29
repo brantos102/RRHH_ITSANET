@@ -20,6 +20,10 @@ const MODULOS = [
       { texto: "Pendientes de autorización", href: "dashboard.html#aprobaciones", contador: "pendientes" },
       { texto: "Pendientes de anulación", href: "dashboard.html#anulaciones", contador: "anulaciones" },
       { texto: "Colaboradores", href: "colaboradores.html" },
+      // La bandeja del chat: el backend la servía desde el principio y
+      // ninguna pantalla la consumía, así que las consultas llegaban y
+      // nadie podía leerlas.
+      { texto: "Mensajes de colaboradores", href: "mensajes.html" },
       { texto: "Días no laborables", href: "administracion.html#feriados" },
       { texto: "Antigüedades y días", href: "administracion.html#antiguedades" },
       // La bitácora es herramienta de Talento Humano, no solo del administrador:
@@ -194,6 +198,12 @@ export function montarNavegacion(contenedor, { activo = "panel", contadores = {}
   paneles.forEach((p) => p.addEventListener("click", (e) => e.stopPropagation()));
 
   montarNotificaciones(contenedor);
+  // El chat se monta desde aquí y no desde cada pantalla: antes solo lo
+  // llamaba el panel, de modo que en el calendario, los informes o
+  // administración la burbuja desaparecía sin explicación.
+  import("./chat.js").then((m) => m.montarChat()).catch(() => {
+    /* si el módulo falla, la pantalla sigue siendo usable */
+  });
 
   contenedor.querySelector("#nav-salir").addEventListener("click", async () => {
     const { api } = await import("./api.js");

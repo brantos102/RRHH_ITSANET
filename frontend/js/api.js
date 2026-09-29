@@ -141,7 +141,7 @@ export const api = {
   // --- chat con Talento Humano ---
   chatContactos: () => peticion("/chat/contactos"),
   misConversaciones: () => peticion("/chat/mis-conversaciones"),
-  bandejaChat: () => peticion("/chat/bandeja"),
+  bandejaChat: (estado = "abierta") => peticion(`/chat/bandeja?estado=${estado}`),
   leerConversacion: (id) => peticion(`/chat/conversaciones/${id}`),
   enviarMensaje: (datos) =>
     peticion("/chat/mensajes", { method: "POST", body: JSON.stringify(datos) }),
