@@ -166,3 +166,33 @@ async def test_solo_garita_o_talento_humano_registran_el_retorno(cliente, auth, 
         await obtener_uno("select public.registrar_retorno(%s, %s) as r",
                           (p["id"], empleado["id"]))
     assert "garita" in str(fallo.value).lower() or "solo" in str(fallo.value).lower()
+
+
+async def test_volver_antes_de_hora_no_es_un_exceso_negativo(
+    cliente, auth, jefe_auth, rrhh_auth, guardia_auth
+):
+    """Volver antes no es un exceso de nada.
+
+    Quedaba anotado como «exceso: -528 minutos». La clasificación de
+    puntualidad seguía siendo correcta —solo cuenta como tarde lo que pasa de
+    cero—, pero cualquier informe que sumara o promediara esa columna quedaba
+    falseado: los regresos puntuales restaban. La hora exacta no se pierde,
+    está en `retorno_en`.
+    """
+    p = await _permiso_por_horas_aprobado(cliente, auth, jefe_auth, rrhh_auth)
+
+    # Una franja que termina mucho después de ahora: el regreso es temprano.
+    await ejecutar(
+        """update public.requests
+              set hora_inicio = '00:01', hora_fin = '23:59'
+            where id = %s""", (p["id"],))
+
+    await cliente.post("/garita/validar-qr", headers=guardia_auth, json={"codigo": p["qr"]})
+    r = await cliente.post("/garita/validar-qr", headers=guardia_auth, json={"codigo": p["qr"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["retorno"]["exceso_minutos"] == 0
+    assert r.json()["retorno"]["a_tiempo"] is True
+
+    fila = await obtener_uno(
+        "select retorno_exceso_minutos from public.requests where id = %s", (p["id"],))
+    assert fila["retorno_exceso_minutos"] == 0

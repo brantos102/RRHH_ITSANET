@@ -9,8 +9,14 @@ persona no puede estar ausente dos veces los mismos días— la segunda corrida
 choca con lo que dejó la primera. No es un defecto de la regla: los guiones
 nunca fueron repetibles, solo lo parecían.
 
+Lo mismo pasa con la ficha: un guion pide corregir el cargo, la corrida
+anterior ya lo aplicó, y el segundo pedido choca con «el valor es el mismo que
+ya está registrado». Y con los códigos de acceso, que se limitan por hora: seis
+corridas seguidas dejan al guardia de prueba sin poder entrar.
+
 Toca únicamente al personal de prueba —el de correo `@itsanet.test`— y jamás a
-la planilla real. Cancela sus solicitudes vivas; no borra nada.
+la planilla real. Cancela sus solicitudes vivas y repone su ficha; no borra
+personas.
 
     python scripts/limpiar_pruebas.py            # dice qué haría
     python scripts/limpiar_pruebas.py --aplicar  # lo hace
@@ -51,7 +57,14 @@ async def principal(aplicar: bool) -> int:
 
     vivas = await obtener_todos(SQL_VIVAS, (f"%{DOMINIO_DE_PRUEBA}",))
     if not vivas:
-        print(f"No hay solicitudes vivas del personal {DOMINIO_DE_PRUEBA}. Nada que hacer.")
+        print(f"No hay solicitudes vivas del personal {DOMINIO_DE_PRUEBA}.")
+        if not aplicar:
+            print("Repita con --aplicar para reponer también la ficha.")
+            return 0
+        # La ficha se repone igual: es lo que hace repetible la prueba de
+        # «corrijo mi cargo», que no tiene nada que ver con las solicitudes.
+        print(await reponer_ficha())
+        print("Las pruebas de navegador ya pueden correr.")
         return 0
 
     print(f"Solicitudes vivas del personal de prueba ({len(vivas)}):")
@@ -76,8 +89,47 @@ async def principal(aplicar: bool) -> int:
         except Exception as exc:  # noqa: BLE001
             print(f"  ✗ Nº {v['folio']}: {exc}")
 
-    print(f"\nCanceladas {canceladas} de {len(vivas)}. Las pruebas de navegador ya pueden correr.")
+    repuestas = await reponer_ficha()
+    print(f"\nCanceladas {canceladas} de {len(vivas)}. {repuestas}")
+    print("Las pruebas de navegador ya pueden correr.")
     return 0 if canceladas == len(vivas) else 1
+
+
+async def reponer_ficha() -> str:
+    """Devuelve la ficha del personal de prueba a como estaba antes.
+
+    Sin esto, la segunda corrida de las pruebas de ficha falla por partida
+    doble: el cargo que el guion pide corregir ya es el corregido —y pedir el
+    valor vigente se rechaza, con razón—, y el pedido anterior sigue en la
+    bandeja de Talento Humano confundiendo lo que se está mirando.
+    """
+    condicion = "email::text like %s"
+    patron = (f"%{DOMINIO_DE_PRUEBA}",)
+
+    await obtener_uno(
+        f"""delete from public.cambios_ficha
+             where user_id in (select id from public.users where {condicion})
+             returning 1 as x""", patron)
+    await obtener_uno(
+        f"""delete from public.confirmaciones_correo
+             where user_id in (select id from public.users where {condicion})
+             returning 1 as x""", patron)
+    await obtener_uno(
+        f"""delete from public.altas_pendientes
+             where user_id in (select id from public.users where {condicion})
+             returning 1 as x""", patron)
+    # El límite de envíos cuenta por hora y por cédula: repetir las pruebas
+    # dejaba al personal de prueba con 429 al pedir el código.
+    await obtener_uno(
+        f"""delete from public.auth_otp
+             where cedula in (select cedula from public.users where {condicion})
+             returning 1 as x""", patron)
+    await obtener_uno(
+        f"""update public.users
+               set cargo_confirmado_en = null, jefe_confirmado_en = null
+             where {condicion} returning 1 as x""", patron)
+
+    return "Ficha de prueba repuesta (cambios, confirmaciones y códigos)."
 
 
 async def _con_cierre(aplicar: bool) -> int:

@@ -410,3 +410,120 @@ select c.id, c.user_id, u.cedula, u.nombre as persona, u.departamento, u.ciudad,
  order by c.created_at;
 
 grant select on public.v_cambios_ficha_pendientes to authenticated;
+
+-- =========================================================================
+-- H. El exceso de un regreso a tiempo es cero, no un número negativo
+--
+-- Quien volvía antes de la hora quedaba con «exceso: -528 minutos». La
+-- clasificación de puntualidad era correcta —solo cuenta como tarde lo que
+-- pasa de cero—, pero el número en sí no lo era: un informe que sume o
+-- promedie una columna llamada «exceso» quedaba falseado por los regresos
+-- puntuales, que restaban. Volver antes no es un exceso de nada.
+--
+-- No se pierde información: la hora real está en `retorno_en`, que es de
+-- donde sale cualquier cálculo fino.
+-- =========================================================================
+
+create or replace function public.registrar_retorno(
+  p_request_id uuid,
+  p_guardia_id uuid,
+  p_ip         inet    default null,
+  p_agente     text    default null
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $ret$
+declare
+  v_sol      public.requests;
+  v_usuario  public.users;
+  v_rol      public.user_role;
+  v_salida   timestamptz;
+  v_esperado timestamptz;
+  v_ahora    timestamptz := now();
+  v_min      integer;
+  v_dias     integer;
+  v_por_horas boolean;
+begin
+  select rol into v_rol from public.users where id = p_guardia_id;
+  if v_rol not in ('guardia', 'rrhh', 'admin') then
+    raise exception 'Solo garita o Talento Humano registran el retorno';
+  end if;
+
+  select * into v_sol from public.requests where id = p_request_id for update;
+  if not found then
+    raise exception 'La solicitud no existe';
+  end if;
+  if v_sol.estado <> 'aprobado' then
+    raise exception 'La solicitud no está aprobada (está en %)', v_sol.estado;
+  end if;
+
+  -- Sin salida previa no hay retorno que registrar: sería anotar que volvió
+  -- alguien que nunca se fue.
+  select created_at into v_salida
+    from public.access_logs
+   where request_id = p_request_id and tipo_acceso = 'salida_empleado' and autorizado
+   order by created_at limit 1;
+  if v_salida is null then
+    raise exception 'No hay salida registrada para esta autorización: primero se registra la salida';
+  end if;
+
+  if v_sol.retorno_en is not null then
+    raise exception 'El retorno ya quedó registrado el %',
+      to_char(v_sol.retorno_en, 'DD/MM/YYYY HH24:MI');
+  end if;
+
+  select * into v_usuario from public.users where id = v_sol.user_id;
+
+  v_por_horas := v_sol.hora_fin is not null and v_sol.fecha_inicio = v_sol.fecha_fin;
+
+  if v_por_horas then
+    v_esperado := (v_sol.fecha_fin + v_sol.hora_fin)::timestamptz;
+    -- `greatest(..., 0)`: volver antes de la hora no es un exceso de nada.
+    v_min  := greatest(round(extract(epoch from (v_ahora - v_esperado)) / 60.0), 0);
+    v_dias := null;
+  else
+    -- Se esperaba de vuelta el día siguiente al último de ausencia.
+    v_esperado := (v_sol.fecha_fin + 1)::timestamptz;
+    v_min  := null;
+    v_dias := greatest(v_ahora::date - (v_sol.fecha_fin + 1), 0);
+  end if;
+
+  update public.requests set
+    retorno_en             = v_ahora,
+    retorno_exceso_minutos = v_min,
+    retorno_exceso_dias    = v_dias,
+    retorno_guardia        = p_guardia_id,
+    updated_at             = now()
+  where id = p_request_id;
+
+  insert into public.access_logs
+    (user_id, cedula, request_id, tipo_acceso, autorizado, guardia_id, ip, user_agent, metadata)
+  values
+    (v_sol.user_id, v_usuario.cedula, p_request_id, 'retorno_empleado', true,
+     p_guardia_id, p_ip, p_agente,
+     jsonb_build_object('esperado', v_esperado, 'exceso_minutos', v_min,
+                        'exceso_dias', v_dias));
+
+  return jsonb_build_object(
+    'folio',           v_sol.folio,
+    'nombre',          v_usuario.nombre,
+    'cedula',          v_usuario.cedula,
+    'salio',           v_salida,
+    'volvio',          v_ahora,
+    'esperado',        v_esperado,
+    'por_horas',       v_por_horas,
+    'exceso_minutos',  v_min,
+    'exceso_dias',     v_dias,
+    'a_tiempo',        coalesce(v_min, 0) <= 0 and coalesce(v_dias, 0) = 0
+  );
+end;
+$ret$;
+
+revoke all on function public.registrar_retorno(uuid, uuid, inet, text) from public;
+
+-- Los regresos ya registrados con un exceso negativo se corrigen: son
+-- regresos puntuales, no adelantos de nueve horas.
+update public.requests
+   set retorno_exceso_minutos = 0
+ where retorno_exceso_minutos < 0;

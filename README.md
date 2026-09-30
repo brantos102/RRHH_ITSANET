@@ -188,6 +188,20 @@ hizo. Detalle en **[docs/registros.md](docs/registros.md)**.
 
 ## Verificación
 
+Tres niveles, del más rápido al más completo. Guía completa en
+**[docs/comprobar.md](docs/comprobar.md)**.
+
+```powershell
+python scripts\verificar.py            # ¿está bien montado? (migraciones, .env, CORS)
+cd backend && python -m pytest -q      # ¿se cumplen las reglas? (299 pruebas)
+python scripts\pruebas_navegador.py    # ¿funciona la pantalla? (4 recorridos reales)
+```
+
+El tercero es el que dos veces salvó a este proyecto de entregar una función
+entera en el servidor y ausente de la interfaz. Recorre la aplicación en un
+navegador de verdad, se puede repetir cuantas veces haga falta y solo toca al
+personal de prueba.
+
 ```
 supabase/tests/
 ├── 00_verificar_instalacion.sql  # qué migraciones están aplicadas
