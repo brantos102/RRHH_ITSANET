@@ -47,6 +47,18 @@ document.querySelectorAll("[data-seccion]").forEach((b) =>
   b.addEventListener("click", () => mostrar(b.dataset.seccion))
 );
 
+/* Y cuando cambia el fragmento de la dirección.
+
+   Sin esto, los enlaces de la barra lateral —«Lineamientos», «Cambios de
+   ficha», «Días no laborables»— solo funcionaban viniendo de otra pantalla.
+   Estando ya en administración, el navegador cambiaba el «#» y no recargaba
+   nada, así que pulsarlos no hacía absolutamente nada y parecía que esas
+   opciones estaban puestas de adorno. */
+window.addEventListener("hashchange", () => {
+  const seccion = location.hash.slice(1);
+  if (seccion && seccion in CARGADORES) mostrar(seccion);
+});
+
 /* --------------------------------------------------------------- usuarios */
 function tablaUsuarios(usuarios) {
   if (!usuarios.length) {

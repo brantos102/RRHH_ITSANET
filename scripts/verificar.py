@@ -218,6 +218,9 @@ async def revisar_base() -> int:
         ("0029 nadie sin forma de entrar", "public.v_sin_entrada"),
         ("0030 lineamientos editables", "public.lineamientos_solicitud"),
         ("0031 ningún día se pierde", None),
+        ("0032 el calendario recuerda los históricos", None),
+        ("0033 fines de semana cumplidos", "public.v_fines_semana"),
+        ("0034 personal temporal sin dinero", "public.v_jornadas_detalle"),
     ]
 
     # Las migraciones que solo cambian funciones se comprueban por la función.
@@ -250,6 +253,9 @@ async def revisar_base() -> int:
     # tenga la columna nueva, que es lo que esa línea hacía imposible.
     columnas_de_vista = {
         "0023 el calendario recuerda lo que pasó": ("v_calendario_equipo", "ya_ocurrio"),
+        # Esta une las vacaciones de la hoja a la cuadrícula del mes: se
+        # comprueba por la columna que dice de dónde viene cada ausencia.
+        "0032 el calendario recuerda los históricos": ("v_calendario_equipo", "procedencia"),
     }
     for nombre, objeto in migraciones:
         if nombre in columnas_de_vista:

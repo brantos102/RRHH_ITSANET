@@ -260,6 +260,30 @@ export const api = {
     peticion(`/rrhh/lineamientos/${id}`,
              { method: "PATCH", body: JSON.stringify(cambios) }),
 
+  // Personal temporal: el informe que se presenta a Finanzas.
+  opcionesInformeTemporal: () => peticion("/temporal/opciones-informe"),
+  informeTemporal: (filtro) =>
+    peticion("/temporal/informe", { method: "POST", body: JSON.stringify(filtro) }),
+  /* La descarga lleva el token, así que se pide con fetch y se guarda como
+     blob: un enlace normal iría sin cabecera de sesión y el servidor lo
+     rechazaría. El nombre lo pone el servidor, que sabe la fecha. */
+  bajarInformeTemporal: async (formato, filtro) => {
+    const respuesta = await fetch(`${API}/temporal/informe.${formato}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json",
+                 Authorization: `Bearer ${sesion.token}` },
+      body: JSON.stringify(filtro),
+    });
+    if (!respuesta.ok) throw new ErrorApi("No se pudo generar el archivo.", respuesta.status);
+    const cabecera = respuesta.headers.get("content-disposition") || "";
+    const nombre = /filename="([^"]+)"/.exec(cabecera)?.[1]
+      || `personal-temporal-${new Date().toISOString().slice(0, 10)}.${formato}`;
+    const url = URL.createObjectURL(await respuesta.blob());
+    Object.assign(document.createElement("a"), { href: url, download: nombre }).click();
+    URL.revokeObjectURL(url);
+    return nombre;
+  },
+
   // El expediente de una persona, para jefaturas y Talento Humano.
   buscarPersona: (q) => peticion(`/personas/buscar?q=${encodeURIComponent(q)}`),
   expediente: (id) => peticion(`/personas/${id}`),

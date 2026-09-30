@@ -131,16 +131,36 @@
       <p id="fecha-ingreso" class="mt-1 text-sm text-slate-500">—</p>
     </article>
 
+    <!-- Fines de semana obligatorios.
+
+         Callado a propósito. Antes le gritaba «2» a todo el mundo, incluido
+         quien ya había gozado sus períodos completos: quince días seguidos
+         contienen dos fines de semana por calendario, así que el aviso le
+         pedía declarar algo que ya había hecho. Un aviso que no se puede
+         atender enseña a ignorar los avisos.
+
+         Ahora, cuando no hay nada que resolver, dice «Al día» y punto. El
+         detalle —qué son y de dónde salen— va plegado: quien tiene la duda
+         lo abre, y quien no, no tropieza con él. -->
     <article data-bloque="fines_semana" class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
       <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Fines de semana</p>
       <p id="fds-pendientes" class="mt-2 text-2xl font-semibold">—</p>
       <p id="fds-detalle" class="mt-1 text-sm leading-snug text-slate-500">
         obligatorios por consumir en su período
       </p>
-      <p class="mt-2 text-xs leading-snug text-slate-400">
-        ¿Ya los tomó antes de usar este sistema? Escriba a Talento Humano: solo
-        ellos pueden corregirlo.
-      </p>
+      <details class="mt-2">
+        <summary class="cursor-pointer select-none text-xs font-medium text-slate-500
+                        hover:text-slate-800">¿Qué son estos días?</summary>
+        <div class="mt-1.5 space-y-1.5 text-xs leading-relaxed text-slate-500">
+          <p>
+            Los 15 días de vacaciones son <strong>calendario</strong>: dentro caen dos
+            fines de semana (Art.&nbsp;69 del Código del Trabajo). El sistema los cuenta
+            para que nadie tome solo los laborables y quede debiendo cuatro días que en
+            realidad ya descansó.
+          </p>
+          <p id="fds-nota"></p>
+        </div>
+      </details>
     </article>
   </section>
 

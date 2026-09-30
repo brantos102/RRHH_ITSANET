@@ -203,7 +203,7 @@ async def calendario(
         f"""
         select c.request_id, c.folio, c.user_id, c.nombre, c.departamento,
                c.fecha_inicio, c.fecha_fin, c.estado, c.motivo_general,
-               c.reemplazo_nombre
+               c.reemplazo_nombre, c.procedencia
         from public.v_calendario_equipo c
         where {alcance}
           and c.fecha_fin >= %(desde)s and c.fecha_inicio <= %(hasta)s
@@ -245,7 +245,7 @@ async def calendario_equipo(
         select c.request_id, c.folio, c.user_id, c.nombre, c.cargo, c.departamento,
                c.fecha_inicio, c.fecha_fin, c.hora_inicio, c.hora_fin,
                c.dias_solicitados, c.estado, c.motivo_general,
-               c.reemplazo_nombre, c.ajustada_en
+               c.reemplazo_nombre, c.ajustada_en, c.procedencia, c.historico_id
         from public.v_calendario_equipo c
         where {alcance}
           and c.fecha_fin >= %(desde)s and c.fecha_inicio <= %(hasta)s

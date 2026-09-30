@@ -112,6 +112,32 @@
   <!-- ===== Resumen ===== -->
   <section id="resumen" class="mt-4 hidden grid-cols-2 gap-3 sm:grid-cols-4"></section>
 
+  <!-- ===== Por departamento =====
+       Estaba en el menú y no existía: el enlace llevaba aquí y no pasaba
+       nada. Responde a la pregunta que se hace al planificar el año: en qué
+       meses se vacía cada área. -->
+  <section id="departamentos" class="mt-4 hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+      <div>
+        <h2 class="font-medium">Días de ausencia por departamento</h2>
+        <p class="mt-0.5 text-sm text-slate-500">
+          Mes a mes, solo lo aprobado. Para ver en qué épocas se queda corta cada área.
+        </p>
+      </div>
+      <div class="flex items-center gap-2">
+        <label class="text-sm text-slate-600" for="anio-departamentos">Año</label>
+        <select id="anio-departamentos"
+                class="rounded-xl border-0 bg-slate-50 px-2.5 py-2 text-sm ring-1 ring-slate-300
+                       focus:bg-white focus:ring-2 focus:ring-slate-900"></select>
+        <button id="btn-cerrar-departamentos"
+                class="rounded-xl bg-slate-100 px-3 py-2 text-sm font-medium hover:bg-slate-200">
+          Volver al detalle
+        </button>
+      </div>
+    </header>
+    <div id="tabla-departamentos" class="overflow-x-auto"></div>
+  </section>
+
   <!-- ===== Tabla ===== -->
   <section class="mt-4 rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
     <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">

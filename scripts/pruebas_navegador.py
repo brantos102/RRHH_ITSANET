@@ -893,7 +893,6 @@ async def recorrido_temporal(nav, capturas) -> Paso:
     await pg.fill("#t-nombre", "Operario De Comprobacion")
     await pg.fill("#t-labor", "Estibador")
     await pg.fill("#t-proveedor", "Servicios de prueba")
-    await pg.fill("#t-valor", "4.50")
     await pg.click("#form-temporal button[type=submit]")
     await pg.wait_for_selector("#aviso:not(.hidden)", timeout=10000)
     paso.ok(f"alta del operario: {(await pg.inner_text('#aviso')).strip()}")
@@ -928,13 +927,20 @@ async def recorrido_temporal(nav, capturas) -> Paso:
                     "dos jornadas del mismo día se pagan dos veces.")
     paso.ok("y con la jornada cumplida el botón queda inactivo")
 
-    # La liquidación de la semana.
+    # Lo trabajado en la semana: horas y jornadas, nunca dinero.
     horas = (await pg.inner_text("#semana-horas")).strip()
-    total = (await pg.inner_text("#semana-total")).strip()
-    if total == "—":
-        raise Falla("El total de la semana sale «—» aunque el operario tiene "
-                    "valor por hora. Cero es un total, no la ausencia de uno.")
-    paso.ok(f"la semana suma {horas} y {total}")
+    jornadas = (await pg.inner_text("#semana-jornadas")).strip()
+    if horas in ("—", "") or jornadas in ("—", ""):
+        raise Falla(f"La semana no suma: horas «{horas}», jornadas «{jornadas}».")
+    paso.ok(f"la semana suma {horas} en {jornadas} jornada(s)")
+
+    # Y no vuelve a hablar de pagos: cuánto se le paga a un operario sale del
+    # contrato del proveedor, y esa cuenta la hace Finanzas.
+    pantalla = await pg.inner_text("main")
+    for palabra in ("$", "Total a pagar", "valor por hora", "Lo que se debe pagar"):
+        if palabra in pantalla:
+            raise Falla(f"La pantalla de personal temporal todavía dice «{palabra}».")
+    paso.ok("sin importes en pantalla: el pago lo calcula Finanzas")
     if capturas:
         await pg.screenshot(path=str(capturas / "personal-temporal.png"), full_page=True)
 
@@ -949,8 +955,8 @@ async def recorrido_temporal(nav, capturas) -> Paso:
     paso.ok("una jornada de ayer sin salida aparece señalada en rojo")
 
     aviso = await pg.inner_text("#semana-aviso")
-    if "incompleto" not in aviso:
-        raise Falla("El total de la semana no avisa de que está incompleto.")
+    if "incompleta" not in aviso:
+        raise Falla("Las horas de la semana no avisan de que están incompletas.")
     paso.ok("y el total de la semana avisa de que está incompleto")
 
     # Talento Humano la cierra a mano, con motivo.
@@ -971,6 +977,36 @@ async def recorrido_temporal(nav, capturas) -> Paso:
     if "Cerrada a mano" not in (guardada["observacion"] or ""):
         raise Falla("El cierre manual no quedó anotado en la jornada.")
     paso.ok("y queda constancia de que la cerró una persona, no la garita")
+
+    # El informe que se presenta a Finanzas: filtros, total en vivo y los
+    # tres formatos. Bajar un archivo para descubrir que venía vacío es la
+    # forma más rápida de perderle la confianza a un botón de descarga.
+    await pg.click("#btn-informe")
+    await pg.wait_for_selector("#modal-informe[open]", timeout=10000)
+    await pg.wait_for_timeout(1200)
+
+    resumen = " ".join((await pg.inner_text("#i-resumen")).split())
+    if "operario" not in resumen:
+        raise Falla(f"El informe no calcula el total antes de bajarlo: «{resumen}».")
+    paso.ok(f"el informe se calcula antes de bajarlo: {resumen[:70]}")
+
+    if not await pg.locator("#i-personas [data-operario]").count():
+        raise Falla("No se puede elegir a qué operarios sale el informe.")
+    # Una sola persona: es la pregunta que llega cuando alguien reclama.
+    await pg.locator("#i-personas [data-operario]").first.check()
+    await pg.wait_for_timeout(1200)
+    paso.ok("se puede pedir el historial de una persona suelta")
+
+    descargados = []
+    for formato in ("csv", "xlsx", "pdf"):
+        async with pg.expect_download(timeout=20000) as espera:
+            await pg.click(f"[data-bajar='{formato}']")
+        archivo = await espera.value
+        descargados.append(archivo.suggested_filename)
+    paso.ok(f"se baja en los tres formatos: {', '.join(descargados)}")
+    if capturas:
+        await pg.screenshot(path=str(capturas / "temporal-informe.png"))
+    await pg.click("#modal-informe [data-cerrar]")
 
     await ejecutar("delete from public.personal_temporal where cedula = %s", (CEDULA_OP,))
     return paso

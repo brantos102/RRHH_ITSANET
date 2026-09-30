@@ -268,3 +268,123 @@ $("f-desde").value = new Date(hoy.getFullYear(), 0, 1).toISOString().slice(0, 10
 
 cargarDimensiones().then(() => $("filtros").requestSubmit());
 pintarTabla();
+
+/* ------------------------------------------------- informe por departamento
+
+   Estaba en el menú de Informes y no existía: el enlace llevaba a esta
+   pantalla y no pasaba nada, que es peor que no tener la opción. El backend
+   ya servía el resumen desde hacía tiempo y ninguna pantalla lo consumía.
+
+   Responde a la pregunta que se hace al planificar el año: en qué meses se
+   vacía cada área. Por eso es una cuadrícula de departamentos por meses y no
+   una lista: lo que se busca son las casillas cargadas, y eso se ve de un
+   vistazo o no se ve. */
+
+const MES_CORTO = ["ene", "feb", "mar", "abr", "may", "jun",
+                   "jul", "ago", "sep", "oct", "nov", "dic"];
+
+async function pintarDepartamentos() {
+  const anio = Number($("anio-departamentos").value) || new Date().getFullYear();
+  const caja = $("tabla-departamentos");
+  caja.innerHTML = `<p class="px-5 py-10 text-center text-sm text-slate-500">Cargando…</p>`;
+
+  let filas;
+  try {
+    filas = await api.resumenDepartamentos(anio);
+  } catch (e) {
+    caja.innerHTML = `<p class="px-5 py-10 text-center text-sm text-rose-600">${
+      esc(e.message || "No se pudo cargar el resumen.")}</p>`;
+    return;
+  }
+
+  if (!filas.length) {
+    caja.innerHTML = `<p class="px-5 py-10 text-center text-sm text-slate-500">
+      No hay ausencias aprobadas en ${anio}.</p>`;
+    return;
+  }
+
+  const areas = [...new Set(filas.map((f) => f.departamento))].sort();
+  const porArea = new Map(areas.map((a) => [a, new Array(12).fill(0)]));
+  for (const f of filas) {
+    const mes = Number(String(f.mes).slice(5, 7)) - 1;
+    if (mes >= 0 && mes < 12) porArea.get(f.departamento)[mes] += Number(f.dias || 0);
+  }
+
+  const totalMes = new Array(12).fill(0);
+  for (const dias of porArea.values()) dias.forEach((d, i) => { totalMes[i] += d; });
+  const mayor = Math.max(1, ...[...porArea.values()].flat());
+
+  // El tono crece con los días: una tabla de números iguales no enseña dónde
+  // está el problema, y lo que se busca aquí es precisamente el mes cargado.
+  const tono = (d) => {
+    if (!d) return "";
+    const parte = d / mayor;
+    if (parte > 0.66) return "bg-amber-200 font-semibold text-amber-900";
+    if (parte > 0.33) return "bg-amber-100 text-amber-900";
+    return "bg-amber-50 text-slate-700";
+  };
+  const num = (d) => d ? Number(d).toLocaleString("es-EC",
+    { minimumFractionDigits: 0, maximumFractionDigits: 1 }) : "";
+
+  caja.innerHTML = `
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+        <tr>
+          <th class="sticky left-0 z-10 bg-slate-50 px-3 py-2.5 text-left">Departamento</th>
+          ${MES_CORTO.map((m) => `<th class="px-2 py-2.5 text-center">${m}</th>`).join("")}
+          <th class="px-3 py-2.5 text-right">Total</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        ${areas.map((a) => {
+          const dias = porArea.get(a);
+          const total = dias.reduce((s, d) => s + d, 0);
+          return `<tr class="hover:bg-slate-50">
+            <th scope="row" class="sticky left-0 z-10 bg-white px-3 py-2 text-left font-medium
+                                   hover:bg-slate-50">${esc(a)}</th>
+            ${dias.map((d, i) => `<td class="px-2 py-2 text-center tabular-nums ${tono(d)}"
+                 title="${esc(a)} · ${MES_CORTO[i]} ${anio}${d ? ` · ${num(d)} días` : ""}"
+                 >${num(d)}</td>`).join("")}
+            <td class="px-3 py-2 text-right font-semibold tabular-nums">${num(total)}</td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+      <tfoot class="border-t-2 border-slate-200 bg-slate-50 text-sm font-medium">
+        <tr>
+          <th scope="row" class="sticky left-0 z-10 bg-slate-50 px-3 py-2.5 text-left">Todos</th>
+          ${totalMes.map((d) => `<td class="px-2 py-2.5 text-center tabular-nums">${num(d)}</td>`).join("")}
+          <td class="px-3 py-2.5 text-right tabular-nums">${
+            num(totalMes.reduce((s, d) => s + d, 0))}</td>
+        </tr>
+      </tfoot>
+    </table>
+    <p class="px-5 py-3 text-xs text-slate-500">
+      Días de ausencia aprobados. Cuanto más cargado el tono, más se vacía esa área ese mes.
+    </p>`;
+}
+
+/* Se llega por «Informes → Por departamento», que es un enlace con «#». Hay
+   que atender también el cambio de fragmento: estando ya en esta pantalla, el
+   navegador no recarga nada y el enlace no haría absolutamente nada. */
+function mostrarDepartamentos(mostrar) {
+  $("departamentos").classList.toggle("hidden", !mostrar);
+  // El detalle se esconde mientras tanto: son dos informes distintos y verlos
+  // a la vez obliga a desplazar para entender cuál se está mirando.
+  document.querySelectorAll("main > section").forEach((s) => {
+    if (s.id !== "departamentos") s.classList.toggle("hidden", mostrar);
+  });
+  if (mostrar) pintarDepartamentos();
+  else if (location.hash === "#departamentos") history.replaceState(null, "", location.pathname);
+}
+
+(function montarDepartamentos() {
+  const anio = new Date().getFullYear();
+  $("anio-departamentos").innerHTML = [anio, anio - 1, anio - 2, anio - 3]
+    .map((a) => `<option value="${a}">${a}</option>`).join("");
+  $("anio-departamentos").addEventListener("change", pintarDepartamentos);
+  $("btn-cerrar-departamentos").addEventListener("click", () => mostrarDepartamentos(false));
+
+  const revisar = () => mostrarDepartamentos(location.hash === "#departamentos");
+  window.addEventListener("hashchange", revisar);
+  revisar();
+})();

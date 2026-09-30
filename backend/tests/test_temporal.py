@@ -211,7 +211,14 @@ async def test_la_garita_no_cierra_jornadas_a_mano(cliente, guardia_auth, operar
 
 
 # ------------------------------------------------------------- la liquidación
-async def test_la_semana_cuenta_horas_y_valor(cliente, rrhh_auth, operario):
+async def test_la_semana_cuenta_jornadas_y_horas(cliente, rrhh_auth, operario):
+    """Lo que la garita presenció, y nada más.
+
+    Antes esta prueba comprobaba un total en dólares. El módulo ya no lo
+    calcula: cuánto se paga sale del contrato del proveedor y esa cuenta la
+    hace Finanzas. Un importe impreso aquí se toma por la cifra buena, y el
+    día que cambie la tarifa sigue saliendo igual de convincente.
+    """
     await obtener_uno(
         """insert into public.jornadas_temporales
              (temporal_id, fecha, entrada_en, salida_en, horas)
@@ -223,14 +230,15 @@ async def test_la_semana_cuenta_horas_y_valor(cliente, rrhh_auth, operario):
     cuerpo = r.json()
     mio = next(p for p in cuerpo["personas"] if p["temporal_id"] == operario["id"])
     assert mio["horas"] == 8
-    assert mio["dias"] == 1
-    assert mio["total"] == 36.0, "8 horas por 4,50 la hora"
+    assert mio["jornadas"] == 1
+    assert "total" not in mio and "valor_hora" not in mio, (
+        "el módulo volvió a hablar de dinero")
     assert cuerpo["jornadas_sin_cerrar"] == 0
     assert cuerpo["aviso"] is None
 
 
-async def test_el_total_avisa_cuando_esta_incompleto(cliente, rrhh_auth, operario):
-    """Sumar una columna que no cuadra es peor que no sumarla."""
+async def test_las_horas_avisan_cuando_estan_incompletas(cliente, rrhh_auth, operario):
+    """Dar por buenas unas horas que no cuadran es peor que no darlas."""
     await obtener_uno(
         """insert into public.jornadas_temporales (temporal_id, fecha, entrada_en)
            values (%s, current_date, now() - interval '3 hours') returning id""",
@@ -239,26 +247,144 @@ async def test_el_total_avisa_cuando_esta_incompleto(cliente, rrhh_auth, operari
     r = await cliente.get("/temporal/semana", headers=rrhh_auth)
     cuerpo = r.json()
     assert cuerpo["jornadas_sin_cerrar"] >= 1
-    assert cuerpo["aviso"] and "incompleto" in cuerpo["aviso"]
+    assert cuerpo["aviso"] and "incompleta" in cuerpo["aviso"]
 
 
-async def test_sin_valor_hora_se_dan_las_horas_sin_valorar(cliente, rrhh_auth, operario):
-    """Hay quien se paga por obra. Las horas siguen siendo lo que se presenció."""
-    await cliente.patch(f"/temporal/{operario['id']}", headers=rrhh_auth,
-                        json={"valor_hora": None})
-    await obtener_uno(
-        """insert into public.jornadas_temporales
-             (temporal_id, fecha, entrada_en, salida_en, horas)
-           values (%s, current_date, now() - interval '6 hours', now(), 6)
-           returning id""", (operario["id"],))
+async def test_el_alta_ya_no_acepta_una_tarifa(cliente, rrhh_auth):
+    """Y si alguien la manda igual, se ignora en vez de guardarse a escondidas."""
+    from app.db import obtener_todos
 
-    r = await cliente.get("/temporal/semana", headers=rrhh_auth)
-    mio = next(p for p in r.json()["personas"] if p["temporal_id"] == operario["id"])
-    assert mio["horas"] == 6
-    assert mio["total"] is None
+    r = await cliente.post("/temporal", headers=rrhh_auth, json={
+        "cedula": "1717171717", "nombre": "Operario Sin Tarifa",
+        "labor": "Estibador", "valor_hora": 4.5})
+    if r.status_code == 201:
+        columnas = await obtener_todos(
+            """select column_name from information_schema.columns
+                where table_schema = 'public' and table_name = 'personal_temporal'""")
+        assert "valor_hora" not in {c["column_name"] for c in columnas}
 
 
 async def test_la_garita_no_ve_la_liquidacion(cliente, guardia_auth, operario):
     """Cuánto gana cada quien no es asunto de la garita (LOPDP, Art. 10)."""
     r = await cliente.get("/temporal/semana", headers=guardia_auth)
     assert r.status_code == 403
+
+
+# ------------------------------------------------------- informe a Finanzas
+
+async def _jornada(temporal_id, dia: int, horas: float = 8, cerrada: bool = True):
+    from app.db import obtener_uno as uno
+    return await uno(
+        """insert into public.jornadas_temporales
+             (temporal_id, fecha, entrada_en, salida_en, horas)
+           values (%s, current_date - %s,
+                   (current_date - %s)::timestamptz + interval '8 hours',
+                   case when %s then (current_date - %s)::timestamptz + interval '16 hours' end,
+                   case when %s then %s end)
+           returning id""",
+        (temporal_id, dia, dia, cerrada, dia, cerrada, horas))
+
+
+async def test_el_informe_resume_y_detalla(cliente, rrhh_auth, operario):
+    for dia in (1, 2, 3):
+        await _jornada(operario["id"], dia)
+
+    r = await cliente.post("/temporal/informe", headers=rrhh_auth, json={})
+    assert r.status_code == 200, r.text
+    cuerpo = r.json()
+    mio = next(x for x in cuerpo["resumen"] if x["cedula"] == operario["cedula"])
+    assert mio["jornadas"] == 3 and mio["horas"] == 24
+    assert len([j for j in cuerpo["jornadas"] if j["cedula"] == operario["cedula"]]) == 3
+    assert cuerpo["total_horas"] >= 24
+
+
+async def test_el_informe_no_lleva_importes(cliente, rrhh_auth, operario):
+    """La razón del módulo: el sistema sabe cuánto estuvo, no cuánto se paga."""
+    await _jornada(operario["id"], 1)
+    r = await cliente.post("/temporal/informe", headers=rrhh_auth, json={})
+    crudo = r.text.lower()
+    for palabra in ("valor_hora", "total_pagar", "importe", "tarifa"):
+        assert palabra not in crudo, f"el informe habla de «{palabra}»"
+
+
+async def test_se_puede_pedir_una_sola_persona(cliente, rrhh_auth, operario):
+    """Es la pregunta que llega cuando alguien reclama su pago."""
+    await _jornada(operario["id"], 1)
+    otro = await cliente.post("/temporal", headers=rrhh_auth, json={
+        "cedula": "0968067396", "nombre": "Otro Operario Cualquiera"})
+    if otro.status_code == 201:
+        await _jornada(otro.json()["id"], 1)
+
+    r = await cliente.post("/temporal/informe", headers=rrhh_auth,
+                           json={"temporales": [operario["id"]]})
+    cedulas = {x["cedula"] for x in r.json()["resumen"]}
+    assert cedulas == {operario["cedula"]}
+
+
+async def test_el_rango_de_fechas_acota(cliente, rrhh_auth, operario):
+    import datetime as dt
+    await _jornada(operario["id"], 20)
+    await _jornada(operario["id"], 1)
+
+    ayer = dt.date.today() - dt.timedelta(days=2)
+    r = await cliente.post("/temporal/informe", headers=rrhh_auth,
+                           json={"desde": str(ayer)})
+    mio = next(x for x in r.json()["resumen"] if x["cedula"] == operario["cedula"])
+    assert mio["jornadas"] == 1, "entró una jornada de hace veinte días"
+
+
+async def test_avisa_de_las_jornadas_sin_cerrar(cliente, rrhh_auth, operario):
+    """Una jornada sin salida no se puede pagar, y el informe no la cuenta."""
+    await _jornada(operario["id"], 1, cerrada=False)
+    r = await cliente.post("/temporal/informe", headers=rrhh_auth, json={})
+    cuerpo = r.json()
+    assert cuerpo["jornadas_sin_cerrar"] >= 1
+    assert cuerpo["aviso"] and "sin salida" in cuerpo["aviso"]
+
+    solo = await cliente.post("/temporal/informe", headers=rrhh_auth,
+                              json={"solo_sin_cerrar": True})
+    assert all(j["sin_cerrar"] for j in solo.json()["jornadas"])
+
+
+async def test_se_baja_en_los_tres_formatos(cliente, rrhh_auth, operario):
+    await _jornada(operario["id"], 1)
+    # Cada formato por su firma real: un CSV es texto y los otros dos traen
+    # su marca en los primeros bytes. Comprobar solo el código de respuesta
+    # dejaría pasar un archivo vacío.
+    for formato in ("csv", "xlsx", "pdf"):
+        r = await cliente.post(f"/temporal/informe.{formato}", headers=rrhh_auth,
+                               json={"detalle": True})
+        assert r.status_code == 200, f"{formato}: {r.text[:200]}"
+        assert "attachment" in r.headers.get("content-disposition", "")
+        if formato == "csv":
+            texto = r.content.decode("utf-8-sig")
+            assert "Cédula" in texto and operario["cedula"] in texto
+        elif formato == "xlsx":
+            assert r.content[:2] == b"PK", "no es un libro de Excel"
+        else:
+            assert r.content[:4] == b"%PDF", "no es un PDF"
+        assert len(r.content) > 500, f"{formato} salió prácticamente vacío"
+
+
+async def test_el_archivo_dice_que_no_lleva_importes(cliente, rrhh_auth, operario):
+    """Dentro del archivo, no en el correo: el archivo se reenvía solo."""
+    await _jornada(operario["id"], 1)
+    r = await cliente.post("/temporal/informe.csv", headers=rrhh_auth, json={})
+    texto = r.content.decode("utf-8", "ignore")
+    assert "Finanzas" in texto and "no incluye importes" in texto
+
+
+async def test_las_opciones_de_filtro_salen_de_los_datos(cliente, rrhh_auth, operario):
+    r = await cliente.get("/temporal/opciones-informe", headers=rrhh_auth)
+    assert r.status_code == 200, r.text
+    cuerpo = r.json()
+    assert any(p["cedula"] == operario["cedula"] for p in cuerpo["personas"])
+    assert isinstance(cuerpo["proveedores"], list)
+
+
+async def test_la_garita_no_baja_informes(cliente, guardia_auth, operario):
+    """Registra jornadas; liquidarlas es de Talento Humano."""
+    assert (await cliente.post("/temporal/informe", headers=guardia_auth,
+                               json={})).status_code == 403
+    assert (await cliente.post("/temporal/informe.xlsx", headers=guardia_auth,
+                               json={})).status_code == 403

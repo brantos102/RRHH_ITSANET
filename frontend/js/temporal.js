@@ -137,12 +137,13 @@ function abrirCierre({ cerrarJornada, nombre, entrada }) {
 /* ------------------------------------------------------------ la semana */
 
 function pintarSemana(semana) {
+  // Horas y jornadas, no dinero. El sistema sabe cuánto estuvo cada operario
+  // porque la garita lo presenció; cuánto se le paga sale del contrato del
+  // proveedor y esa cuenta la hace Finanzas. Un total en dólares impreso aquí
+  // se tomaría por la cifra buena, y el día que cambie la tarifa seguiría
+  // saliendo igual de convincente y ya equivocado.
   $("semana-horas").textContent = `${numero(semana.total_horas)} h`;
-  // Cero es un total, no la ausencia de un total: mostrar «—» cuando nadie ha
-  // acumulado horas todavía hace dudar de si el dato falta o si de verdad es
-  // cero. El guion «—» queda solo para cuando nadie tiene valor por hora.
-  const hayTarifa = semana.personas.some((p) => p.valor_hora !== null);
-  $("semana-total").textContent = hayTarifa ? `$ ${numero(semana.total_pagar)}` : "—";
+  $("semana-jornadas").textContent = semana.total_jornadas;
 
   const aviso = $("semana-aviso");
   aviso.classList.toggle("hidden", !semana.aviso);
@@ -154,13 +155,11 @@ function pintarSemana(semana) {
         <div class="min-w-0">
           <p class="truncate">${esc(p.nombre)}</p>
           <p class="text-xs text-slate-500">
-            ${p.dias} día(s) · ${numero(p.horas)} h${
+            ${p.jornadas} jornada(s)${
               p.sin_cerrar ? ` · <span class="text-rose-600">${p.sin_cerrar} sin cerrar</span>` : ""}
           </p>
         </div>
-        <p class="shrink-0 font-medium tabular-nums">${
-          p.total === null ? '<span class="text-xs font-normal text-slate-400">por obra</span>'
-                           : "$ " + numero(p.total)}</p>
+        <p class="shrink-0 font-medium tabular-nums">${numero(p.horas)} h</p>
       </div>`).join("")
     : `<p class="py-6 text-center text-sm text-slate-500">Nadie trabajó esta semana todavía.</p>`;
 }
@@ -201,7 +200,6 @@ document.addEventListener("click", (e) => {
 
 $("form-temporal").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const valor = $("t-valor").value.trim().replace(",", ".");
   try {
     const r = await api.crearTemporal({
       cedula: $("t-cedula").value.trim(),
@@ -209,7 +207,6 @@ $("form-temporal").addEventListener("submit", async (e) => {
       labor: $("t-labor").value.trim() || null,
       proveedor: $("t-proveedor").value.trim() || null,
       telefono: $("t-telefono").value.trim() || null,
-      valor_hora: valor === "" ? null : Number(valor),
     });
     $("modal-temporal").close();
     avisar(r.mensaje);
@@ -240,3 +237,140 @@ $("form-cerrar").addEventListener("submit", async (e) => {
 cargar();
 // La garita y Talento Humano suelen tener esta pantalla abierta todo el día.
 estado.sondeo = setInterval(cargar, 60000);
+
+/* ----------------------------------------------- informe para Finanzas
+
+   Talento Humano necesita presentar a Finanzas qué operarios vinieron, qué
+   días y cuántas horas, para que autoricen el pago. Hasta ahora solo había
+   un enlace a Excel de la semana en curso: ni un rango, ni una persona
+   suelta, ni un proveedor.
+
+   Lo que se filtra en pantalla es lo que sale en el archivo, y el filtro va
+   escrito dentro: un informe que no dice de qué está hablando no sustenta
+   nada tres meses después.
+
+   El total se recalcula al tocar cualquier filtro. Bajar un archivo para
+   descubrir que estaba vacío, o que traía media planilla, es la forma más
+   rápida de perderle la confianza a un botón de descarga. */
+
+const informe = { opciones: null, elegidos: new Set() };
+
+function filtroActual() {
+  return {
+    desde: $("i-desde").value || null,
+    hasta: $("i-hasta").value || null,
+    temporales: informe.elegidos.size ? [...informe.elegidos] : null,
+    proveedor: $("i-proveedor").value || null,
+    labor: $("i-labor").value || null,
+    incluir_inactivos: $("i-inactivos").checked,
+    solo_sin_cerrar: $("i-sin-cerrar").checked,
+    detalle: $("i-detalle").checked,
+  };
+}
+
+function pintarPersonasInforme() {
+  const aguja = normalizar($("i-buscar").value.trim());
+  const gente = (informe.opciones?.personas || []).filter((p) =>
+    !aguja || normalizar(`${p.nombre} ${p.cedula} ${p.labor || ""} ${p.proveedor || ""}`)
+      .includes(aguja));
+
+  $("i-personas").innerHTML = gente.length ? gente.map((p) => `
+    <label class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-white">
+      <input type="checkbox" data-operario="${esc(p.id)}"
+             ${informe.elegidos.has(p.id) ? "checked" : ""} class="rounded border-slate-300">
+      <span class="min-w-0 flex-1 truncate ${p.activo ? "" : "text-slate-400"}">
+        ${esc(p.nombre)}
+        <span class="text-xs text-slate-500">· ${esc(p.cedula)}${
+          p.labor ? " · " + esc(p.labor) : ""}${p.activo ? "" : " · inactivo"}</span>
+      </span>
+    </label>`).join("")
+    : `<p class="px-2 py-3 text-center text-sm text-slate-500">Nadie coincide.</p>`;
+
+  $("i-personas").querySelectorAll("[data-operario]").forEach((c) =>
+    c.addEventListener("change", () => {
+      if (c.checked) informe.elegidos.add(c.dataset.operario);
+      else informe.elegidos.delete(c.dataset.operario);
+      previsualizarInforme();
+    }));
+}
+
+let temporizadorInforme;
+function previsualizarInforme() {
+  clearTimeout(temporizadorInforme);
+  temporizadorInforme = setTimeout(async () => {
+    $("i-resumen").textContent = "Calculando…";
+    try {
+      const d = await api.informeTemporal(filtroActual());
+      $("i-resumen").innerHTML = d.total_jornadas
+        ? `<strong>${d.personas}</strong> operario(s) · <strong>${d.total_jornadas}</strong>
+           jornada(s) · <strong>${numero(d.total_horas)}</strong> horas`
+        : "Con estos filtros no hay ninguna jornada. Revise el rango de fechas.";
+      $("i-aviso").classList.toggle("hidden", !d.aviso);
+      if (d.aviso) $("i-aviso").textContent = d.aviso;
+      document.querySelectorAll("[data-bajar]").forEach((b) => {
+        b.disabled = !d.total_jornadas;
+        b.classList.toggle("opacity-40", !d.total_jornadas);
+      });
+    } catch (e) {
+      $("i-resumen").textContent = e.message || "No se pudo calcular.";
+    }
+  }, 250);
+}
+
+async function abrirInforme() {
+  if (!informe.opciones) {
+    try {
+      informe.opciones = await api.opcionesInformeTemporal();
+    } catch (e) {
+      return avisar(e.message || "No se pudieron cargar las opciones.", true);
+    }
+    const llenar = (id, valores, vacio) => {
+      $(id).innerHTML = `<option value="">${vacio}</option>` +
+        valores.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
+    };
+    llenar("i-proveedor", informe.opciones.proveedores, "Todos");
+    llenar("i-labor", informe.opciones.labores, "Todas");
+
+    // Del lunes de esta semana a hoy: es el rango con el que se liquida, y
+    // así el primer informe que alguien abre ya trae algo.
+    const hoy = new Date();
+    const lunes = new Date(hoy);
+    lunes.setDate(hoy.getDate() - ((hoy.getDay() + 6) % 7));
+    $("i-desde").value = lunes.toISOString().slice(0, 10);
+    $("i-hasta").value = hoy.toISOString().slice(0, 10);
+  }
+  pintarPersonasInforme();
+  previsualizarInforme();
+  $("modal-informe").showModal();
+}
+
+$("btn-informe").addEventListener("click", abrirInforme);
+$("i-buscar").addEventListener("input", pintarPersonasInforme);
+$("i-todos").addEventListener("click", () => {
+  (informe.opciones?.personas || []).forEach((p) => informe.elegidos.add(p.id));
+  pintarPersonasInforme(); previsualizarInforme();
+});
+$("i-ninguno").addEventListener("click", () => {
+  informe.elegidos.clear();
+  pintarPersonasInforme(); previsualizarInforme();
+});
+["i-desde", "i-hasta", "i-proveedor", "i-labor", "i-detalle", "i-sin-cerrar", "i-inactivos"]
+  .forEach((id) => $(id).addEventListener("change", previsualizarInforme));
+
+document.querySelectorAll("#modal-informe [data-cerrar]").forEach((b) =>
+  b.addEventListener("click", () => $("modal-informe").close()));
+
+document.querySelectorAll("[data-bajar]").forEach((boton) =>
+  boton.addEventListener("click", async () => {
+    boton.disabled = true;
+    const original = boton.textContent;
+    boton.textContent = "…";
+    try {
+      await api.bajarInformeTemporal(boton.dataset.bajar, filtroActual());
+    } catch (e) {
+      avisar(e.message || "No se pudo bajar el informe.", true);
+    } finally {
+      boton.disabled = false;
+      boton.textContent = original;
+    }
+  }));

@@ -76,6 +76,12 @@ def a_csv(informe: Informe) -> Response:
     if informe.generado_por:
         escritor.writerow(["Generado por", informe.generado_por])
     escritor.writerow(["Generado el", datetime.now().strftime("%d/%m/%Y %H:%M")])
+    # La nota, arriba y en los tres formatos. Solo salía en el PDF, y es
+    # justo lo que tiene que viajar con el archivo: dice qué NO contiene
+    # —importes, jornadas sin cerrar— y esa advertencia no puede quedarse en
+    # el correo que lo acompañaba, porque el archivo se reenvía solo.
+    if informe.nota:
+        escritor.writerow(["Nota", informe.nota])
     escritor.writerow([])
 
     escritor.writerow([etiqueta for _, etiqueta in informe.columnas])
@@ -105,6 +111,8 @@ def a_excel(informe: Informe) -> Response:
     if informe.generado_por:
         hoja.append(["Generado por", informe.generado_por])
     hoja.append(["Generado el", datetime.now().strftime("%d/%m/%Y %H:%M")])
+    if informe.nota:
+        hoja.append(["Nota", informe.nota])
     hoja.append([])
 
     fila_cabecera = hoja.max_row + 1

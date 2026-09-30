@@ -127,11 +127,20 @@ function pintar() {
      desaparecer una ausencia sin rastro es lo que hace que nadie confíe en
      el calendario. */
   const color = (a) => {
+    // Lo que Talento Humano anotó antes de este sistema, en su propio tono.
+    // Son vacaciones gozadas de verdad, pero no hay solicitud que abrir ni
+    // motivo que consultar: pintarlas igual que las de aquí prometería una
+    // ficha que no existe.
+    if (a.procedencia === "historico") return "bg-emerald-200/70 ring-1 ring-inset ring-emerald-500";
     if (a.estado === "cancelado") return "bg-slate-300";
     const aprobada = a.estado === "aprobado";
     if (a.motivo_general === "Vacaciones") return aprobada ? "bg-emerald-400" : "bg-emerald-200";
     return aprobada ? "bg-sky-400" : "bg-sky-200";
   };
+
+  const titulo = (a, persona) => a.procedencia === "historico"
+    ? `${persona.nombre} · Vacaciones · Registro de Talento Humano`
+    : `${persona.nombre} · ${a.motivo_general} · Nº ${a.folio}`;
 
   const encabezado = Array.from({ length: total }, (_, i) => {
     const d = new Date(desde.getFullYear(), desde.getMonth(), i + 1);
@@ -156,8 +165,8 @@ function pintar() {
         : finDeSemana ? "bg-slate-50" : "";
       return `<td class="border-l border-slate-100 p-0">
         <button type="button" class="block h-8 w-full ${fondo}"
-                ${a ? `data-solicitud="${a.request_id}" title="${esc(persona.nombre)} · ${
-                  esc(a.motivo_general)} · Nº ${a.folio}"` : "disabled"}></button></td>`;
+                ${a ? `${a.request_id ? `data-solicitud="${a.request_id}"` : "disabled"
+                  } title="${esc(titulo(a, persona))}"` : "disabled"}></button></td>`;
     }).join("");
 
     return `<tr class="border-t border-slate-100">

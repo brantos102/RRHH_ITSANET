@@ -59,7 +59,9 @@ const MODULOS = [
       { texto: "Configuración", href: "administracion.html#configuracion" },
       { texto: "Usuarios", href: "administracion.html#usuarios" },
       { texto: "Tipos de solicitud", href: "administracion.html#tipos" },
-      { texto: "Bitácora", href: "administracion.html#bitacora" },
+      // La bitácora no se repite aquí: ya está en Talento Humano, y el
+      // administrador ve ese grupo entero. Dos entradas al mismo sitio hacen
+      // dudar de si llevan a cosas distintas.
     ],
   },
 ];

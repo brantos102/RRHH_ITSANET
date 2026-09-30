@@ -53,8 +53,10 @@
     <!-- ===== La semana ===== -->
     <section id="caja-semana" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
       <header class="border-b border-slate-200 px-5 py-3.5">
-        <h2 class="font-medium">Lo que se debe pagar</h2>
-        <p class="mt-0.5 text-sm text-slate-500">Semana en curso, de lunes a domingo</p>
+        <h2 class="font-medium">Lo trabajado esta semana</h2>
+        <p class="mt-0.5 text-sm text-slate-500">
+          De lunes a domingo. Horas presenciadas por la garita; el pago lo calcula Finanzas.
+        </p>
       </header>
       <div class="px-5 py-4">
         <div class="grid grid-cols-2 gap-3">
@@ -63,16 +65,18 @@
             <p id="semana-horas" class="text-2xl font-semibold tabular-nums">—</p>
           </div>
           <div class="rounded-xl bg-slate-50 p-3">
-            <p class="text-xs text-slate-500">Total</p>
-            <p id="semana-total" class="text-2xl font-semibold tabular-nums">—</p>
+            <p class="text-xs text-slate-500">Jornadas</p>
+            <p id="semana-jornadas" class="text-2xl font-semibold tabular-nums">—</p>
           </div>
         </div>
         <p id="semana-aviso"
            class="mt-3 hidden rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200"></p>
         <div id="semana-lista" class="mt-3 space-y-2"></div>
-        <a id="semana-descargar" href="#"
-           class="mt-3 hidden w-full rounded-xl bg-slate-100 px-4 py-2.5 text-center text-sm
-                  font-medium hover:bg-slate-200">Descargar en Excel</a>
+        <button id="btn-informe"
+                class="mt-3 w-full rounded-xl bg-slate-900 px-4 py-2.5 text-center text-sm
+                       font-medium text-white hover:bg-slate-800">
+          Informe para Finanzas…
+        </button>
       </div>
     </section>
   </div>
@@ -83,6 +87,112 @@
     constancia de quién la puso y por qué.
   </p>
 </main>
+
+<!-- ===== Informe para Finanzas =====
+
+     Lo que Finanzas necesita para autorizar un pago: quién vino, qué días y
+     cuántas horas. Sin importes: el sistema sabe cuánto estuvo cada operario
+     porque la garita lo presenció, y cuánto se le paga sale del contrato del
+     proveedor. -->
+<dialog id="modal-informe" class="w-[min(100vw-1.5rem,40rem)] rounded-2xl p-0">
+  <form id="form-informe" method="dialog">
+    <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+      <div>
+        <h2 class="font-semibold">Informe para Finanzas</h2>
+        <p class="mt-0.5 text-sm text-slate-500">
+          Horas trabajadas, sin importes: la tarifa y el cálculo son de Finanzas.
+        </p>
+      </div>
+      <button type="button" data-cerrar class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100">✕</button>
+    </div>
+
+    <div class="max-h-[60vh] space-y-4 overflow-y-auto px-5 py-4">
+      <div class="grid gap-3 sm:grid-cols-2">
+        <label class="block">
+          <span class="text-sm font-medium text-slate-700">Desde</span>
+          <input type="date" id="i-desde"
+                 class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1
+                        ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </label>
+        <label class="block">
+          <span class="text-sm font-medium text-slate-700">Hasta</span>
+          <input type="date" id="i-hasta"
+                 class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1
+                        ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </label>
+        <label class="block">
+          <span class="text-sm font-medium text-slate-700">Proveedor</span>
+          <select id="i-proveedor"
+                  class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1
+                         ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></select>
+        </label>
+        <label class="block">
+          <span class="text-sm font-medium text-slate-700">Labor</span>
+          <select id="i-labor"
+                  class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1
+                         ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></select>
+        </label>
+      </div>
+
+      <div>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="text-sm font-medium text-slate-700">Operarios</span>
+          <div class="flex items-center gap-2">
+            <input type="search" id="i-buscar" placeholder="Buscar"
+                   class="w-40 rounded-lg border-0 bg-slate-50 px-2.5 py-1.5 text-xs ring-1 ring-slate-300
+                          focus:bg-white focus:ring-2 focus:ring-slate-900">
+            <button type="button" id="i-todos"
+                    class="rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-medium hover:bg-slate-200">
+              Todos</button>
+            <button type="button" id="i-ninguno"
+                    class="rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-medium hover:bg-slate-200">
+              Ninguno</button>
+          </div>
+        </div>
+        <p class="mt-1 text-xs text-slate-500">
+          Sin marcar a nadie entran todos. Marque uno para su historial, o un grupo
+          para el informe de ese grupo.
+        </p>
+        <div id="i-personas"
+             class="sin-barra mt-2 max-h-48 space-y-1 overflow-y-auto rounded-xl bg-slate-50 p-2"></div>
+      </div>
+
+      <div class="flex flex-wrap gap-4">
+        <label class="flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" id="i-detalle" checked class="rounded border-slate-300">
+          Una línea por jornada
+        </label>
+        <label class="flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" id="i-sin-cerrar" class="rounded border-slate-300">
+          Solo jornadas sin salida
+        </label>
+        <label class="flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" id="i-inactivos" class="rounded border-slate-300">
+          Incluir operarios inactivos
+        </label>
+      </div>
+
+      <div id="i-resumen" class="rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
+        Ajuste los filtros para ver el total.
+      </div>
+      <p id="i-aviso" class="hidden rounded-xl bg-amber-50 p-3 text-sm text-amber-900
+                             ring-1 ring-amber-200"></p>
+    </div>
+
+    <div class="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 px-5 py-4">
+      <button type="button" data-cerrar
+              class="rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-medium hover:bg-slate-200">
+        Cerrar</button>
+      <button type="button" data-bajar="csv"
+              class="rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-medium hover:bg-slate-200">CSV</button>
+      <button type="button" data-bajar="pdf"
+              class="rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-medium hover:bg-slate-200">PDF</button>
+      <button type="button" data-bajar="xlsx"
+              class="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800">
+        Excel</button>
+    </div>
+  </form>
+</dialog>
 
 <!-- ===== Registrar operario ===== -->
 <dialog id="modal-temporal" class="w-[min(100vw-1.5rem,30rem)] rounded-2xl p-0">
@@ -124,13 +234,6 @@
           <input id="t-telefono" inputmode="tel" maxlength="13"
                  class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm
                         ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
-        </div>
-        <div>
-          <label for="t-valor" class="block text-sm font-medium text-slate-700">Valor por hora</label>
-          <input id="t-valor" inputmode="decimal" placeholder="opcional"
-                 class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm
-                        ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
-          <p class="mt-1 text-xs text-slate-500">Si se paga por obra, déjelo vacío.</p>
         </div>
       </div>
       <p id="t-error" class="hidden rounded-xl bg-rose-50 p-3 text-sm text-rose-800"></p>

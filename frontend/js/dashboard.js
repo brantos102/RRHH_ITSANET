@@ -237,12 +237,29 @@ function pintarResumen(perfil, saldo) {
     perfil.anios_servicio === 1 ? "1 año" : `${perfil.anios_servicio} años`;
   $("fecha-ingreso").textContent = `Ingresó el ${fecha(perfil.fecha_ingreso)}`;
 
+  /* Los fines de semana obligatorios, en voz baja.
+
+     Un período gozado por completo trae sus dos fines de semana dentro: no
+     hay forma de gastar quince días seguidos sin tomarlos. El contador los
+     pedía igual —784 períodos ya cerrados, 1.568 avisos imposibles de
+     atender— y un número grande sin nada que hacer es justo lo que enseña a
+     no volver a mirar la tarjeta. */
   const fds = saldo ? saldo.fines_semana_pendientes : null;
-  $("fds-pendientes").textContent = fds === null ? "—" : fds;
+  const porConfirmar = fds !== null && fds > 0;
+
+  $("fds-pendientes").textContent = fds === null ? "—" : porConfirmar ? fds : "Al día";
+  $("fds-pendientes").className = `mt-2 text-2xl font-semibold ${
+    porConfirmar ? "text-amber-700" : "text-slate-900"}`;
   if (fds !== null) {
-    $("fds-detalle").textContent = fds === 0
-      ? "ya cumplió los de su período"
-      : `obligatorios por consumir: ${plural(fds * 2, "día", "días")} dentro de su descanso`;
+    $("fds-detalle").textContent = porConfirmar
+      ? `por confirmar: ${plural(fds * 2, "día", "días")} de un período que gozó a medias`
+      : "no hay nada que confirmar";
+    $("fds-nota").textContent = porConfirmar
+      ? "Aparece porque gozó parte de un período y no consta si esos fines de semana "
+        + "estaban dentro. Si ya los tomó, escríbale a Talento Humano: solo ellos pueden "
+        + "corregirlo."
+      : "Sus períodos completos los traen dentro, y los que todavía no ha empezado no "
+        + "pueden deberlos.";
   }
 
   const periodos = saldo?.periodos || [];
@@ -475,7 +492,10 @@ function pintarCalendario() {
     const hasta = new Date(a.fecha_fin + "T12:00");
     if (hasta < inicio || desde > fin) continue;
     if (!porPersona.has(a.user_id)) porPersona.set(a.user_id, { nombre: a.nombre, tramos: [] });
-    porPersona.get(a.user_id).tramos.push({ desde, hasta, estado: a.estado, motivo: a.motivo_general });
+    porPersona.get(a.user_id).tramos.push({
+      desde, hasta, estado: a.estado, motivo: a.motivo_general,
+      procedencia: a.procedencia,
+    });
   }
 
   const caja = $("calendario");
@@ -500,12 +520,17 @@ function pintarCalendario() {
       const tramo = p.tramos.find((t) => d >= t.desde && d <= t.hasta);
       const finde = d.getDay() === 0 || d.getDay() === 6;
       if (!tramo) return `<td class="h-7 border border-slate-100 ${finde ? "bg-slate-50" : ""}"></td>`;
-      const color = tramo.estado === "aprobado"
-        ? "bg-emerald-400"
+      // Lo que Talento Humano anotó antes de este sistema, en su propio
+      // tono: son vacaciones gozadas de verdad, pero no hay solicitud detrás.
+      const historico = tramo.procedencia === "historico";
+      const color = historico ? "bg-emerald-200/70 ring-1 ring-inset ring-emerald-500"
+        : tramo.estado === "aprobado" ? "bg-emerald-400"
         : "bg-amber-300";
+      const cuando = historico ? "registro de Talento Humano"
+        : tramo.estado === "aprobado" ? "aprobada" : "en trámite";
       return `<td class="h-7 border border-slate-100 p-0">
-                <div class="h-full w-full ${color}" title="${esc(p.nombre)} · ${esc(tramo.motivo)} · ${
-                  tramo.estado === "aprobado" ? "aprobada" : "en trámite"}"></div>
+                <div class="h-full w-full ${color}" title="${esc(p.nombre)} · ${
+                  esc(tramo.motivo)} · ${cuando}"></div>
               </td>`;
     }).join("");
     return `<tr>
@@ -521,6 +546,7 @@ function pintarCalendario() {
     <div class="mt-3 flex flex-wrap gap-4 text-xs text-slate-500">
       <span class="flex items-center gap-1.5"><i class="inline-block h-3 w-3 rounded-sm bg-emerald-400"></i> Aprobada</span>
       <span class="flex items-center gap-1.5"><i class="inline-block h-3 w-3 rounded-sm bg-amber-300"></i> En trámite</span>
+      <span class="flex items-center gap-1.5"><i class="inline-block h-3 w-3 rounded-sm bg-emerald-200/70 ring-1 ring-inset ring-emerald-500"></i> Registro de Talento Humano</span>
       <span>Solo se muestra quién falta y cuándo, no el motivo.</span>
     </div>`;
 }
@@ -1616,12 +1642,21 @@ $("form-solicitud").addEventListener("submit", async (e) => {
 });
 
 /* ------------------------------------------------------------------- salir */
+/* El fragmento de la dirección elige la pestaña, al cargar y al cambiar.
+
+   Sin lo segundo, «Por autorizar» y «Anulaciones» de la barra lateral solo
+   funcionaban viniendo de otra pantalla: estando ya en el panel, el navegador
+   cambiaba el «#» sin recargar y el enlace no hacía nada. */
+function pestanaDelFragmento() {
+  const destino = location.hash.slice(1);
+  if (["aprobaciones", "anulaciones"].includes(destino) &&
+      !$("pestanas").classList.contains("hidden")) {
+    mostrarPestana(destino);
+  }
+}
+
+window.addEventListener("hashchange", pestanaDelFragmento);
+
 cargar()
-  .then(() => {
-    const destino = location.hash.slice(1);
-    if (["aprobaciones", "anulaciones"].includes(destino) &&
-        !$("pestanas").classList.contains("hidden")) {
-      mostrarPestana(destino);
-    }
-  })
+  .then(pestanaDelFragmento)
   .catch((err) => avisar(err.message || "No se pudo cargar su panel.", "error"));
