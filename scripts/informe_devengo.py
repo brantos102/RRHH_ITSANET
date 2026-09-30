@@ -26,6 +26,7 @@ sys.path.insert(0, str(RAIZ / "backend"))
 # bucle, es decir aquí. Ver scripts/_windows.py.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _windows  # noqa: F401,E402
+import _cli  # noqa: E402
 
 TITULO = "Cálculo de los días de vacaciones devengados"
 SUBTITULO = "Diferencia entre el registro de Talento Humano y el sistema, y qué se propone"
@@ -283,5 +284,5 @@ async def principal(salida: Path) -> int:
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--salida", type=Path, default=RAIZ / "informe_devengo.pdf")
-    args = p.parse_args()
+    args = _cli.analizar(p)
     raise SystemExit(asyncio.run(principal(args.salida)))

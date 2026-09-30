@@ -19,6 +19,10 @@ import sys
 import time
 from pathlib import Path
 
+# Su propia carpeta en la ruta de búsqueda, para los ayudantes compartidos.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _cli  # noqa: E402
+
 CARPETA = Path(__file__).resolve().parents[1] / "backend" / "logs"
 SISTEMA = CARPETA / "sistema.log"
 ERRORES = CARPETA / "errores.log"
@@ -94,7 +98,7 @@ def main() -> int:
     p.add_argument("--errores", action="store_true", help="Solo advertencias y errores.")
     p.add_argument("--ultimas", type=int, default=40, help="Cuántas líneas mostrar (0 = todas).")
     p.add_argument("--seguir", action="store_true", help="Mostrar en vivo lo que vaya llegando.")
-    args = p.parse_args()
+    args = _cli.analizar(p)
 
     if not CARPETA.exists():
         print(f"No hay registros en {CARPETA}.")

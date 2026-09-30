@@ -21,6 +21,10 @@ import socketserver
 import sys
 from pathlib import Path
 
+# Su propia carpeta en la ruta de búsqueda, para los ayudantes compartidos.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _cli  # noqa: E402
+
 CARPETA = Path(__file__).resolve().parents[1] / "frontend"
 IMPRESCINDIBLES = ("index.html", "dashboard.html", "config.js")
 
@@ -76,7 +80,7 @@ class Manejador(http.server.SimpleHTTPRequestHandler):
 def main() -> int:
     p = argparse.ArgumentParser(description="Sirve la interfaz web del sistema.")
     p.add_argument("--puerto", type=int, default=5500)
-    argumentos = p.parse_args()
+    argumentos = _cli.analizar(p)
 
     if not CARPETA.is_dir():
         print(f"No encuentro la carpeta de la interfaz en {CARPETA}.")

@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 # bucle, es decir aquí. Ver scripts/_windows.py.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _windows  # noqa: F401,E402
+import _cli  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
 from app.db import cerrar_pool, obtener_todos, obtener_uno  # noqa: E402
@@ -154,5 +155,5 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--aplicar", action="store_true",
                    help="Cancelar de verdad (sin esto solo muestra).")
-    argumentos = p.parse_args()
+    argumentos = _cli.analizar(p)
     raise SystemExit(asyncio.run(_con_cierre(argumentos.aplicar)))

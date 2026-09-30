@@ -45,6 +45,7 @@ sys.path.insert(0, str(RAIZ / "backend"))
 # bucle, es decir aquí. Ver scripts/_windows.py.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _windows  # noqa: F401,E402
+import _cli  # noqa: E402
 
 VERDE, ROJO, AMARILLO, GRIS, FIN = "\033[92m", "\033[91m", "\033[93m", "\033[90m", "\033[0m"
 
@@ -406,6 +407,6 @@ if __name__ == "__main__":
     p.add_argument("--aplicar", action="store_true", help="Cargar de verdad.")
     p.add_argument("--informe", type=Path, default=None,
                    help="CSV con el detalle de lo emparejado, para cotejar.")
-    a = p.parse_args()
+    a = _cli.analizar(p)
     archivo = localizar(a.archivo)
     raise SystemExit(asyncio.run(_con_cierre(archivo, a.aplicar, a.informe)))

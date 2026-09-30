@@ -38,6 +38,7 @@ sys.path.insert(0, str(RAIZ / "backend"))
 # bucle, es decir aquí. Ver scripts/_windows.py.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _windows  # noqa: F401,E402
+import _cli  # noqa: E402
 
 FRONTEND = "http://localhost:8100"
 BACKEND = "http://localhost:8000"
@@ -1072,7 +1073,7 @@ if __name__ == "__main__":
     p.add_argument("--lista", action="store_true", help="Qué recorridos hay.")
     p.add_argument("--capturas", type=Path, default=None,
                    help="Carpeta donde dejar las pantallas.")
-    args = p.parse_args()
+    args = _cli.analizar(p)
 
     if args.lista:
         print("Recorridos disponibles:\n")

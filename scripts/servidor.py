@@ -27,6 +27,7 @@ from pathlib import Path
 # omisión. Ver scripts/_windows.py.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _windows  # noqa: F401,E402
+import _cli  # noqa: E402
 
 RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ / "backend"))
@@ -39,7 +40,7 @@ def main() -> int:
     parser.add_argument("--puerto", type=int, default=8000)
     parser.add_argument("--sin-recarga", action="store_true",
                         help="No vigilar cambios en el código (como en producción)")
-    args = parser.parse_args()
+    args = _cli.analizar(parser)
 
     try:
         import uvicorn
