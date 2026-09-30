@@ -997,7 +997,9 @@ function pintarPilar(boton, elegido) {
 function montarPilares(catalogo) {
   estado.catalogo = catalogo;
   estado.tipos = (catalogo.pilares || []).flatMap((p) => p.subtipos);
-  $("mandato").textContent = catalogo.mandato || "";
+  // Sin texto no se deja un desplegable que promete algo y no tiene nada.
+  $("mandato-texto").textContent = catalogo.mandato || "";
+  $("mandato").classList.toggle("hidden", !catalogo.mandato);
 
   /* Un catálogo vacío significa que la base no tiene la migración de los
      pilares. Antes el formulario salía mudo —sin tipo, sin subtipo y sin

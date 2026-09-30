@@ -357,7 +357,20 @@
           <label for="descripcion" class="block text-sm font-medium text-slate-700">Descripción</label>
           <span id="contador-desc" class="text-xs text-slate-400">0/200</span>
         </div>
-        <p id="mandato" class="mt-1 text-xs leading-relaxed text-slate-500"></p>
+        <!-- La guía de qué escribir, plegada.
+
+             Eran cuatro renglones de texto seguido encima del campo, cada vez
+             que alguien pide un permiso. Quien pide su tercer permiso del año
+             no los lee: los salta, y con ellos se salta el resto de la
+             pantalla. Plegados, el que tiene la duda los abre y el que no, no
+             tropieza. -->
+        <details id="mandato" class="mt-1 hidden">
+          <summary class="cursor-pointer select-none text-xs font-medium text-slate-500
+                          hover:text-slate-800">
+            ¿Qué debo escribir aquí?
+          </summary>
+          <p id="mandato-texto" class="mt-1 text-xs leading-relaxed text-slate-500"></p>
+        </details>
         <textarea id="descripcion" rows="3" maxlength="200" required
                   placeholder="Motivo, lugar, hora y cuánto tiempo estará ausente"
                   class="mt-1.5 w-full resize-none rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
