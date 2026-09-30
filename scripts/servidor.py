@@ -23,8 +23,10 @@ import asyncio
 import sys
 from pathlib import Path
 
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+# psycopg no arranca sobre el bucle de eventos que Windows usa por
+# omisión. Ver scripts/_windows.py.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _windows  # noqa: F401,E402
 
 RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ / "backend"))

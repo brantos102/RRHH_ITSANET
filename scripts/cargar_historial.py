@@ -40,6 +40,12 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ / "backend"))
 
+# psycopg no arranca sobre el bucle de eventos que Windows usa por
+# omisión. La política correcta hay que fijarla antes de crear ningún
+# bucle, es decir aquí. Ver scripts/_windows.py.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _windows  # noqa: F401,E402
+
 VERDE, ROJO, AMARILLO, GRIS, FIN = "\033[92m", "\033[91m", "\033[93m", "\033[90m", "\033[0m"
 
 # La pestaña que manda, tal como se llama hoy: «REGISTRO DE VACACIONE», sin

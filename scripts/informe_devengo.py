@@ -21,6 +21,12 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ / "backend"))
 
+# psycopg no arranca sobre el bucle de eventos que Windows usa por
+# omisión. La política correcta hay que fijarla antes de crear ningún
+# bucle, es decir aquí. Ver scripts/_windows.py.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _windows  # noqa: F401,E402
+
 TITULO = "Cálculo de los días de vacaciones devengados"
 SUBTITULO = "Diferencia entre el registro de Talento Humano y el sistema, y qué se propone"
 

@@ -30,6 +30,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
+# psycopg no arranca sobre el bucle de eventos que Windows usa por
+# omisión. La política correcta hay que fijarla antes de crear ningún
+# bucle, es decir aquí. Ver scripts/_windows.py.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _windows  # noqa: F401,E402
+
 from app.config import get_settings  # noqa: E402
 from app.db import cerrar_pool, obtener_todos, obtener_uno  # noqa: E402
 

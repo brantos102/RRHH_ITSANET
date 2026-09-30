@@ -33,6 +33,12 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ / "backend"))
 
+# psycopg no arranca sobre el bucle de eventos que Windows usa por
+# omisión. La política correcta hay que fijarla antes de crear ningún
+# bucle, es decir aquí. Ver scripts/_windows.py.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _windows  # noqa: F401,E402
+
 FRONTEND = "http://localhost:8100"
 BACKEND = "http://localhost:8000"
 
