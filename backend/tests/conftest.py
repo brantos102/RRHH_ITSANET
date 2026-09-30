@@ -81,8 +81,20 @@ async def empleado():
 
 
 async def _limpiar() -> None:
-    await ejecutar("delete from public.auth_otp where cedula = any(%s)",
-                   ([CEDULA_PRUEBA, CEDULA_SIN_REGISTRO, "0900000001", "1100000007", "1200000006"],))
+    # Los códigos de acceso se borran por dueño y no por una lista fija de
+    # cédulas. El límite de envíos cuenta por hora, y cada módulo de pruebas
+    # crea su propio jefe, su guardia o su Talento Humano: con una lista
+    # cerrada, esas cédulas acumulaban envíos hasta que el fixture recibía un
+    # 429 y la prueba moría en el arranque, sin que nada estuviera roto. Pasa
+    # igual cuando las pruebas de navegador entraron antes con el mismo
+    # personal de la semilla.
+    await ejecutar(
+        """delete from public.auth_otp
+            where cedula = any(%s)
+               or cedula in (select cedula from public.users
+                              where email::text like '%%@api.test'
+                                 or email::text like '%%@itsanet.test')""",
+        ([CEDULA_PRUEBA, CEDULA_SIN_REGISTRO, "0900000001", "1100000007", "1200000006"],))
     await ejecutar(
         "delete from public.notifications where user_id in "
         "(select id from public.users where email like %s)", ("%@api.test",))

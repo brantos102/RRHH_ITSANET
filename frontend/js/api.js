@@ -119,6 +119,14 @@ export const api = {
     }),
   completarFicha: (datos) =>
     peticion("/auth/completar-ficha", { method: "POST", body: JSON.stringify(datos) }),
+  jefaturasDelAlta: (token) => peticion(`/auth/alta/jefaturas?token=${token}`),
+  confirmarCorreo: (token) =>
+    peticion("/auth/confirmar-correo", { method: "POST", body: JSON.stringify({ token }) }),
+  cambiarCorreo: (email) =>
+    peticion("/mi-ficha/correo", { method: "POST", body: JSON.stringify({ email }) }),
+  confirmarCargoYJefe: (datos) =>
+    peticion("/mi-ficha/confirmar", { method: "POST", body: JSON.stringify(datos) }),
+  jefaturas: () => peticion("/catalogos/jefaturas"),
 
   tiposPermiso: () => peticion("/catalogos/tipos-permiso"),
   catalogoPermisos: () => peticion("/catalogos/permisos"),

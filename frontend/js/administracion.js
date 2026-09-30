@@ -27,6 +27,7 @@ const CARGADORES = {
   usuarios: cargarUsuarios, tipos: cargarTipos, feriados: cargarFeriados,
   antiguedades: cargarAntiguedades, configuracion: cargarConfiguracion,
   bitacora: cargarBitacora, cotejo: cargarCotejo,
+  "cambios-ficha": cargarCambiosFicha,
 };
 
 function mostrar(seccion) {
@@ -582,3 +583,94 @@ document.querySelectorAll("[data-cotejo]").forEach((b) =>
   b.addEventListener("click", () => descargarCotejo(b.dataset.cotejo)));
 
 mostrar(seccionInicial in CARGADORES ? seccionInicial : "usuarios");
+
+/* ------------------------------------------------- cambios de ficha
+   Lo que un colaborador pidió corregir de su propio expediente. La mayoría
+   serán cargos y jefes mal cargados desde el Excel de origen: el sistema no
+   puede aplicarlos solo porque de quién depende cada quien decide a dónde va
+   su solicitud a autorizarse. */
+let cambiosFicha = [];
+
+const sinTildes = (t) =>
+  (t || "").toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+function pintarCambiosFicha() {
+  const aguja = sinTildes($("cf-buscar").value.trim());
+  const visibles = aguja
+    ? cambiosFicha.filter((c) => sinTildes(
+        `${c.persona} ${c.cedula} ${c.departamento || ""} ${c.etiqueta} ` +
+        `${c.anterior_legible || ""} ${c.nuevo_legible}`).includes(aguja))
+    : cambiosFicha;
+
+  $("cf-resumen").textContent = cambiosFicha.length
+    ? `${cambiosFicha.length} pedido(s) esperando confirmación`
+    : "No hay nada por confirmar.";
+
+  $("cf-lista").innerHTML = visibles.length
+    ? visibles.map((c) => `
+      <article class="px-5 py-4" data-cambio="${c.id}">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="font-medium">${esc(c.persona)}</p>
+            <p class="text-xs text-slate-500">
+              ${esc(c.cedula)}${c.departamento ? ` · ${esc(c.departamento)}` : ""}
+              ${c.ciudad ? ` · ${esc(c.ciudad)}` : ""}
+            </p>
+          </div>
+          <span class="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800">
+            ${esc(c.etiqueta)}
+          </span>
+        </div>
+        <p class="mt-2 text-sm">
+          <span class="text-slate-500">${esc(c.anterior_legible || "sin dato")}</span>
+          <span class="mx-1.5">→</span>
+          <strong>${esc(c.nuevo_legible)}</strong>
+        </p>
+        ${c.motivo ? `<p class="mt-1 text-xs text-slate-500">${esc(c.motivo)}</p>` : ""}
+        <div class="mt-3 flex flex-wrap gap-2">
+          <button data-aprobar="${c.id}"
+                  class="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800">
+            Confirmar
+          </button>
+          <button data-rechazar="${c.id}"
+                  class="rounded-lg bg-slate-100 px-3 py-1.5 text-sm font-medium hover:bg-slate-200">
+            Rechazar
+          </button>
+        </div>
+      </article>`).join("")
+    : `<p class="px-5 py-10 text-center text-sm text-slate-500">${
+         aguja ? "Nada coincide con esa búsqueda." : "No hay cambios por confirmar."}</p>`;
+
+  $("cf-lista").querySelectorAll("[data-aprobar]").forEach((b) =>
+    b.addEventListener("click", () => resolverFicha(b.dataset.aprobar, "aprobar")));
+  $("cf-lista").querySelectorAll("[data-rechazar]").forEach((b) =>
+    b.addEventListener("click", () => resolverFicha(b.dataset.rechazar, "rechazar")));
+}
+
+async function resolverFicha(id, accion) {
+  let motivo = null;
+  if (accion === "rechazar") {
+    motivo = prompt("¿Por qué no procede? La persona verá este texto.");
+    if (motivo === null) return;
+    if (motivo.trim().length < 5) {
+      return avisar("Indique por qué se rechaza: la persona debe saber qué corregir.", true);
+    }
+  }
+  try {
+    const r = await api.resolverCambioFicha(Number(id), accion, motivo);
+    avisar(r.mensaje);
+    await cargarCambiosFicha();
+  } catch (err) {
+    avisar(err.message, true);
+  }
+}
+
+async function cargarCambiosFicha() {
+  // Los nombres los resuelve el servidor: el catálogo de jefaturas excluye a
+  // quien lo consulta, así que traducirlos aquí fallaba justo cuando el jefe
+  // señalado era la propia persona que estaba revisando.
+  cambiosFicha = await api.cambiosFichaPendientes();
+  pintarCambiosFicha();
+}
+
+$("cf-buscar").addEventListener("input", pintarCambiosFicha);

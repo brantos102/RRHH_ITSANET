@@ -360,6 +360,10 @@ async def cerrar_sesion(request: Request, usuario: Annotated[dict, Depends(usuar
 #   3. El correo se verifica de vuelta: para entrar hay que recibir el código
 #      en la dirección declarada. Y Talento Humano recibe aviso de cada alta.
 
+class ConfirmacionCorreo(BaseModel):
+    token: uuid.UUID
+
+
 class PruebaIdentidad(BaseModel):
     cedula: str
     fecha_nacimiento: date
@@ -386,6 +390,14 @@ class FichaInicial(BaseModel):
     emergencia_telefono: str = Field(..., min_length=7, max_length=20)
     direccion: str | None = Field(None, max_length=200)
     tipo_sangre: str | None = None
+    # Confirmar el cargo y el jefe es parte del primer ingreso: la planilla
+    # se cargó de una hoja de cálculo y nadie la verificó contra quien la
+    # vive. Diez personas llegaron sin jefe asignado. Se pregunta aquí, que
+    # es el único momento en que se tiene la atención de las 351.
+    cargo_correcto: bool | None = None
+    jefe_correcto: bool | None = None
+    cargo_propuesto: str | None = Field(None, max_length=120)
+    jefe_propuesto_id: uuid.UUID | None = None
 
     @field_validator("telefono", "emergencia_telefono")
     @classmethod
@@ -430,7 +442,10 @@ async def probar_identidad(datos: PruebaIdentidad, request: Request) -> dict:
         )
 
     usuario = await obtener_uno(
-        """select u.id, u.nombre from public.users u
+        """select u.id, u.nombre, u.cargo, u.departamento,
+                  j.nombre as jefe_nombre
+             from public.users u
+             left join public.users j on j.id = u.jefe_id
             where u.cedula = %(cedula)s and u.activo
               and u.correo_pendiente and not u.ficha_completa
               and u.fecha_nacimiento = %(nacimiento)s
@@ -458,7 +473,81 @@ async def probar_identidad(datos: PruebaIdentidad, request: Request) -> dict:
     return {
         "token": str(alta["token"]),
         "nombre": usuario["nombre"],
+        # Lo que hay que confirmar. Se devuelve aquí, ya probada la
+        # identidad, y no en la pantalla de acceso: el cargo y el área de
+        # alguien no son datos que deba poder leer quien solo tecleó una
+        # cédula, que en Ecuador es casi pública.
+        "cargo": usuario["cargo"],
+        "departamento": usuario["departamento"],
+        "jefe": usuario["jefe_nombre"],
         "minutos": 30,
+    }
+
+
+@router.get("/alta/jefaturas")
+async def jefaturas_para_el_alta(token: uuid.UUID) -> list[dict]:
+    """La lista para elegir jefe mientras se completa la ficha.
+
+    Solo con un permiso de alta vivo, y solo nombre, cargo y área: quien
+    llegó hasta aquí ya probó su identidad con dos datos del expediente, y
+    aun así no ve ni cédulas ni correos de terceros (LOPDP, Art. 10).
+    """
+    alta = await obtener_uno(
+        """select 1 as x from public.altas_pendientes
+            where token = %s and usado_en is null and expira_en > now()""",
+        (str(token),),
+    )
+    if alta is None:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail={"mensaje": "El permiso para completar sus datos venció."},
+        )
+    filas = await obtener_todos(
+        "select id, nombre, cargo, departamento from public.v_jefaturas"
+    )
+    return [{**f, "id": str(f["id"])} for f in filas]
+
+
+@router.post("/confirmar-correo")
+async def confirmar_correo(datos: ConfirmacionCorreo, request: Request,
+                           tareas: BackgroundTasks) -> dict:
+    """El enlace que llegó a la dirección nueva. Recién aquí empieza a regir.
+
+    Es POST y no GET aunque venga de un enlace: los antivirus de correo y
+    los previsualizadores abren los enlaces de los mensajes que analizan, y
+    un GET con efecto los dejaría aplicar el cambio sin que la persona haya
+    hecho nada. La página de confirmación hace el POST cuando alguien
+    realmente la abre.
+    """
+    anterior = await obtener_uno(
+        """select u.email::text as email, u.nombre
+             from public.confirmaciones_correo c
+             join public.users u on u.id = c.user_id
+            where c.token = %s and c.confirmado_en is null""",
+        (str(datos.token),),
+    )
+
+    fila = await obtener_uno("select public.confirmar_correo(%s) as r", (str(datos.token),))
+    resultado = fila["r"] if fila else {"confirmado": False, "motivo": "Enlace no válido."}
+
+    if not resultado.get("confirmado"):
+        await registrar(request, "correo_confirmacion_fallida")
+        raise HTTPException(status_code=status.HTTP_410_GONE,
+                            detail={"mensaje": resultado.get("motivo")})
+
+    # Al buzón anterior: si el cambio no fue suyo, tiene que enterarse por
+    # una vía que quien lo hizo no controla.
+    if anterior and anterior["email"]:
+        tareas.add_task(notificaciones.avisar_correo_confirmado,
+                        anterior["email"], resultado["nombre"], resultado["email"])
+
+    await registrar(request, "correo_confirmado", detalle={"correo": resultado["email"]})
+    return {
+        "confirmado": True,
+        "nombre": resultado["nombre"],
+        "email": resultado["email"],
+        "mensaje": "Su correo quedó confirmado. Desde ahora recibirá ahí el "
+                   "código de acceso y los avisos de sus solicitudes.",
     }
 
 
@@ -515,15 +604,35 @@ async def completar_ficha(
                      "direccion": datos.direccion, "sangre": datos.tipo_sangre,
                      "id": alta["user_id"]},
                 )
+                # Se actualiza si ya había uno principal, en vez de insertar a
+                # ciegas. Talento Humano puede reabrir un alta —porque la
+                # persona se equivocó de correo, por ejemplo— y entonces el
+                # segundo intento chocaba con el índice único y moría con un
+                # «El registro ya existe» que no le dice nada a nadie, después
+                # de haber guardado ya el correo y el teléfono.
                 await cur.execute(
                     """
                     insert into public.emergency_contacts
                         (user_id, nombre, parentesco, telefono, es_principal)
                     values (%s, %s, %s::parentesco, %s, true)
+                    on conflict (user_id) where es_principal do update
+                      set nombre = excluded.nombre,
+                          parentesco = excluded.parentesco,
+                          telefono = excluded.telefono
                     """,
                     (alta["user_id"], datos.emergencia_nombre.strip(),
                      datos.emergencia_parentesco or "otro", datos.emergencia_telefono),
                 )
+                if datos.cargo_correcto:
+                    await cur.execute(
+                        "update public.users set cargo_confirmado_en = now() where id = %s",
+                        (alta["user_id"],),
+                    )
+                if datos.jefe_correcto:
+                    await cur.execute(
+                        "update public.users set jefe_confirmado_en = now() where id = %s",
+                        (alta["user_id"],),
+                    )
                 await cur.execute(
                     "update public.altas_pendientes set usado_en = now() where id = %s",
                     (alta["id"],),
@@ -531,8 +640,47 @@ async def completar_ficha(
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
+    # Las correcciones van FUERA de la transacción de arriba y a propósito:
+    # si la jefatura señalada resultara inválida, sería absurdo perder por eso
+    # el correo y el teléfono que la persona acaba de escribir. Lo que no se
+    # pueda registrar se devuelve como aviso, no como error.
+    pedidos: list[tuple[str, str]] = []
+    avisos: list[str] = []
+
+    if datos.cargo_correcto is False and (datos.cargo_propuesto or "").strip():
+        try:
+            await obtener_uno(
+                "select public.solicitar_cambio_ficha(%s, 'cargo', %s, %s) as id",
+                (alta["user_id"], datos.cargo_propuesto.strip(),
+                 "Corrección declarada al completar la ficha"),
+            )
+            pedidos.append(("Cargo que indica", datos.cargo_propuesto.strip()))
+        except Exception:  # noqa: BLE001
+            avisos.append("No se pudo registrar la corrección del cargo. "
+                          "Puede volver a pedirla desde su ficha.")
+
+    if datos.jefe_correcto is False and datos.jefe_propuesto_id:
+        jefe = await obtener_uno(
+            "select nombre from public.v_jefaturas where id = %s",
+            (str(datos.jefe_propuesto_id),),
+        )
+        if jefe is None:
+            avisos.append("La jefatura señalada no está en la lista vigente.")
+        else:
+            try:
+                await obtener_uno(
+                    "select public.solicitar_cambio_ficha(%s, 'jefe_id', %s, %s) as id",
+                    (alta["user_id"], str(datos.jefe_propuesto_id),
+                     "Corrección declarada al completar la ficha"),
+                )
+                pedidos.append(("Jefe que indica", jefe["nombre"]))
+            except Exception:  # noqa: BLE001
+                avisos.append("No se pudo registrar la corrección del jefe. "
+                              "Puede volver a pedirla desde su ficha.")
+
     await registrar(request, "alta_ficha_completada", user_id=str(alta["user_id"]),
-                    cedula=alta["cedula"], detalle={"correo": datos.email})
+                    cedula=alta["cedula"],
+                    detalle={"correo": datos.email, "correcciones": len(pedidos)})
 
     # Talento Humano de su región se entera: un correo que alguien declara de
     # sí mismo merece una mirada, aunque el sistema ya lo verifique de vuelta.
@@ -543,10 +691,17 @@ async def completar_ficha(
     if destinos:
         tareas.add_task(notificaciones.avisar_alta_completada, destinos,
                         alta["nombre"], alta["cedula"], datos.email)
+        if pedidos:
+            tareas.add_task(notificaciones.avisar_correccion_de_ficha, destinos,
+                            alta["nombre"], alta["cedula"], pedidos)
 
     return {
         "completado": True,
         "cedula": alta["cedula"],
+        "en_revision": [etiqueta for etiqueta, _ in pedidos],
+        "avisos": avisos,
         "mensaje": "Datos guardados. Le enviamos el código de acceso al correo "
-                   "que acaba de registrar.",
+                   "que acaba de registrar."
+                   + (" Lo que indicó como incorrecto queda a la espera de que "
+                      "Talento Humano lo confirme." if pedidos else ""),
     }

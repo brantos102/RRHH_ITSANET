@@ -23,6 +23,7 @@
     <button data-seccion="configuracion" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Configuración</button>
     <button data-seccion="bitacora" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Bitácora</button>
     <button data-seccion="cotejo" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Cotejo de la carga</button>
+    <button data-seccion="cambios-ficha" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Cambios de ficha</button>
   </nav>
 
   <!-- ===== Usuarios ===== -->
@@ -49,6 +50,23 @@
        Una carga masiva puede traer errores que dentro del sistema, de uno en
        uno, no se detectan con trescientas cincuenta personas. Esto baja la
        tabla para compararla con el archivo del que salió. -->
+  <!-- Cambios de ficha ---------------------------------------------------
+       La cola existía en la API desde el principio y ninguna pantalla la
+       mostraba: alguien pedía corregir su cargo y el pedido se quedaba en la
+       base sin que nadie pudiera verlo. -->
+  <section data-panel="cambios-ficha" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+      <div>
+        <h2 class="font-medium">Cambios de ficha por confirmar</h2>
+        <p id="cf-resumen" class="mt-0.5 text-sm text-slate-500">Cargando…</p>
+      </div>
+      <input type="search" id="cf-buscar" placeholder="Persona, cédula o dato"
+             class="w-56 rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+    </header>
+    <div id="cf-lista" class="divide-y divide-slate-100"></div>
+  </section>
+
   <section data-panel="cotejo" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
     <header class="border-b border-slate-200 px-5 py-3.5">
       <h2 class="font-medium">Cotejo de la carga inicial</h2>

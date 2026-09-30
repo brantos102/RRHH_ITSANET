@@ -15,14 +15,21 @@ import pytest
 from app.db import ejecutar, obtener_todos, obtener_uno
 from tests.conftest import CEDULA_PRUEBA
 
-# Los que solo maneja Talento Humano, con el valor que un atacante pondría.
+# Los que no se tocan por ninguna vía, con el valor que un atacante pondría.
 BLOQUEADOS = {
     "fecha_ingreso": "2000-01-01",      # más antigüedad = más días
     "cedula": "1710034065",             # suplantar a otra persona
     "dias_vacaciones": "365",           # saldo a voluntad
-    "cargo": "Gerente General",
     "departamento": "GERENCIA",
-    "jefe_id": None,                    # quedarse sin quien lo autorice
+}
+
+# El cargo y el jefe sí se pueden señalar, porque la planilla los trajo mal en
+# varios casos y antes no había forma de decirlo. Lo que no cambia es quién
+# decide: la persona propone, Talento Humano confirma, y hasta entonces el
+# dato registrado sigue siendo el que rige.
+REVISADOS = {
+    "cargo": "Gerente General",
+    "jefe_id": None,
 }
 
 
@@ -35,7 +42,7 @@ async def auth_empleado(cliente, codigos, empleado):
 
 
 # --------------------------------------------------------- por la vía directa
-@pytest.mark.parametrize("campo", [c for c in BLOQUEADOS if c != "jefe_id"])
+@pytest.mark.parametrize("campo", [*BLOQUEADOS, "cargo"])
 async def test_no_se_corrigen_directamente(cliente, auth_empleado, empleado, campo):
     """`/mi-ficha` acepta una lista cerrada de campos; el resto ni se mira.
 
@@ -48,14 +55,14 @@ async def test_no_se_corrigen_directamente(cliente, auth_empleado, empleado, cam
         f"select {campo}::text as v from public.users where id = %s", (empleado["id"],))
 
     await cliente.patch("/mi-ficha", headers=auth_empleado,
-                        json={campo: BLOQUEADOS[campo]})
+                        json={campo: {**BLOQUEADOS, **REVISADOS}[campo]})
 
     despues = await obtener_uno(
         f"select {campo}::text as v from public.users where id = %s", (empleado["id"],))
     assert despues["v"] == antes["v"], f"{campo} cambió y no debía"
 
 
-@pytest.mark.parametrize("campo", [c for c in BLOQUEADOS if c != "jefe_id"])
+@pytest.mark.parametrize("campo", list(BLOQUEADOS))
 async def test_no_se_piden_ni_por_revision(cliente, auth_empleado, campo):
     """Tampoco por la vía de «lo revisa Talento Humano»: no son revisables."""
     r = await cliente.post("/mi-ficha/cambios", headers=auth_empleado,
@@ -63,6 +70,53 @@ async def test_no_se_piden_ni_por_revision(cliente, auth_empleado, campo):
                                  "motivo": "Intento deliberado de cambiar un dato bloqueado"})
     assert r.status_code in (403, 422), f"{campo}: {r.status_code} {r.text}"
     assert "Talento Humano" in r.text or "no se modifica" in r.text, r.text
+
+
+async def test_pedir_el_cargo_no_lo_cambia_hasta_que_lo_confirmen(
+    cliente, auth_empleado, empleado
+):
+    """Señalar no es decidir.
+
+    El colaborador puede decir «mi cargo no es este», y debe poder: diez
+    personas de la planilla llegaron sin jefe y varios cargos vinieron mal
+    del Excel. Lo que no puede es que su palabra rija sola.
+    """
+    antes = await obtener_uno(
+        "select cargo from public.users where id = %s", (empleado["id"],))
+
+    r = await cliente.post("/mi-ficha/cambios", headers=auth_empleado,
+                           json={"campo": "cargo", "valor": "Gerente General",
+                                 "motivo": "Intento de ascenderse solo"})
+    assert r.status_code == 201, r.text
+
+    despues = await obtener_uno(
+        "select cargo from public.users where id = %s", (empleado["id"],))
+    assert despues["cargo"] == antes["cargo"], (
+        "el cargo cambió sin que Talento Humano lo confirmara"
+    )
+
+    pendiente = await obtener_uno(
+        """select estado from public.cambios_ficha
+            where user_id = %s and campo = 'cargo'
+            order by created_at desc limit 1""",
+        (empleado["id"],))
+    assert pendiente["estado"] == "pendiente"
+
+
+async def test_nadie_se_pone_a_si_mismo_de_jefe(cliente, auth_empleado, empleado):
+    r = await cliente.post("/mi-ficha/cambios", headers=auth_empleado,
+                           json={"campo": "jefe_id", "valor": str(empleado["id"]),
+                                 "motivo": "Intento de quedarse sin quien lo autorice"})
+    assert r.status_code in (403, 422), r.text
+    assert "propio jefe" in r.text
+
+
+async def test_el_jefe_senalado_tiene_que_existir(cliente, auth_empleado):
+    r = await cliente.post("/mi-ficha/cambios", headers=auth_empleado,
+                           json={"campo": "jefe_id",
+                                 "valor": "00000000-0000-0000-0000-000000000000",
+                                 "motivo": "Jefatura inventada"})
+    assert r.status_code in (403, 422), r.text
 
 
 async def test_la_base_rechaza_el_campo_aunque_el_backend_lo_dejara_pasar(empleado):
@@ -154,6 +208,14 @@ async def test_el_catalogo_declara_bloqueados_los_que_debe(cliente, auth_emplead
     filas = await obtener_todos(
         "select campo from public.campos_ficha where nivel = 'bloqueado'")
     bloqueados = {f["campo"] for f in filas}
-    for campo in ("fecha_ingreso", "cedula", "dias_vacaciones", "cargo",
-                  "departamento", "jefe_id"):
+    for campo in ("fecha_ingreso", "cedula", "dias_vacaciones", "departamento"):
         assert campo in bloqueados, f"{campo} debe estar bloqueado para el empleado"
+
+    # Y los que sí se señalan, con confirmación de por medio.
+    niveles = {f["campo"]: f["nivel"] for f in await obtener_todos(
+        "select campo, nivel from public.campos_ficha")}
+    assert niveles["cargo"] == "revisado"
+    assert niveles["jefe_id"] == "revisado"
+    assert niveles["email"] == "confirmado", (
+        "el correo no lo aprueba nadie: lo confirma la dirección misma"
+    )

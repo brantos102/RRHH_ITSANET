@@ -24,6 +24,7 @@ const MODULOS = [
       // ninguna pantalla la consumía, así que las consultas llegaban y
       // nadie podía leerlas.
       { texto: "Mensajes de colaboradores", href: "mensajes.html" },
+      { texto: "Cambios de ficha", href: "administracion.html#cambios-ficha" },
       { texto: "Días no laborables", href: "administracion.html#feriados" },
       { texto: "Antigüedades y días", href: "administracion.html#antiguedades" },
       // La bitácora es herramienta de Talento Humano, no solo del administrador:
@@ -132,6 +133,7 @@ export function montarNavegacion(contenedor, { activo = "panel", contadores = {}
             </p>
             <hr class="my-1 border-slate-100">
             <a href="dashboard.html" class="block px-4 py-2.5 text-sm hover:bg-slate-50">Mi panel</a>
+            <a href="mi-ficha.html" class="block px-4 py-2.5 text-sm hover:bg-slate-50">Mi ficha personal</a>
             <button id="nav-salir" class="block w-full px-4 py-2.5 text-left text-sm hover:bg-slate-50">
               Cerrar sesión
             </button>

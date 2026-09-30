@@ -291,3 +291,68 @@ async def avisar_alta_completada(destinatarios: list[dict], nombre: str,
     for destino in destinatarios:
         if destino.get("email"):
             await correo.enviar(destino["email"], titulo, texto, _marco(titulo, cuerpo))
+
+
+async def confirmar_direccion(destino: str, nombre: str, token: str) -> None:
+    """A la dirección nueva, para comprobar que existe y es de quien la declara.
+
+    Es la única barrera que hace falta para un correo: cambiar el propio no
+    es una decisión que Talento Humano deba aprobar —nadie conoce mejor su
+    buzón—, pero sí hay que comprobar que el buzón es suyo. Hasta que se abra
+    este enlace, el correo anterior sigue rigiendo: un dedazo no deja a nadie
+    sin poder entrar.
+    """
+    url = f"{get_settings().app_url.rstrip('/')}/confirmar.html?t={token}"
+    titulo = "Confirme su dirección de correo"
+    cuerpo = (
+        f'<p style="margin:0 0 16px;font-size:14px;color:#475569">'
+        f"{nombre}, alguien —quizá usted— registró esta dirección para recibir "
+        "los códigos de acceso y los avisos de sus solicitudes. Confírmelo para "
+        "que empiece a regir.</p>"
+        '<p style="margin:0 0 16px;font-size:13px;color:#64748b">'
+        "El enlace vence en 24 horas. Si no fue usted, ignore este mensaje: "
+        "no se cambió nada y su correo anterior sigue vigente.</p>"
+    )
+    texto = (f"{titulo}\n\n{nombre}, confirme esta dirección abriendo:\n{url}\n\n"
+             "El enlace vence en 24 horas. Si no fue usted, ignore este mensaje.\n")
+    await correo.enviar(destino, titulo, texto, _marco(titulo, cuerpo, ("Confirmar mi correo", url)))
+
+
+async def avisar_correo_confirmado(destino: str, nombre: str, email: str) -> None:
+    """Al correo anterior: si el cambio no fue suyo, tiene que enterarse."""
+    if not destino or destino == email:
+        return
+    titulo = "Su correo de acceso cambió"
+    filas = [("Colaborador", nombre), ("Nueva dirección", email)]
+    cuerpo = (
+        '<p style="margin:0 0 16px;font-size:14px;color:#475569">'
+        "A partir de ahora los códigos de acceso y los avisos van a la dirección "
+        "nueva. Si usted no hizo este cambio, escriba a Talento Humano de "
+        "inmediato.</p>" + _tabla(filas)
+    )
+    texto = f"{titulo}\n\n" + "\n".join(f"{e}: {v}" for e, v in filas) + "\n"
+    await correo.enviar(destino, titulo, texto, _marco(titulo, cuerpo))
+
+
+async def avisar_correccion_de_ficha(destinatarios: list[dict], nombre: str,
+                                     cedula: str, pedidos: list[tuple[str, str]]) -> None:
+    """A Talento Humano cuando alguien dice que su cargo o su jefe están mal.
+
+    No es un trámite menor: de quién es jefe de quién depende a dónde va cada
+    solicitud a autorizarse. Por eso lo confirma Talento Humano y no se aplica
+    solo, y por eso el aviso sale en el momento, no en un informe mensual.
+    """
+    if not pedidos:
+        return
+    titulo = f"{nombre} corrige su cargo o su jefe"
+    filas = [("Colaborador", nombre), ("Cédula", cedula), *pedidos]
+    cuerpo = (
+        '<p style="margin:0 0 16px;font-size:14px;color:#475569">'
+        "Al entrar por primera vez, esta persona indicó que el dato registrado "
+        "no corresponde. Nada cambió todavía: revíselo en «Cambios de ficha» y "
+        "confírmelo o recházelo.</p>" + _tabla(filas)
+    )
+    texto = f"{titulo}\n\n" + "\n".join(f"{e}: {v}" for e, v in filas) + "\n"
+    for destino in destinatarios:
+        if destino.get("email"):
+            await correo.enviar(destino["email"], titulo, texto, _marco(titulo, cuerpo))

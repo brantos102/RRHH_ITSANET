@@ -151,6 +151,57 @@
              class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 ring-1 ring-slate-300
                     focus:bg-white focus:ring-2 focus:ring-slate-900">
 
+      <!-- Confirmar cargo y jefe ------------------------------------------
+           La planilla se cargó de una hoja de cálculo y nadie la contrastó
+           con quien la vive. Este es el único momento en que se tiene la
+           atención de las 351 personas, así que es aquí donde se pregunta. -->
+      <fieldset id="f-confirmar" class="mt-4 rounded-xl bg-amber-50 p-3 ring-1 ring-amber-200">
+        <legend class="px-1 text-sm font-medium text-amber-900">Confirme sus datos laborales</legend>
+        <p class="mb-3 text-xs text-amber-800">
+          Esto es lo que tenemos registrado. Si algo no corresponde, indíquelo:
+          Talento Humano lo confirma antes de que rija.
+        </p>
+
+        <div class="rounded-lg bg-white p-3 ring-1 ring-slate-200">
+          <p class="text-xs text-slate-500">Cargo</p>
+          <p id="f-cargo-actual" class="font-medium">—</p>
+          <div class="mt-2 flex gap-4 text-sm">
+            <label class="flex items-center gap-1.5">
+              <input type="radio" name="cargo-ok" value="si" checked
+                     class="text-slate-900 focus:ring-slate-900"> Es correcto
+            </label>
+            <label class="flex items-center gap-1.5">
+              <input type="radio" name="cargo-ok" value="no"
+                     class="text-slate-900 focus:ring-slate-900"> No corresponde
+            </label>
+          </div>
+          <input id="f-cargo-nuevo" type="text" maxlength="120"
+                 placeholder="¿Cuál es su cargo?"
+                 class="mt-2 hidden w-full rounded-lg border-0 bg-slate-50 px-3 py-2 text-sm
+                        ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </div>
+
+        <div class="mt-2 rounded-lg bg-white p-3 ring-1 ring-slate-200">
+          <p class="text-xs text-slate-500">Jefe inmediato</p>
+          <p id="f-jefe-actual" class="font-medium">—</p>
+          <div class="mt-2 flex gap-4 text-sm">
+            <label class="flex items-center gap-1.5">
+              <input type="radio" name="jefe-ok" value="si" checked
+                     class="text-slate-900 focus:ring-slate-900"> Es correcto
+            </label>
+            <label class="flex items-center gap-1.5">
+              <input type="radio" name="jefe-ok" value="no"
+                     class="text-slate-900 focus:ring-slate-900"> No corresponde
+            </label>
+          </div>
+          <select id="f-jefe-nuevo"
+                  class="mt-2 hidden w-full rounded-lg border-0 bg-slate-50 px-3 py-2 text-sm
+                         ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+            <option value="">Elija a su jefe…</option>
+          </select>
+        </div>
+      </fieldset>
+
       <p id="error-ficha" class="mt-3 hidden text-sm text-rose-600" role="alert"></p>
 
       <button type="submit" id="btn-ficha"
@@ -158,9 +209,6 @@
                      hover:bg-slate-800 disabled:opacity-50">
         Guardar y enviarme el código
       </button>
-      <p class="mt-4 text-center text-xs leading-relaxed text-slate-500">
-        Sus datos se tratan conforme a la Ley Orgánica de Protección de Datos Personales.
-      </p>
     </form>
 
     <!-- Paso 2: código -->
@@ -315,6 +363,13 @@ $("paso-identidad").addEventListener("submit", async (e) => {
     tokenAlta = r.token;
     $("ficha-saludo").textContent =
       `${r.nombre}, registre dónde ubicarlo. Le enviaremos su código al correo que indique.`;
+    $("f-cargo-actual").textContent =
+      [r.cargo, r.departamento].filter(Boolean).join(" · ") || "Sin cargo registrado";
+    $("f-jefe-actual").textContent = r.jefe || "Sin jefe registrado";
+    // Sin cargo o sin jefe no hay nada que confirmar: se pregunta cuál es.
+    if (!r.cargo) marcarIncorrecto("cargo-ok");
+    if (!r.jefe) marcarIncorrecto("jefe-ok");
+    cargarJefaturas();
     $("paso-identidad").classList.add("hidden");
     $("paso-ficha").classList.remove("hidden");
     $("f-email").focus();
@@ -326,6 +381,36 @@ $("paso-identidad").addEventListener("submit", async (e) => {
     $("btn-identidad").textContent = "Continuar";
   }
 });
+
+/* ---- Confirmación de cargo y jefe ---- */
+const elegido = (grupo) =>
+  document.querySelector(`input[name="${grupo}"]:checked`)?.value || "si";
+
+function marcarIncorrecto(grupo) {
+  const opcion = document.querySelector(`input[name="${grupo}"][value="no"]`);
+  if (opcion) { opcion.checked = true; opcion.dispatchEvent(new Event("change", { bubbles: true })); }
+}
+
+[["cargo-ok", "f-cargo-nuevo"], ["jefe-ok", "f-jefe-nuevo"]].forEach(([grupo, campo]) =>
+  document.querySelectorAll(`input[name="${grupo}"]`).forEach((opcion) =>
+    opcion.addEventListener("change", () =>
+      $(campo).classList.toggle("hidden", elegido(grupo) === "si"))));
+
+async function cargarJefaturas() {
+  const lista = $("f-jefe-nuevo");
+  if (lista.options.length > 1) return;          // ya cargada
+  try {
+    const jefaturas = await api.jefaturasDelAlta(tokenAlta);
+    lista.insertAdjacentHTML("beforeend", jefaturas.map((j) =>
+      `<option value="${j.id}">${[j.nombre, j.cargo].filter(Boolean).join(" · ")}</option>`
+    ).join(""));
+  } catch {
+    // Sin lista, la persona igual completa el resto: no se le corta el paso
+    // por un dato que Talento Humano puede corregir después.
+    lista.insertAdjacentHTML("beforeend",
+      '<option value="" disabled>No se pudo cargar la lista</option>');
+  }
+}
 
 ["f-telefono", "f-emer-telefono"].forEach((id) =>
   $(id).addEventListener("input", (e) => {
@@ -355,13 +440,27 @@ $("paso-ficha").addEventListener("submit", async (e) => {
   $("btn-ficha").disabled = true;
   $("btn-ficha").textContent = "Guardando…";
   try {
-    await api.completarFicha({
+    const cargoOk = elegido("cargo-ok") === "si";
+    const jefeOk = elegido("jefe-ok") === "si";
+    if (!cargoOk && !$("f-cargo-nuevo").value.trim()) {
+      return mostrarError("ficha", "Escriba cuál es su cargo.");
+    }
+    if (!jefeOk && !$("f-jefe-nuevo").value) {
+      return mostrarError("ficha", "Elija quién es su jefe inmediato.");
+    }
+
+    const respuesta = await api.completarFicha({
       token: tokenAlta, email, telefono,
       emergencia_nombre: emerNombre,
       emergencia_parentesco: $("f-emer-parentesco").value.trim() || null,
       emergencia_telefono: emerTelefono,
       direccion: $("f-direccion").value.trim() || null,
+      cargo_correcto: cargoOk,
+      cargo_propuesto: cargoOk ? null : $("f-cargo-nuevo").value.trim(),
+      jefe_correcto: jefeOk,
+      jefe_propuesto_id: jefeOk ? null : $("f-jefe-nuevo").value,
     });
+    if (respuesta.avisos?.length) console.warn(respuesta.avisos.join(" "));
     // Con el correo ya registrado, el camino normal funciona.
     const r = await api.solicitarToken(cedulaActual);
     $("correo-destino").textContent = r.correo || email;
