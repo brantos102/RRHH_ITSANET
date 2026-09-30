@@ -195,6 +195,7 @@ async def revisar_base() -> int:
         ("0020 sin caducidad inventada", "public.v_caducidad"),
         ("0021 Art. 75 correcto y control de acumulación", "public.v_acumulacion_excesiva"),
         ("0022 correo en blanco de quien no lo tiene", None),
+        ("0023 el calendario recuerda lo que pasó", None),
     ]
 
     # Las migraciones que solo cambian funciones se comprueban por la función.
@@ -217,8 +218,22 @@ async def revisar_base() -> int:
         "0017 excepción sin regla de fin de semana":
             ("tg_requests_before_insert", "bloque_menor_justificado"),
     }
+
+    # Y una que solo quita una línea de una vista: se comprueba que la vista
+    # tenga la columna nueva, que es lo que esa línea hacía imposible.
+    columnas_de_vista = {
+        "0023 el calendario recuerda lo que pasó": ("v_calendario_equipo", "ya_ocurrio"),
+    }
     for nombre, objeto in migraciones:
-        if nombre in columnas_nulas:
+        if nombre in columnas_de_vista:
+            vista, columna = columnas_de_vista[nombre]
+            fila = await obtener_uno(
+                """select count(*) > 0 as existe from information_schema.columns
+                    where table_schema = 'public' and table_name = %s
+                      and column_name = %s""",
+                (vista, columna),
+            )
+        elif nombre in columnas_nulas:
             tabla, columna = columnas_nulas[nombre]
             fila = await obtener_uno(
                 """select is_nullable = 'YES' as existe

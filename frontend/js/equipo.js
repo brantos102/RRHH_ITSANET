@@ -118,7 +118,16 @@ function pintar() {
     }
   }
 
+  /* Una ausencia anulada se ve, tachada, y no se confunde con una vigente.
+
+     La vista del calendario recortaba todo lo terminado hacía más de un mes,
+     así que al retroceder de mes la grilla salía en blanco: no porque nadie
+     hubiera faltado, sino porque el dato ya no llegaba. Ahora llega también
+     lo pasado y lo anulado, y el color tiene que distinguirlos: ver
+     desaparecer una ausencia sin rastro es lo que hace que nadie confíe en
+     el calendario. */
   const color = (a) => {
+    if (a.estado === "cancelado") return "bg-slate-300";
     const aprobada = a.estado === "aprobado";
     if (a.motivo_general === "Vacaciones") return aprobada ? "bg-emerald-400" : "bg-emerald-200";
     return aprobada ? "bg-sky-400" : "bg-sky-200";
