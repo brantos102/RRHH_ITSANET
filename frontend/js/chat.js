@@ -270,38 +270,203 @@ function abrirMeet(modo) {
 
 /* ------------------------------------------------- burbuja de Talento Humano */
 
+/* ------------------------------------------- la bandeja, en una ventanita
+
+   Antes la burbuja de Talento Humano llevaba a `mensajes.html`, una página
+   entera. Para responder «sí, le quedan ocho días» había que abandonar lo
+   que se estaba haciendo, ir a otra pantalla y volver. Nadie contesta así, y
+   la consulta se queda sin respuesta.
+
+   Ahora abre la misma ventana flotante que ve el colaborador, con dos
+   vistas: la lista de consultas y, al elegir una, el hilo. La pantalla
+   completa sigue existiendo para quien quiera trabajar la bandeja entera; se
+   llega por el menú de Talento Humano, o desde el pie de la ventanita. */
+
 function montarAtajoBandeja() {
   if (PAGINA === "mensajes.html") return;   // ya está dentro de la bandeja
 
-  const enlace = document.createElement("a");
-  enlace.href = "mensajes.html";
-  enlace.id = "chat-burbuja";
-  enlace.setAttribute("aria-label", "Mensajes de los colaboradores");
-  enlace.className =
-    "fixed bottom-5 right-5 z-40 grid h-14 w-14 place-items-center rounded-full " +
-    "bg-slate-900 text-white shadow-lg transition hover:bg-slate-800";
-  enlace.innerHTML = `
-    <svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round"
-            d="M8 10.5h8M8 14h5m7-1.5a8.5 8.5 0 0 1-12.2 7.7L4 21l.9-3.6A8.5 8.5 0 1 1 20 12.5Z"/>
-    </svg>
-    <span id="chat-punto" class="absolute -right-1 -top-1 hidden min-w-[1.25rem] rounded-full
-          bg-rose-500 px-1 text-center text-[11px] font-bold leading-5 text-white
-          ring-2 ring-white"></span>`;
-  document.body.appendChild(enlace);
+  const caja = document.createElement("div");
+  caja.innerHTML = `
+    <button id="chat-burbuja" aria-label="Mensajes de los colaboradores"
+            class="fixed bottom-5 right-5 z-40 grid h-14 w-14 place-items-center rounded-full
+                   bg-slate-900 text-white shadow-lg transition hover:bg-slate-800">
+      <svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round"
+              d="M8 10.5h8M8 14h5m7-1.5a8.5 8.5 0 0 1-12.2 7.7L4 21l.9-3.6A8.5 8.5 0 1 1 20 12.5Z"/>
+      </svg>
+      <span id="chat-punto" class="absolute -right-1 -top-1 hidden min-w-[1.25rem] rounded-full
+            bg-rose-500 px-1 text-center text-[11px] font-bold leading-5 text-white
+            ring-2 ring-white"></span>
+    </button>
 
-  const contar = async () => {
-    try {
-      const hilos = await api.bandejaChat("abierta");
-      const sinLeer = hilos.reduce((n, h) => n + (h.sin_leer || 0), 0);
-      const punto = $("chat-punto");
-      punto.textContent = sinLeer > 99 ? "99+" : sinLeer;
-      punto.classList.toggle("hidden", sinLeer === 0);
-      enlace.setAttribute("aria-label", sinLeer
-        ? `Mensajes de los colaboradores: ${sinLeer} sin leer`
-        : "Mensajes de los colaboradores");
-    } catch { /* sin conexión la burbuja simplemente no avisa */ }
-  };
-  contar();
-  estado.sondeo = setInterval(contar, 60000);
+    <section id="chat-panel"
+             class="fixed bottom-5 right-5 z-50 hidden max-h-[min(80dvh,34rem)]
+                    w-[min(100vw-2.5rem,23rem)] flex-col overflow-hidden rounded-2xl
+                    bg-white shadow-2xl ring-1 ring-slate-200">
+      <header class="flex items-center gap-2 bg-slate-900 px-4 py-3 text-white">
+        <button id="bandeja-volver"
+                class="hidden shrink-0 rounded-lg p-1 text-slate-300 hover:bg-slate-800
+                       hover:text-white" aria-label="Volver a la lista">←</button>
+        <div class="min-w-0 flex-1">
+          <p id="bandeja-titulo" class="truncate text-sm font-medium">Consultas recibidas</p>
+          <p id="bandeja-pie" class="truncate text-xs text-slate-400"></p>
+        </div>
+        <button id="bandeja-cerrar-hilo" title="Dar por resuelta"
+                class="hidden rounded-lg px-2 py-1 text-xs font-medium text-slate-300
+                       hover:bg-slate-800 hover:text-white">Resolver</button>
+        <button id="chat-cerrar" aria-label="Cerrar"
+                class="rounded-lg p-1.5 text-slate-300 hover:bg-slate-800 hover:text-white">✕</button>
+      </header>
+
+      <div id="bandeja-lista" class="sin-barra min-h-[12rem] flex-1 divide-y divide-slate-100
+                                     overflow-y-auto"></div>
+
+      <div id="bandeja-hilo" class="hidden min-h-[12rem] flex-1 flex-col overflow-hidden">
+        <div id="chat-mensajes" class="sin-barra flex-1 space-y-2 overflow-y-auto
+                                       bg-slate-50 px-3 py-3"></div>
+        <form id="chat-form" class="flex items-end gap-2 border-t border-slate-200 p-2">
+          <textarea id="chat-texto" rows="1" maxlength="2000" required
+                    placeholder="Responder"
+                    class="max-h-28 min-h-[2.5rem] flex-1 resize-none rounded-xl border-0 bg-slate-50
+                           px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white
+                           focus:ring-2 focus:ring-slate-900"></textarea>
+          <button type="submit" aria-label="Enviar"
+                  class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-900 text-white
+                         hover:bg-slate-800">
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="m4 12 16-8-5 16-3-6-8-2Z"/>
+            </svg>
+          </button>
+        </form>
+      </div>
+
+      <a href="mensajes.html" class="border-t border-slate-200 px-4 py-2 text-center text-xs
+                                     text-slate-500 hover:bg-slate-50 hover:text-slate-900">
+        Abrir la bandeja completa
+      </a>
+    </section>`;
+  document.body.appendChild(caja);
+
+  $("chat-burbuja").addEventListener("click", alternarBandeja);
+  $("chat-cerrar").addEventListener("click", alternarBandeja);
+  $("bandeja-volver").addEventListener("click", () => mostrarLista());
+  $("bandeja-cerrar-hilo").addEventListener("click", resolverHilo);
+  $("chat-form").addEventListener("submit", responder);
+  $("chat-texto").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); responder(e); }
+  });
+
+  contarSinLeer();
+  estado.sondeo = setInterval(contarSinLeer, 60000);
+}
+
+async function contarSinLeer() {
+  try {
+    const hilos = await api.bandejaChat("abierta");
+    const sinLeer = hilos.reduce((n, h) => n + (h.sin_leer || 0), 0);
+    const punto = $("chat-punto");
+    punto.textContent = sinLeer > 99 ? "99+" : sinLeer;
+    punto.classList.toggle("hidden", sinLeer === 0);
+    $("chat-burbuja").setAttribute("aria-label", sinLeer
+      ? `Mensajes de los colaboradores: ${sinLeer} sin leer`
+      : "Mensajes de los colaboradores");
+  } catch { /* sin conexión la burbuja simplemente no avisa */ }
+}
+
+function alternarBandeja() {
+  estado.abierto = !estado.abierto;
+  $("chat-panel").classList.toggle("hidden", !estado.abierto);
+  $("chat-panel").classList.toggle("flex", estado.abierto);
+  $("chat-burbuja").classList.toggle("hidden", estado.abierto);
+  if (estado.abierto) { mostrarLista(); cargarBandeja(); }
+}
+
+function mostrarLista() {
+  estado.conversacion = null;
+  $("bandeja-lista").classList.remove("hidden");
+  $("bandeja-hilo").classList.add("hidden");
+  $("bandeja-hilo").classList.remove("flex");
+  $("bandeja-volver").classList.add("hidden");
+  $("bandeja-cerrar-hilo").classList.add("hidden");
+  $("bandeja-titulo").textContent = "Consultas recibidas";
+  cargarBandeja();
+}
+
+async function cargarBandeja() {
+  const caja = $("bandeja-lista");
+  try {
+    const hilos = await api.bandejaChat("abierta");
+    $("bandeja-pie").textContent = hilos.length
+      ? `${hilos.length} abierta(s)` : "ninguna abierta";
+    caja.innerHTML = hilos.length ? hilos.map((h) => `
+      <button type="button" data-hilo="${esc(h.id)}"
+              class="block w-full px-3 py-2.5 text-left hover:bg-slate-50">
+        <div class="flex items-center gap-2">
+          <p class="min-w-0 flex-1 truncate text-sm font-medium">${esc(h.persona)}</p>
+          ${h.sin_leer ? `<span class="shrink-0 rounded-full bg-rose-500 px-1.5 text-[11px]
+                               font-bold text-white">${h.sin_leer}</span>` : ""}
+        </div>
+        <p class="truncate text-xs text-slate-500">${esc(h.ultimo_mensaje || "—")}</p>
+        <p class="text-[11px] text-slate-400">
+          ${esc(h.cargo || "")}${h.ciudad ? ` · ${esc(h.ciudad)}` : ""} · ${fechaHora(h.updated_at)}
+        </p>
+      </button>`).join("")
+      : `<p class="px-3 py-10 text-center text-sm text-slate-500">
+           No hay consultas sin resolver.</p>`;
+
+    caja.querySelectorAll("[data-hilo]").forEach((b) =>
+      b.addEventListener("click", () => abrirHilo(b.dataset.hilo)));
+  } catch (err) {
+    caja.innerHTML = `<p class="px-3 py-10 text-center text-sm text-rose-600">${
+      esc(err.message)}</p>`;
+  }
+}
+
+async function abrirHilo(id) {
+  estado.conversacion = id;
+  $("bandeja-lista").classList.add("hidden");
+  $("bandeja-hilo").classList.remove("hidden");
+  $("bandeja-hilo").classList.add("flex");
+  $("bandeja-volver").classList.remove("hidden");
+  $("bandeja-cerrar-hilo").classList.remove("hidden");
+
+  const caja = $("chat-mensajes");
+  caja.innerHTML = `<p class="py-8 text-center text-sm text-slate-400">Cargando…</p>`;
+  try {
+    const hilo = await api.leerConversacion(id);
+    const primero = hilo.mensajes.find((m) => !m.es_rrhh);
+    $("bandeja-titulo").textContent = primero?.autor || "Consulta";
+    $("bandeja-pie").textContent = `${hilo.mensajes.length} mensaje(s)`;
+    pintar(hilo.mensajes);
+    contarSinLeer();
+  } catch (err) {
+    caja.innerHTML = `<p class="py-8 text-center text-sm text-rose-600">${esc(err.message)}</p>`;
+  }
+}
+
+async function responder(e) {
+  e.preventDefault();
+  const texto = $("chat-texto").value.trim();
+  if (!texto || !estado.conversacion) return;
+  $("chat-texto").value = "";
+  try {
+    await api.enviarMensaje({ texto, conversacion_id: estado.conversacion });
+    const hilo = await api.leerConversacion(estado.conversacion);
+    pintar(hilo.mensajes);
+  } catch (err) {
+    $("chat-mensajes").insertAdjacentHTML("beforeend",
+      `<p class="py-2 text-center text-xs text-rose-600">${esc(err.message)}</p>`);
+  }
+}
+
+async function resolverHilo() {
+  if (!estado.conversacion) return;
+  try {
+    await api.cerrarConversacion(estado.conversacion);
+    mostrarLista();
+    contarSinLeer();
+  } catch (err) {
+    $("chat-mensajes").insertAdjacentHTML("beforeend",
+      `<p class="py-2 text-center text-xs text-rose-600">${esc(err.message)}</p>`);
+  }
 }

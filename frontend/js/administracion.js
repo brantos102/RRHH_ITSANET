@@ -10,7 +10,9 @@ if (!["rrhh", "admin"].includes(sesion.perfil?.rol)) location.replace("dashboard
 montarNavegacion($("barra"), { activo: "admin" });
 
 const esAdmin = sesion.perfil.rol === "admin";
-const estado = { usuarios: [], jefes: [] };
+// `jefes` arranca en nulo y no en lista vacía: una lista vacía es un valor
+// verdadero, y con ella el catálogo no se pedía la primera vez.
+const estado = { usuarios: [], jefes: null };
 
 let temporizador;
 const avisar = (texto, error = false) => {
@@ -28,6 +30,7 @@ const CARGADORES = {
   antiguedades: cargarAntiguedades, configuracion: cargarConfiguracion,
   bitacora: cargarBitacora, cotejo: cargarCotejo,
   "cambios-ficha": cargarCambiosFicha, lineamientos: cargarLineamientos,
+  depuracion: cargarDepuracion,
 };
 
 function mostrar(seccion) {
@@ -107,12 +110,45 @@ function tablaUsuarios(usuarios) {
     </table>`;
 }
 
+/* La lista de jefes NO sale del resultado de la búsqueda.
+
+   Salía, y por eso al buscar una cédula para editar a esa persona el
+   desplegable de «Jefe inmediato» quedaba con una sola opción: «Sin jefe
+   asignado». La búsqueda devolvía una fila, esa fila no era jefe, y de ahí
+   se sacaba la lista. Cuanto más preciso el filtro, menos jefes había donde
+   elegir; buscar por cédula —que es lo que uno hace para editar a alguien—
+   los dejaba todos fuera.
+
+   Ahora viene del catálogo, que es una consulta aparte y trae a quien de
+   verdad puede serlo: los roles de mando y, además, cualquiera que ya tenga
+   gente a cargo aunque figure como empleado. */
+async function cargarJefaturas() {
+  try {
+    estado.jefes = await api.jefaturas();
+  } catch {
+    estado.jefes = [];
+  }
+  const opciones = estado.jefes.map((j) => {
+    const detalle = [j.cargo, j.departamento].filter(Boolean).join(" · ");
+    return `<option value="${j.id}">${esc(j.nombre)}${
+      detalle ? ` — ${esc(detalle)}` : ""}${
+      j.a_cargo ? ` (${j.a_cargo} a cargo)` : ""}</option>`;
+  }).join("");
+  $("u-jefe").innerHTML = `<option value="">Sin jefe asignado</option>` + opciones;
+
+  // Si no hay ninguno, decirlo: un desplegable con una sola opción parece
+  // roto, y de hecho lo estaba.
+  if (!estado.jefes.length) {
+    $("u-jefe").innerHTML =
+      `<option value="">No hay jefaturas registradas todavía</option>`;
+  }
+}
+
 async function cargarUsuarios() {
   estado.usuarios = await api.adminUsuarios($("buscar-usuario").value, $("ver-inactivos").checked);
-  estado.jefes = estado.usuarios.filter((u) => ["jefe", "rrhh", "admin"].includes(u.rol));
   $("tabla-usuarios").innerHTML = tablaUsuarios(estado.usuarios);
-  $("u-jefe").innerHTML = `<option value="">Sin jefe asignado</option>` +
-    estado.jefes.map((j) => `<option value="${j.id}">${esc(j.nombre)}</option>`).join("");
+  // El catálogo se pide una vez, no en cada tecla del buscador.
+  if (!estado.jefes) await cargarJefaturas();
 }
 
 let buscando;
@@ -214,6 +250,10 @@ $("form-usuario").addEventListener("submit", async (e) => {
       })).mensaje);
     }
     $("modal-usuario").close();
+    // Si cambió el rol, la lista de jefaturas cambió con él: quien acaba de
+    // ser nombrado jefe tiene que poder elegirse en la siguiente edición sin
+    // recargar la pantalla.
+    estado.jefes = null;
     await cargarUsuarios();
   } catch (err) {
     $("u-error").textContent = err.message;
@@ -842,3 +882,142 @@ async function cargarCambiosFicha() {
 }
 
 $("cf-buscar").addEventListener("input", pintarCambiosFicha);
+
+/* --------------------------------------------------------------- depuración
+
+   Después de una carga inicial siempre queda algo que revisar a mano, y
+   revisarlo escribiendo SQL contra la planilla real no es razonable como
+   rutina. Aquí sale lo mismo que consultan los archivos de
+   `supabase/depuracion/`, ordenado por lo que impide trabajar.
+
+   Esta pantalla no corrige nada. Señala, y cada fila lleva al expediente de
+   la persona: se corrige por las pantallas de siempre, que dejan constancia
+   de quién cambió qué. */
+
+const GRUPOS_DEP = [
+  ["cuentas_de_prueba", "Cuentas de prueba", "rose",
+   "Correos del dominio itsanet.test, que no existe. Al probar esto sobre la "
+   + "planilla real aparecieron pegadas a personas de verdad: no pueden recibir "
+   + "su código de acceso, y algunas cargan con roles de mando que nadie les dio."],
+  ["sin_entrada", "No pueden entrar", "rose",
+   "Sin correo y sin los datos que pide el primer ingreso. No les queda ninguna "
+   + "puerta, y la pantalla de acceso no se lo dice."],
+  ["jerarquia", "Jerarquía", "amber",
+   "Quién reporta a quién, y dónde está roto. Un empleado sin jefe deja sus "
+   + "solicitudes sin quien las autorice."],
+  ["fichas_incompletas", "Fichas incompletas", "amber",
+   "Lo que falta, ordenado por gravedad. Un teléfono en blanco no rompe nada; "
+   + "un empleado sin jefe sí."],
+  ["historicas_imposibles", "Vacaciones imposibles", "slate",
+   "Anotadas antes de la fecha de ingreso de la persona, o con fecha futura. "
+   + "Casi siempre es un error de tecleo en la hoja; cada una trae su número de fila."],
+];
+
+const TONO_DEP = {
+  rose: ["bg-rose-50 ring-rose-200", "text-rose-800"],
+  amber: ["bg-amber-50 ring-amber-200", "text-amber-800"],
+  slate: ["bg-slate-50 ring-slate-200", "text-slate-700"],
+};
+
+function filaDep(clave, f) {
+  const alExpediente = (texto) => f.user_id
+    ? `<a href="persona.html?id=${encodeURIComponent(f.user_id)}"
+          class="font-medium text-slate-900 underline decoration-slate-300
+                 underline-offset-4 hover:decoration-slate-900">${esc(texto)}</a>`
+    : `<span class="font-medium">${esc(texto)}</span>`;
+
+  if (clave === "cuentas_de_prueba") {
+    return `<td class="px-3 py-2.5">${alExpediente(f.nombre)}
+              <p class="text-xs text-slate-500">${esc(f.cedula)} · ${esc(f.email || "")}</p></td>
+            <td class="px-3 py-2.5"><span class="rounded-full bg-slate-900 px-2 py-0.5 text-xs
+                font-medium text-white">${esc(f.rol)}</span></td>
+            <td class="px-3 py-2.5 text-right tabular-nums">${f.a_cargo}</td>
+            <td class="px-3 py-2.5 text-right tabular-nums">${f.solicitudes} · ${f.historicas}</td>
+            <td class="px-3 py-2.5 text-sm text-slate-600">${esc(f.que_hacer)}</td>`;
+  }
+  if (clave === "historicas_imposibles") {
+    return `<td class="px-3 py-2.5">${alExpediente(f.nombre)}
+              <p class="text-xs text-slate-500">ingresó el ${fecha(f.fecha_ingreso)}</p></td>
+            <td class="px-3 py-2.5 whitespace-nowrap">${fecha(f.fecha_inicio)} — ${fecha(f.fecha_fin)}</td>
+            <td class="px-3 py-2.5 text-right tabular-nums">${f.dias}</td>
+            <td class="px-3 py-2.5 text-right tabular-nums text-slate-500">${f.fila_origen ?? "—"}</td>
+            <td class="px-3 py-2.5 text-sm text-slate-600">${esc(f.problema)}</td>`;
+  }
+  if (clave === "jerarquia") {
+    return `<td class="px-3 py-2.5">${alExpediente(f.nombre)}
+              <p class="text-xs text-slate-500">${esc(f.cargo || "")} · ${esc(f.departamento || "")}</p></td>
+            <td class="px-3 py-2.5">${esc(f.rol)}</td>
+            <td class="px-3 py-2.5">${esc(f.jefe_nombre || "—")}</td>
+            <td class="px-3 py-2.5 text-right tabular-nums">${f.a_cargo}</td>
+            <td class="px-3 py-2.5 text-sm text-slate-600">${esc(f.problema)}</td>`;
+  }
+  if (clave === "sin_entrada") {
+    return `<td class="px-3 py-2.5"><span class="font-medium">${esc(f.nombre)}</span>
+              <p class="text-xs text-slate-500">${esc(f.cedula)}</p></td>
+            <td class="px-3 py-2.5">${esc(f.departamento || "—")}</td>
+            <td class="px-3 py-2.5 text-sm text-slate-600">${esc(f.motivo)}</td>
+            <td class="px-3 py-2.5 text-sm text-slate-600">${esc(f.que_hacer)}</td>`;
+  }
+  // fichas_incompletas
+  const falta = [
+    f.sin_jefe && "jefe", f.sin_correo && "correo", f.sin_cargo && "cargo",
+    f.sin_departamento && "departamento", f.sin_nacimiento && "nacimiento",
+    f.sin_telefono && "teléfono",
+  ].filter(Boolean).join(", ");
+  return `<td class="px-3 py-2.5">${alExpediente(f.nombre)}
+            <p class="text-xs text-slate-500">${esc(f.cedula)}</p></td>
+          <td class="px-3 py-2.5">${esc(f.departamento || "—")}</td>
+          <td class="px-3 py-2.5 text-right tabular-nums">${f.huecos}</td>
+          <td class="px-3 py-2.5 text-sm text-slate-600">${esc(falta)}</td>
+          <td class="px-3 py-2.5 text-sm text-slate-600">${esc(f.lo_principal)}</td>`;
+}
+
+const CABECERAS_DEP = {
+  cuentas_de_prueba: ["Persona", "Rol", "A cargo", "Solicitudes · históricas", "Qué hacer"],
+  sin_entrada: ["Persona", "Departamento", "Motivo", "Qué hacer"],
+  jerarquia: ["Persona", "Rol", "Jefe", "A cargo", "Problema"],
+  fichas_incompletas: ["Persona", "Departamento", "Huecos", "Qué falta", "Lo principal"],
+  historicas_imposibles: ["Persona", "Fechas", "Días", "Fila de la hoja", "Problema"],
+};
+
+async function cargarDepuracion() {
+  const d = await api.depuracion();
+
+  $("dep-resumen").innerHTML = GRUPOS_DEP.map(([clave, titulo, tono]) => {
+    const n = d.resumen[clave] || 0;
+    const [fondo, tinta] = n ? TONO_DEP[tono] : TONO_DEP.slate;
+    return `<article class="rounded-2xl p-4 ring-1 ${fondo}">
+      <p class="text-2xl font-semibold tabular-nums ${n ? tinta : "text-slate-400"}">${n}</p>
+      <p class="mt-0.5 text-xs leading-snug text-slate-600">${esc(titulo)}</p>
+    </article>`;
+  }).join("");
+
+  $("dep-detalle").innerHTML = GRUPOS_DEP.map(([clave, titulo, , explicacion]) => {
+    const filas = d[clave] || [];
+    if (!filas.length) {
+      return `<section class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+        <h2 class="font-medium">${esc(titulo)}</h2>
+        <p class="mt-1 text-sm text-emerald-700">Nada que revisar aquí.</p>
+      </section>`;
+    }
+    return `<section class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+      <header class="border-b border-slate-200 px-5 py-3.5">
+        <h2 class="font-medium">${esc(titulo)} <span class="text-slate-400">(${filas.length})</span></h2>
+        <p class="mt-0.5 text-sm leading-relaxed text-slate-600">${esc(explicacion)}</p>
+      </header>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr>
+            ${CABECERAS_DEP[clave].map((c) => `<th class="px-3 py-2.5">${c}</th>`).join("")}
+          </tr></thead>
+          <tbody class="divide-y divide-slate-100">
+            ${filas.slice(0, 100).map((f) => `<tr class="hover:bg-slate-50">${filaDep(clave, f)}</tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+      ${filas.length > 100
+        ? `<p class="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-500">
+             Se muestran las primeras 100 de ${filas.length}.</p>` : ""}
+    </section>`;
+  }).join("");
+}

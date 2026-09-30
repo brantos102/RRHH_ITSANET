@@ -27,7 +27,7 @@ import asyncio
 import re
 import subprocess
 import sys
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parents[1]
@@ -227,19 +227,42 @@ async def recorrido_chat(nav, capturas) -> Paso:
         raise Falla("La burbuja de Talento Humano no avisa de mensajes sin leer.")
     paso.ok(f"Talento Humano lo ve: «{etiqueta}»")
 
+    # La bandeja se abre EN LA MISMA PANTALLA, como ventanita.
+    #
+    # Antes la burbuja llevaba a una página entera: para contestar «sí, le
+    # quedan ocho días» había que abandonar lo que se estaba haciendo, ir a
+    # otra pantalla y volver. Así no contesta nadie, y la consulta se queda
+    # sin respuesta.
+    antes = rh.url
     await rh.click("#chat-burbuja")
-    await rh.wait_for_url("**/mensajes.html", timeout=15000)
-    await rh.wait_for_selector("[data-hilo]", timeout=15000)
-    await rh.click("[data-hilo] >> nth=0")
-    await rh.wait_for_selector(f"#hilo-mensajes >> text={consulta[:40]}", timeout=15000)
+    await rh.wait_for_selector("#chat-panel:not(.hidden)", timeout=15000)
+    if rh.url != antes:
+        raise Falla("La burbuja de Talento Humano sigue cambiando de página "
+                    "en vez de abrir una ventana.")
+    caja = await rh.locator("#chat-panel").bounding_box()
+    alto = await rh.evaluate("() => window.innerHeight")
+    if caja["height"] > alto * 0.9:
+        raise Falla(f"La bandeja ocupa {caja['height']:.0f} de {alto} px: "
+                    "es una ventana, no una pantalla.")
+    paso.ok(f"la bandeja se abre como ventana de {caja['width']:.0f}x{caja['height']:.0f} px")
+
+    await rh.wait_for_selector("#bandeja-lista [data-hilo]", timeout=15000)
+    await rh.locator("#bandeja-lista [data-hilo]").first.click()
+    await rh.wait_for_selector(f"#chat-mensajes >> text={consulta[:40]}", timeout=15000)
 
     respuesta = "Comprobacion automatica: si, le quedan y no caducan este ano."
-    await rh.fill("#texto-respuesta", respuesta)
-    await rh.click("#form-responder button[type=submit]")
-    await rh.wait_for_selector(f"#hilo-mensajes >> text={respuesta[:40]}", timeout=15000)
-    paso.ok("responde desde su bandeja")
+    await rh.fill("#chat-texto", respuesta)
+    await rh.click("#chat-form button[type=submit]")
+    await rh.wait_for_selector(f"#chat-mensajes >> text={respuesta[:40]}", timeout=15000)
+    paso.ok("responde sin salir de la pantalla en la que estaba")
     if capturas:
-        await rh.screenshot(path=str(capturas / "bandeja-chat.png"), full_page=True)
+        await rh.screenshot(path=str(capturas / "bandeja-chat.png"))
+
+    # Y la pantalla completa sigue estando para quien quiera trabajar la
+    # bandeja entera: se llega por el menú, no se perdió.
+    await rh.goto(f"{FRONTEND}/mensajes.html")
+    await rh.wait_for_selector("[data-hilo]", timeout=15000)
+    paso.ok("la bandeja completa sigue existiendo por el menú")
 
     await emp.reload()
     await emp.wait_for_selector("#chat-burbuja", timeout=15000)
@@ -764,6 +787,84 @@ async def recorrido_lineamientos(nav, capturas) -> Paso:
     return paso
 
 
+async def recorrido_depuracion(nav, capturas) -> Paso:
+    """Lo que hay que revisar a mano tras la carga inicial, sin abrir DBeaver.
+
+    Y el fallo que traía la pantalla de usuarios: la lista de «Jefe
+    inmediato» salía del resultado de la búsqueda, así que buscar una cédula
+    —que es justo lo que uno hace para editar a alguien— la dejaba vacía.
+    """
+    paso = Paso("depuracion")
+
+    pg = await (await nav.new_context(viewport={"width": 1440, "height": 1000})).new_page()
+    await _entrar(pg, ADMIN)
+
+    # --- El desplegable de jefes, con el filtro puesto ---------------------
+    await pg.goto(f"{FRONTEND}/administracion.html#usuarios")
+    await pg.wait_for_selector("#tabla-usuarios tbody tr", timeout=15000)
+    await pg.wait_for_timeout(1200)
+    sin_filtro = await pg.locator("#u-jefe option").count()
+
+    await pg.fill("#buscar-usuario", EMPLEADA)
+    await pg.wait_for_timeout(1500)
+    if await pg.locator("#tabla-usuarios tbody tr").count() != 1:
+        raise Falla("La búsqueda por cédula no dejó una sola fila.")
+    await pg.locator("#tabla-usuarios [data-editar]").first.click()
+    await pg.wait_for_selector("#modal-usuario[open]", timeout=8000)
+
+    con_filtro = await pg.locator("#u-jefe option").count()
+    if con_filtro < sin_filtro:
+        raise Falla(f"Con la búsqueda puesta el desplegable de jefes baja de "
+                    f"{sin_filtro} a {con_filtro} opciones: vuelve a salir del "
+                    "resultado del filtro en vez del catálogo.")
+    if con_filtro < 2:
+        raise Falla("El desplegable de «Jefe inmediato» no ofrece a nadie.")
+    paso.ok(f"el desplegable de jefes mantiene {con_filtro} opciones al buscar por cédula")
+    await pg.keyboard.press("Escape")
+
+    # --- La pantalla de depuración ----------------------------------------
+    await pg.goto(f"{FRONTEND}/administracion.html#depuracion")
+    await pg.wait_for_selector("#dep-resumen article", timeout=15000)
+    await pg.wait_for_timeout(1500)
+
+    tarjetas = await pg.locator("#dep-resumen article").count()
+    if tarjetas != 5:
+        raise Falla(f"La depuración muestra {tarjetas} grupos y deberían ser cinco.")
+    paso.ok(f"cinco grupos: {' '.join((await pg.inner_text('#dep-resumen')).split())[:90]}")
+
+    secciones = await pg.locator("#dep-detalle section").count()
+    if secciones != 5:
+        raise Falla(f"Se dibujaron {secciones} secciones de detalle.")
+
+    # Cada cuenta de prueba tiene que decir qué hacer con ella. Es la
+    # distinción que importa: a una persona real se le corrige el correo; una
+    # cuenta que no es de nadie se desactiva. Confundirlas significa desactivar
+    # a alguien que trabaja aquí.
+    texto = await pg.inner_text("#dep-detalle")
+    consejos = ("corríjale el correo", "se puede desactivar", "reasígnela")
+    if not any(c in texto for c in consejos):
+        raise Falla("Las cuentas de prueba se listan sin decir qué hacer con cada una.")
+    paso.ok("cada cuenta dice si es una persona real o una cuenta que se puede quitar")
+
+    # Y desde cada fila se llega al expediente, que es donde se corrige.
+    if not await pg.locator("#dep-detalle a[href^='persona.html']").count():
+        raise Falla("Ninguna fila lleva al expediente de la persona.")
+    paso.ok("y cada fila lleva al expediente, que es donde se corrige")
+
+    if capturas:
+        await pg.screenshot(path=str(capturas / "depuracion.png"), full_page=True)
+
+    # Y no la ve quien no debe.
+    otra = await (await nav.new_context(viewport={"width": 1280, "height": 900})).new_page()
+    await _entrar(otra, EMPLEADA)
+    await otra.goto(f"{FRONTEND}/administracion.html#depuracion")
+    await otra.wait_for_timeout(2000)
+    if "administracion" in otra.url:
+        raise Falla("Un colaborador entró a la pantalla de administración.")
+    paso.ok("un colaborador no llega a esta pantalla")
+    return paso
+
+
 async def recorrido_menu(nav, capturas) -> Paso:
     """La navegación, que ahora es vertical y tiene dos formas."""
     paso = Paso("menu")
@@ -957,9 +1058,13 @@ async def recorrido_temporal(nav, capturas) -> Paso:
     # Una jornada de ayer sin cerrar tiene que saltar a la vista.
     persona = await obtener_uno(
         "select id from public.personal_temporal where cedula = %s", (CEDULA_OP,))
+    # Hora fija de entrada, no «hace un día»: si el guion se corre por la
+    # tarde, «hace un día» cae después de la salida que se registra abajo y
+    # la base la rechaza con razón. La jornada de ayer empieza a las ocho.
     await ejecutar(
         """insert into public.jornadas_temporales (temporal_id, fecha, entrada_en)
-           values (%s, current_date - 1, now() - interval '1 day')""", (persona["id"],))
+           values (%s, current_date - 1, (current_date - 1) + time '08:00')""",
+        (persona["id"],))
     await pg.reload()
     await pg.wait_for_selector("#caja-sin-cerrar:not(.hidden)", timeout=15000)
     paso.ok("una jornada de ayer sin salida aparece señalada en rojo")
@@ -972,7 +1077,8 @@ async def recorrido_temporal(nav, capturas) -> Paso:
     # Talento Humano la cierra a mano, con motivo.
     await pg.click("[data-cerrar-jornada]")
     await pg.wait_for_selector("#modal-cerrar[open]", timeout=8000)
-    await pg.fill("#c-salida", "2026-09-29T17:00")
+    ayer = date.today() - timedelta(days=1)
+    await pg.fill("#c-salida", f"{ayer.isoformat()}T17:00")
     await pg.fill("#c-motivo", "Se retiró sin timbrar; lo confirma el supervisor de bodega")
     await pg.click("#form-cerrar button[type=submit]")
     await pg.wait_for_selector("#aviso:not(.hidden)", timeout=10000)
@@ -1035,6 +1141,8 @@ RECORRIDOS = {
                    "Buscar a una persona por su nombre y abrir su expediente"),
     "lineamientos": (recorrido_lineamientos,
                      "Talento Humano escribe lo que se lee antes de enviar"),
+    "depuracion": (recorrido_depuracion,
+                   "Depuración de la carga y el desplegable de jefes"),
     "menu": (recorrido_menu, "La navegación vertical: barra en escritorio, cajón en teléfono"),
     "temporal": (recorrido_temporal, "Personal temporal: jornada, cierre manual y semana"),
 }

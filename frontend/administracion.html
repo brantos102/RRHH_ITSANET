@@ -25,7 +25,17 @@
     <button data-seccion="cotejo" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Cotejo de la carga</button>
     <button data-seccion="cambios-ficha" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Cambios de ficha</button>
     <button data-seccion="lineamientos" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Lineamientos</button>
+    <button data-seccion="depuracion" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Depuración</button>
   </nav>
+
+  <!-- ===== Depuración =====
+       Lo que hay que revisar a mano después de la carga inicial, sin abrir un
+       cliente de base de datos. Señala; no corrige: lo que se corrige se
+       corrige por las pantallas de siempre, que dejan constancia. -->
+  <section data-panel="depuracion" class="hidden space-y-4">
+    <div id="dep-resumen" class="grid gap-3 sm:grid-cols-5"></div>
+    <div id="dep-detalle" class="space-y-4"></div>
+  </section>
 
   <!-- ===== Lineamientos =====
        Lo que el colaborador lee antes de enviar una solicitud. Estaba escrito

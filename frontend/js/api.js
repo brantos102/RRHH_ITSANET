@@ -253,6 +253,7 @@ export const api = {
 
   // Los lineamientos que se leen antes de enviar una solicitud. Los escribe
   // Talento Humano: cambian por circular, no por versión del sistema.
+  depuracion: () => peticion("/admin/depuracion"),
   lineamientos: () => peticion("/rrhh/lineamientos"),
   crearLineamiento: (datos) =>
     peticion("/rrhh/lineamientos", { method: "POST", body: JSON.stringify(datos) }),

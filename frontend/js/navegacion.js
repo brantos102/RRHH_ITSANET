@@ -34,6 +34,9 @@ const MODULOS = [
       // Lo que el colaborador lee antes de enviar una solicitud. Estaba
       // escrito en el HTML y lo decide Talento Humano, no el programa.
       { texto: "Lineamientos", href: "administracion.html#lineamientos" },
+      // Lo que hay que revisar a mano tras la carga inicial, sin abrir
+      // un cliente de base de datos.
+      { texto: "Depuración", href: "administracion.html#depuracion" },
       { texto: "Cambios de ficha", href: "administracion.html#cambios-ficha" },
       { texto: "Días no laborables", href: "administracion.html#feriados" },
       { texto: "Antigüedades", href: "administracion.html#antiguedades" },
@@ -104,6 +107,7 @@ const ICONOS_OPCION = {
   "Solicitudes":              'M9 3h6a1 1 0 0 1 1 1v1h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2V4a1 1 0 0 1 1-1Zm-1 9h8m-8 4h5',
   "Por departamento":         'M3 3v18h18M7 17v-5m5 5V8m5 9v-7',
   "Pantalla principal":       'M3 9.5 12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1V9.5Z',
+  "Depuración":               'M4 4h16v3l-6 6v6l-4-2v-4L4 7V4Z',
   "Lineamientos":             'M9 3h6a1 1 0 0 1 1 1v1h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2V4a1 1 0 0 1 1-1Zm-1 8h8m-8 4h5',
   "Configuración":            'M10.3 3.3a1 1 0 0 1 1-.8h1.4a1 1 0 0 1 1 .8l.3 1.6 1.4.8 1.5-.6a1 1 0 0 1 1.2.4l.7 1.2a1 1 0 0 1-.2 1.3l-1.2 1v1.6l1.2 1a1 1 0 0 1 .2 1.3l-.7 1.2a1 1 0 0 1-1.2.4l-1.5-.6-1.4.8-.3 1.6a1 1 0 0 1-1 .8h-1.4a1 1 0 0 1-1-.8M14.5 12a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z',
   "Usuarios":                 'M17 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9.5 6.5a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0Z',

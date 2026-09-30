@@ -221,6 +221,7 @@ async def revisar_base() -> int:
         ("0032 el calendario recuerda los históricos", None),
         ("0033 fines de semana cumplidos", "public.v_fines_semana"),
         ("0034 personal temporal sin dinero", "public.v_jornadas_detalle"),
+        ("0035 pantalla de depuración", "public.v_cuentas_de_prueba"),
     ]
 
     # Las migraciones que solo cambian funciones se comprueban por la función.

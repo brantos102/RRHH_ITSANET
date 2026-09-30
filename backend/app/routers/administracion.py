@@ -556,3 +556,75 @@ async def lineamiento_cambiar(
                     entidad_id=str(lineamiento_id),
                     detalle=datos.model_dump(exclude_none=True))
     return dict(fila)
+
+
+# ----------------------------------------------------------------- depuración
+# Lo que hay que revisar a mano después de una carga inicial, sin abrir un
+# cliente de base de datos. Es de solo lectura: señala, no corrige. Lo que se
+# corrige se corrige por las pantallas de siempre, que dejan constancia.
+
+
+@router.get("/admin/depuracion")
+async def depuracion(_: Annotated[dict, Depends(exigir_rol("rrhh", "admin"))]) -> dict:
+    """Qué está mal en los datos, ordenado por lo que impide trabajar.
+
+    Las cuentas de prueba van primero, y no por vanidad del orden: al probar
+    esto sobre la planilla real aparecieron pegadas a personas de verdad, con
+    un correo que no existe y con roles de mando que nadie les dio.
+    """
+    cuentas = await obtener_todos("""
+        select cedula, nombre, email::text as email, rol, cargo, departamento,
+               a_cargo, solicitudes, historicas, que_hacer, user_id::text as user_id
+          from public.v_cuentas_de_prueba""")
+
+    fichas = await obtener_todos("""
+        select cedula, nombre, departamento, cargo, rol, lo_principal, huecos,
+               sin_correo, sin_cargo, sin_departamento, sin_nacimiento,
+               sin_telefono, sin_jefe, user_id::text as user_id
+          from public.v_fichas_incompletas limit 400""")
+
+    jerarquia = await obtener_todos("""
+        select cedula, nombre, rol, cargo, departamento, jefe_nombre,
+               jefe_activo, a_cargo, problema, user_id::text as user_id
+          from public.v_jerarquia where problema is not null
+          order by problema, nombre""")
+
+    sin_entrada = await obtener_todos("""
+        select cedula, nombre, departamento, motivo, que_hacer
+          from public.v_sin_entrada
+         where sin_fecha_nacimiento or sin_fecha_ingreso""")
+
+    historicas = await obtener_todos("""
+        select u.cedula, u.nombre, u.fecha_ingreso, h.id, h.fecha_inicio,
+               h.fecha_fin, h.dias, h.fila_origen,
+               case when h.fecha_inicio < u.fecha_ingreso then 'anterior a su ingreso'
+                    when h.fecha_inicio > current_date    then 'con fecha futura'
+                    when h.dias > (h.fecha_fin - h.fecha_inicio + 1) then 'más días que fechas'
+                    else 'días cero o negativos' end as problema
+          from public.vacaciones_historicas h
+          join public.users u on u.id = h.user_id
+         where h.fecha_inicio < u.fecha_ingreso
+            or h.fecha_inicio > current_date
+            or h.dias > (h.fecha_fin - h.fecha_inicio + 1)
+            or h.dias <= 0
+         order by u.nombre, h.fecha_inicio""")
+
+    roles = await obtener_todos("""
+        select rol::text as rol, count(*) as personas
+          from public.users where activo group by rol order by 2 desc""")
+
+    return {
+        "cuentas_de_prueba": cuentas,
+        "fichas_incompletas": fichas,
+        "jerarquia": jerarquia,
+        "sin_entrada": sin_entrada,
+        "historicas_imposibles": [{**h, "id": int(h["id"])} for h in historicas],
+        "roles": [{**r, "personas": int(r["personas"])} for r in roles],
+        "resumen": {
+            "cuentas_de_prueba": len(cuentas),
+            "fichas_incompletas": len(fichas),
+            "jerarquia": len(jerarquia),
+            "sin_entrada": len(sin_entrada),
+            "historicas_imposibles": len(historicas),
+        },
+    }
