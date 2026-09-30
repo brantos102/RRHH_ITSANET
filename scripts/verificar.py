@@ -197,6 +197,7 @@ async def revisar_base() -> int:
         ("0022 correo en blanco de quien no lo tiene", None),
         ("0023 el calendario recuerda lo que pasó", None),
         ("0024 personal temporal", "public.personal_temporal"),
+        ("0025 historial de vacaciones", "public.vacaciones_historicas"),
     ]
 
     # Las migraciones que solo cambian funciones se comprueban por la función.

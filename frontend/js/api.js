@@ -154,6 +154,7 @@ export const api = {
   calendarioEquipo: (params = "") => peticion(`/jefe/calendario-equipo${params}`),
   // --- ficha personal ---
   miFicha: () => peticion("/mi-ficha"),
+  miHistorial: () => peticion("/mi-historial"),
   corregirFicha: (datos) => peticion("/mi-ficha", { method: "PATCH", body: JSON.stringify(datos) }),
   pedirCambioFicha: (datos) =>
     peticion("/mi-ficha/cambios", { method: "POST", body: JSON.stringify(datos) }),

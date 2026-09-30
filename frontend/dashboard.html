@@ -99,6 +99,11 @@
             acumularlos hasta tres años (Art.&nbsp;75) y, si al final no los
             goza, se le pagan (Art.&nbsp;76).
           </p>
+          <button id="btn-detalle-periodos"
+                  class="mt-1 font-medium text-slate-900 underline decoration-slate-300
+                         underline-offset-4 hover:decoration-slate-900">
+            Ver el cálculo año por año
+          </button>
         </div>
       </details>
 
@@ -521,6 +526,34 @@
 <div id="aviso" class="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4">
   <p id="aviso-texto" class="hidden max-w-sm rounded-xl bg-slate-900 px-4 py-3 text-center text-sm text-white shadow-lg"></p>
 </div>
+
+<!-- ===== Historial de vacaciones =====
+     La pregunta más simple que se le ocurre a cualquiera —«¿cuándo tomé
+     vacaciones la última vez?»— y hasta hoy el sistema no podía responderla.
+     Lo de antes de este sistema y lo tramitado aquí van en la misma línea de
+     tiempo, pero cada uno dice de dónde viene. -->
+<dialog id="modal-historial" class="w-[min(100vw-1.5rem,38rem)] rounded-2xl p-0">
+  <div class="max-h-[85dvh] overflow-y-auto">
+    <header class="sticky top-0 flex items-start justify-between gap-3 border-b border-slate-200 bg-white px-5 py-4">
+      <div>
+        <h2 class="font-semibold">Mi historial de vacaciones</h2>
+        <p id="historial-resumen" class="mt-0.5 text-sm text-slate-500">Cargando…</p>
+      </div>
+      <button type="button" data-cerrar
+              class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100" aria-label="Cerrar">✕</button>
+    </header>
+    <div class="border-b border-slate-100 px-5 py-2.5">
+      <input type="search" id="buscar-historial" placeholder="Buscar por año o fecha"
+             class="w-full rounded-lg border-slate-300 text-sm focus:border-slate-900 focus:ring-slate-900">
+    </div>
+    <div id="historial-lista" class="divide-y divide-slate-100"></div>
+    <footer class="border-t border-slate-200 px-5 py-3 text-xs leading-relaxed text-slate-500">
+      Lo marcado como <strong>registro de Talento Humano</strong> viene de la hoja que el
+      departamento llevaba antes de este sistema. No pasó por aquí, así que no tiene número
+      de solicitud. Si algo no corresponde, escríbales por el chat.
+    </footer>
+  </div>
+</dialog>
 
 <script type="module" src="js/dashboard.js"></script>
 

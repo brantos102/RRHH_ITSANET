@@ -708,7 +708,7 @@ document.addEventListener("click", async (e) => {
 });
 
 /* --------------------------------------------------------------- del saldo */
-$("btn-detalle-saldo").addEventListener("click", () => {
+$("btn-detalle-periodos").addEventListener("click", () => {
   const d = estado.saldo;
   if (!d) return avisar("No se pudo obtener el detalle.", "error");
 
@@ -773,6 +773,74 @@ $("btn-detalle-saldo").addEventListener("click", () => {
     </section>`;
   abrir("modal-saldo");
 });
+
+
+/* ------------------------------------------------------- historial de vacaciones
+   «¿Cuándo tomé vacaciones la última vez?» es la pregunta que cualquiera se
+   hace, y hasta hoy el sistema no podía responderla: tenía el saldo pero no
+   el detalle de cómo se llegó a él. Ahora están las 3.303 vacaciones que
+   Talento Humano llevaba en su hoja, junto con lo tramitado aquí.
+
+   Cada registro dice de dónde viene. Mezclarlas sin distinguir sería el
+   error a evitar: quien ve «15 días en marzo de 2019» tiene derecho a saber
+   si eso lo tramitó por este sistema o si viene de la hoja del
+   departamento. */
+let historial = [];
+
+function pintarHistorial(filtro = "") {
+  const aguja = filtro.trim().toLowerCase();
+  const visibles = aguja
+    ? historial.filter((v) =>
+        `${v.fecha_inicio} ${v.fecha_fin} ${v.folio || ""}`.toLowerCase().includes(aguja))
+    : historial;
+
+  $("historial-lista").innerHTML = visibles.length
+    ? visibles.map((v) => `
+      <article class="flex flex-wrap items-center gap-3 px-5 py-3">
+        <div class="min-w-0 flex-1">
+          <p class="font-medium">
+            ${v.fecha_inicio === v.fecha_fin
+              ? fecha(v.fecha_inicio)
+              : `${fecha(v.fecha_inicio, false)} al ${fecha(v.fecha_fin)}`}
+          </p>
+          <p class="mt-0.5 text-xs ${v.procedencia === "historico" ? "text-slate-500" : "text-emerald-700"}">
+            ${v.procedencia === "historico"
+              ? "Registro de Talento Humano"
+              : `Solicitud Nº ${v.folio} · tramitada en el sistema`}
+          </p>
+        </div>
+        <p class="shrink-0 text-right">
+          <span class="text-lg font-semibold tabular-nums">${diasExactos(v.dias)}</span>
+          <span class="text-xs text-slate-500">${Number(v.dias) === 1 ? "día" : "días"}</span>
+        </p>
+      </article>`).join("")
+    : `<p class="px-5 py-10 text-center text-sm text-slate-500">${
+         aguja ? "Nada coincide con esa búsqueda."
+               : "Todavía no hay vacaciones registradas a su nombre."}</p>`;
+}
+
+$("btn-detalle-saldo").addEventListener("click", async () => {
+  $("historial-resumen").textContent = "Cargando…";
+  $("historial-lista").innerHTML = "";
+  $("buscar-historial").value = "";
+  abrir("modal-historial");
+  try {
+    const r = await api.miHistorial();
+    historial = r.vacaciones;
+    $("historial-resumen").textContent = r.veces
+      ? `${r.veces} vez(ces) · ${diasExactos(r.total_dias)} días en total` +
+        (r.desde_la_hoja
+          ? ` · ${r.desde_la_hoja} de antes de este sistema` : "")
+      : "Todavía no hay vacaciones registradas a su nombre.";
+    pintarHistorial();
+  } catch (err) {
+    $("historial-resumen").textContent = "";
+    $("historial-lista").innerHTML =
+      `<p class="px-5 py-10 text-center text-sm text-rose-700">${esc(err.message)}</p>`;
+  }
+});
+
+$("buscar-historial").addEventListener("input", (e) => pintarHistorial(e.target.value));
 
 
 /* ------------------------------------------------------------------- firma */

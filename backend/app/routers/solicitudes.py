@@ -321,6 +321,37 @@ async def tabla_antiguedad(_: Annotated[dict, Depends(usuario_actual)]) -> dict:
     }
 
 
+@router.get("/mi-historial")
+async def mi_historial(usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
+    """Todas las vacaciones de una persona, de antes y de ahora.
+
+    Es la pregunta más simple que se le ocurre a cualquiera —«¿cuándo tomé
+    vacaciones la última vez?»— y hasta hoy el sistema no podía responderla:
+    tenía el saldo pero no el detalle de cómo se llegó a él.
+
+    Lo de antes y lo de ahora van juntos en una sola línea de tiempo, pero
+    nunca mezclados sin decirlo: quien ve «15 días en marzo de 2019» tiene
+    derecho a saber si lo tramitó por aquí o si viene de la hoja que llevaba
+    Talento Humano.
+    """
+    filas = await obtener_todos(
+        """select folio, fecha_inicio, fecha_fin, dias, procedencia, detalle
+             from public.v_historial_vacaciones
+            where user_id = %s
+            order by fecha_inicio desc""",
+        (usuario["id"],),
+    )
+    historico = [f for f in filas if f["procedencia"] == "historico"]
+    return {
+        "vacaciones": [{**f, "dias": float(f["dias"]),
+                        "folio": int(f["folio"]) if f["folio"] else None} for f in filas],
+        "total_dias": round(sum(float(f["dias"]) for f in filas), 2),
+        "veces": len(filas),
+        "desde_la_hoja": len(historico),
+        "en_el_sistema": len(filas) - len(historico),
+    }
+
+
 @router.get("/catalogos/feriados")
 async def feriados(_: Annotated[dict, Depends(usuario_actual)]) -> list[dict]:
     """Feriados futuros: el calendario los marca para que no cuenten días."""

@@ -123,3 +123,72 @@ generar.
 - Quien tiene gente a cargo pasa automáticamente a **jefe**.
 - Los perfiles de **Talento Humano** y **administrador** se asignan a mano
   en Administración → Usuarios. La carga nunca degrada un rol ya asignado.
+
+---
+
+## Cargar el historial de vacaciones
+
+Talento Humano lleva desde hace años una hoja con cada vacación tomada. Sin
+ella, un colaborador entra, ve su saldo y no puede responder la pregunta más
+simple que se le ocurre a cualquiera: **«¿cuándo tomé vacaciones la última
+vez?»**.
+
+```powershell
+cd backend
+..\.venv\Scripts\python ..\scripts\cargar_historial.py "C:\ruta\REGISTRO DE VACACIONES.xlsx"
+```
+
+Sin `--aplicar` no escribe nada: dice qué haría y se detiene. Léalo antes de
+seguir.
+
+### Lo delicado: el emparejamiento
+
+La hoja identifica a la gente por **nombre** y el sistema por **cédula**.
+Equivocarse ahí significa cargarle a una persona las vacaciones de otra, y eso
+no se nota nunca. La regla es estricta a propósito:
+
+> Solo se carga cuando el nombre completo coincide **exactamente** —ignorando
+> tildes, mayúsculas y espacios de más— con **una y solo una** persona activa.
+
+Nada de parecidos. Lo que no empareja se lista con su motivo y **no se carga**.
+Es preferible que falten datos a que estén mal atribuidos: lo primero se nota,
+lo segundo no.
+
+En la carga de septiembre de 2026, de 3.339 vacaciones anotadas:
+
+| | |
+|---|---|
+| Cargadas | **3.303**, de 223 personas |
+| Sin emparejar | 36, de 10 nombres — 34 de personal **PASIVO** que ya no está en la nómina |
+| Filas repetidas en la hoja | 5 (se carga una sola vez; el guion las lista con su número de fila) |
+
+### Qué NO hace
+
+**No toca el saldo.** El saldo ya viene de esta misma hoja y es correcto; lo que
+faltaba era el detalle de cómo se llegó a él. Sumarlo otra vez sería descontar
+dos veces los mismos días. El guion compara el saldo total antes y después y
+**falla si cambió**.
+
+**No inventa solicitudes.** Estos registros no pasaron por un jefe, no tienen
+folio ni código QR. Van a `vacaciones_historicas`, no a `requests`, y en la
+pantalla salen marcados como «Registro de Talento Humano».
+
+### Comprobar lo cargado
+
+```powershell
+..\.venv\Scripts\python ..\scripts\cargar_historial.py ARCHIVO.xlsx --informe cotejo.csv
+```
+
+Deja un CSV con fila de la hoja, cédula, nombre y fechas de cada registro
+emparejado, para cotejarlo contra el original. Al terminar, el guion suma los
+días por persona y los compara con la hoja; si alguno no cuadra, lo dice y
+termina con error.
+
+Desde la base:
+
+```sql
+select * from public.v_historico_resumen order by dias_gozados_historicos desc;
+```
+
+El archivo lleva datos personales de 350 personas. Bórrelo cuando termine
+(LOPDP, Art. 10).
