@@ -236,6 +236,12 @@ export const api = {
   ajustarSaldo: (id, saldo) =>
     peticion(`/admin/usuarios/${id}/saldo?saldo=${saldo}`, { method: "POST" }),
   antiguedades: () => peticion("/admin/antiguedades"),
+  adminJefaturas: () => peticion("/admin/jefaturas"),
+  crearJefatura: (persona_id) =>
+    peticion("/admin/jefaturas", { method: "POST", body: JSON.stringify({ persona_id }) }),
+  quitarJefatura: (id, datos) =>
+    peticion(`/admin/jefaturas/${id}/quitar`,
+             { method: "POST", body: JSON.stringify(datos) }),
   periodosDe: (id) => peticion(`/admin/usuarios/${id}/periodos`),
   corregirFinesSemana: (id, datos) =>
     peticion(`/admin/usuarios/${id}/fines-semana`,

@@ -162,6 +162,28 @@ async def editar_usuario(user_id: uuid.UUID, cambios: CambioUsuario,
             detail={"mensaje": "No puede cambiar su propio rol. Pídaselo a otro administrador."},
         )
 
+    # Bajarle el rol a una jefatura con gente a cargo la deja sin atribuciones
+    # pero con sus colaboradores todavía apuntándole: piden permiso y el
+    # pedido no le llega a nadie. Esa baja va por `/admin/jefaturas`, que
+    # obliga a decir a quién pasan las personas y los pendientes.
+    if campos.get("rol") is not None and campos["rol"] not in ("jefe", "rrhh", "admin"):
+        cuenta = await obtener_uno(
+            """select u.nombre, u.rol::text as rol,
+                      (select count(*) from public.users s
+                        where s.jefe_id = u.id and s.activo) as a_cargo
+                 from public.users u where u.id = %s""",
+            (user_id,),
+        )
+        if cuenta and cuenta["rol"] in ("jefe", "rrhh", "admin") and cuenta["a_cargo"]:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"mensaje": (
+                    f"{cuenta['nombre']} tiene {cuenta['a_cargo']} persona(s) a cargo. "
+                    "Quítele la jefatura desde Configuración › Jefaturas, que le pedirá "
+                    "a qué jefatura pasan antes de hacerlo."),
+                    "a_cargo": int(cuenta["a_cargo"])},
+            )
+
     asignaciones = ", ".join(f"{k} = %({k})s" for k in campos)
     try:
         actualizado = await obtener_uno(
@@ -178,6 +200,67 @@ async def editar_usuario(user_id: uuid.UUID, cambios: CambioUsuario,
                     cedula=usuario["cedula"], entidad="users", entidad_id=str(user_id),
                     detalle={"cambios": list(campos)})
     return {"id": str(actualizado["id"]), "mensaje": f"Datos de {actualizado['nombre']} actualizados."}
+
+
+class NuevaJefatura(BaseModel):
+    persona_id: uuid.UUID
+
+
+class BajaJefatura(BaseModel):
+    """A quién pasan las personas y con qué rol se queda quien deja el mando."""
+
+    nuevo_jefe_id: uuid.UUID | None = None
+    rol_destino: Literal["empleado", "guardia", "rrhh", "admin"] = "empleado"
+
+
+@router.get("/admin/jefaturas")
+async def listar_jefaturas(usuario: RRHH) -> list[dict]:
+    """Quiénes tienen mando hoy, con cuánta gente y cuánto les está esperando."""
+    filas = await obtener_todos("select * from public.v_jefaturas_admin")
+    return [{**f, "id": str(f["id"]), "a_cargo": int(f["a_cargo"]),
+             "esperando": int(f["esperando"])} for f in filas]
+
+
+@router.post("/admin/jefaturas", status_code=status.HTTP_201_CREATED)
+async def crear_jefatura(datos: NuevaJefatura, request: Request, usuario: RRHH) -> dict:
+    try:
+        fila = await obtener_uno("select public.jefatura_crear(%s, %s) as r",
+                                 (datos.persona_id, usuario["id"]))
+    except Exception as exc:  # noqa: BLE001
+        raise traducir(exc) from exc
+
+    if fila["r"].get("cambio"):
+        await registrar(request, "jefatura_creada", user_id=str(usuario["id"]),
+                        cedula=usuario["cedula"], entidad="users",
+                        entidad_id=str(datos.persona_id),
+                        detalle={"rol_anterior": fila["r"].get("rol_anterior")})
+    return fila["r"]
+
+
+@router.post("/admin/jefaturas/{user_id}/quitar")
+async def quitar_jefatura(user_id: uuid.UUID, datos: BajaJefatura,
+                          request: Request, usuario: RRHH) -> dict:
+    """Le quita el mando y, en el mismo movimiento, traslada a su gente.
+
+    El traslado y el cambio de rol van en la misma llamada a propósito: si
+    fueran dos pasos, entre uno y otro habría gente reportando a alguien que
+    ya no puede aprobarle nada.
+    """
+    try:
+        fila = await obtener_uno(
+            "select public.jefatura_quitar(%s, %s, %s, %s) as r",
+            (user_id, datos.nuevo_jefe_id, datos.rol_destino, usuario["id"]),
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise traducir(exc) from exc
+
+    await registrar(request, "jefatura_quitada", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="users", entidad_id=str(user_id),
+                    detalle={"nuevo_jefe": str(datos.nuevo_jefe_id or ""),
+                             "rol_destino": datos.rol_destino,
+                             "personas_movidas": fila["r"].get("personas_movidas"),
+                             "solicitudes_movidas": fila["r"].get("solicitudes_movidas")})
+    return fila["r"]
 
 
 @router.post("/admin/usuarios/{user_id}/saldo")

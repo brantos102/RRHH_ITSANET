@@ -12,7 +12,7 @@ montarNavegacion($("barra"), { activo: "admin" });
 const esAdmin = sesion.perfil.rol === "admin";
 // `jefes` arranca en nulo y no en lista vacía: una lista vacía es un valor
 // verdadero, y con ella el catálogo no se pedía la primera vez.
-const estado = { usuarios: [], jefes: null };
+const estado = { usuarios: [], jefes: null, jefaturas: [], candidato: null };
 
 let temporizador;
 const avisar = (texto, error = false) => {
@@ -30,7 +30,7 @@ const CARGADORES = {
   antiguedades: cargarAntiguedades, configuracion: cargarConfiguracion,
   bitacora: cargarBitacora, cotejo: cargarCotejo,
   "cambios-ficha": cargarCambiosFicha, lineamientos: cargarLineamientos,
-  depuracion: cargarDepuracion,
+  jefaturas: cargarJefaturasAdmin, depuracion: cargarDepuracion,
 };
 
 function mostrar(seccion) {
@@ -38,6 +38,11 @@ function mostrar(seccion) {
     const activa = b.dataset.seccion === seccion;
     b.className = `shrink-0 rounded-xl px-4 py-2 text-sm font-medium ${
       activa ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`;
+    // La cinta de pestañas ya no cabe en pantalla. Llegando por el menú
+    // lateral a una de las últimas —Jefaturas, Depuración—, el panel se
+    // abría pero la pestaña marcada quedaba fuera de la vista, y no se veía
+    // dónde estaba uno parado.
+    if (activa) b.scrollIntoView({ block: "nearest", inline: "center" });
   });
   document.querySelectorAll("[data-panel]").forEach((p) =>
     p.classList.toggle("hidden", p.dataset.panel !== seccion)
@@ -1021,3 +1026,166 @@ async function cargarDepuracion() {
     </section>`;
   }).join("");
 }
+
+
+/* ------------------------------------------------------------- jefaturas
+   Nombrar a alguien jefatura es un cambio de rol, y eso ya se podía hacer
+   desde Usuarios. Quitárselo no: la gente que le reporta sigue apuntándole
+   en su ficha, así que pide permiso y el pedido no le llega a nadie. Nada
+   en la pantalla lo advertía. Aquí la baja empieza por la pregunta que
+   hay que contestar: a quién pasan. */
+
+function filaJefatura(j) {
+  const propio = String(j.id) === String(sesion.perfil.id);
+  const alerta = !j.puede_entrar
+    ? `<span class="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700
+                    ring-1 ring-amber-200">no puede entrar</span>` : "";
+  return `<tr class="border-t border-slate-100 hover:bg-slate-50">
+    <td class="px-5 py-2.5">
+      <a href="persona.html?id=${esc(j.id)}" class="font-medium hover:underline">${esc(j.nombre)}</a>${alerta}
+      ${j.reporta_a ? `<div class="text-xs text-slate-500">reporta a ${esc(j.reporta_a)}</div>` : ""}
+    </td>
+    <td class="px-3 py-2.5 text-slate-600">${esc(j.departamento || "—")}</td>
+    <td class="px-3 py-2.5 text-slate-600">${esc(ROL_TEXTO[j.rol] || j.rol)}</td>
+    <td class="px-3 py-2.5 text-right font-medium">${j.a_cargo}</td>
+    <td class="px-3 py-2.5 text-right ${j.esperando ? "font-medium text-amber-700" : "text-slate-500"}">
+      ${j.esperando}</td>
+    <td class="px-3 py-2.5 text-right">
+      ${propio
+        ? `<span class="text-xs text-slate-400">es usted</span>`
+        : `<button type="button" data-quitar-jefatura="${esc(j.id)}"
+                   class="rounded-lg px-2.5 py-1.5 text-sm text-rose-700 hover:bg-rose-50">
+             Quitar</button>`}
+    </td>
+  </tr>`;
+}
+
+function pintarJefaturas() {
+  const filtro = ($("jef-filtro").value || "").trim().toLowerCase();
+  const lista = filtro
+    ? estado.jefaturas.filter((j) =>
+        `${j.nombre} ${j.departamento || ""} ${j.cargo || ""}`.toLowerCase().includes(filtro))
+    : estado.jefaturas;
+
+  const gente = estado.jefaturas.reduce((s, j) => s + j.a_cargo, 0);
+  const sinGente = estado.jefaturas.filter((j) => !j.a_cargo).length;
+  $("jef-cuantas").textContent =
+    `${estado.jefaturas.length} jefatura(s) para ${gente} persona(s)` +
+    (sinGente ? ` · ${sinGente} sin nadie a cargo` : "");
+
+  $("jef-tabla").innerHTML = lista.length
+    ? lista.map(filaJefatura).join("")
+    : `<tr><td colspan="6" class="px-5 py-10 text-center text-sm text-slate-500">
+         Nadie coincide con el filtro.</td></tr>`;
+
+  $("jef-tabla").querySelectorAll("[data-quitar-jefatura]").forEach((b) =>
+    b.addEventListener("click", () => abrirBajaJefatura(b.dataset.quitarJefatura)));
+}
+
+async function cargarJefaturasAdmin() {
+  estado.jefaturas = await api.adminJefaturas();
+  pintarJefaturas();
+}
+
+$("jef-filtro").addEventListener("input", () => {
+  if (estado.jefaturas.length) pintarJefaturas();
+});
+
+/* Nombrar: se busca entre quienes todavía no tienen mando. */
+let temporizadorJef;
+$("jef-buscar").addEventListener("input", () => {
+  clearTimeout(temporizadorJef);
+  estado.candidato = null;
+  $("jef-nombrar").disabled = true;
+  const texto = $("jef-buscar").value.trim();
+  if (texto.length < 3) { $("jef-candidatos").innerHTML = ""; return; }
+  temporizadorJef = setTimeout(async () => {
+    try {
+      const gente = await api.adminUsuarios(texto, false);
+      const conMando = new Set(estado.jefaturas.map((j) => String(j.id)));
+      const libres = gente.filter((u) => !conMando.has(String(u.id))).slice(0, 8);
+      $("jef-candidatos").innerHTML = libres.length
+        ? libres.map((u) => `
+            <li><button type="button" data-candidato="${esc(u.id)}" data-nombre="${esc(u.nombre)}"
+                        class="w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-slate-100">
+              <span class="font-medium">${esc(u.nombre)}</span>
+              <span class="text-slate-500"> · ${esc(u.cargo || "sin cargo")}
+                · ${esc(u.departamento || "sin área")}</span>
+            </button></li>`).join("")
+        : `<li class="px-3 py-2 text-sm text-slate-500">
+             Nadie más coincide; quien ya tiene mando no aparece aquí.</li>`;
+      $("jef-candidatos").querySelectorAll("[data-candidato]").forEach((b) =>
+        b.addEventListener("click", () => {
+          estado.candidato = { id: b.dataset.candidato, nombre: b.dataset.nombre };
+          $("jef-buscar").value = b.dataset.nombre;
+          $("jef-candidatos").innerHTML = "";
+          $("jef-nombrar").disabled = false;
+        }));
+    } catch (err) { avisar(err.message, true); }
+  }, 300);
+});
+
+$("jef-nombrar").addEventListener("click", async () => {
+  if (!estado.candidato) return;
+  try {
+    const r = await api.crearJefatura(estado.candidato.id);
+    avisar(r.mensaje);
+    $("jef-buscar").value = "";
+    $("jef-nombrar").disabled = true;
+    estado.candidato = null;
+    estado.jefes = null;            // el catálogo de la ficha cambió con esto
+    await cargarJefaturasAdmin();
+  } catch (err) { avisar(err.message, true); }
+});
+
+/* Quitar: el diálogo se abre ya sabiendo cuánta gente hay que trasladar. */
+let jefaturaEnBaja = null;
+
+function abrirBajaJefatura(id) {
+  const j = estado.jefaturas.find((x) => String(x.id) === String(id));
+  if (!j) return;
+  jefaturaEnBaja = j;
+
+  $("jef-quien").textContent = `${j.nombre} · ${j.departamento || "sin área"}`;
+  $("jef-error").classList.add("hidden");
+
+  const hayGente = j.a_cargo > 0 || j.esperando > 0;
+  $("jef-aviso").textContent = hayGente
+    ? `Tiene ${j.a_cargo} persona(s) a cargo y ${j.esperando} solicitud(es) esperando su firma. ` +
+      "Todo eso pasa a la jefatura que elija, en un solo movimiento."
+    : "No tiene gente a cargo ni solicitudes esperando. Se le quita el mando y nada más se mueve.";
+  $("jef-aviso").className = hayGente
+    ? "rounded-xl bg-amber-50 p-3 text-sm leading-relaxed text-amber-900 ring-1 ring-amber-200"
+    : "rounded-xl bg-slate-50 p-3 text-sm leading-relaxed text-slate-600";
+
+  $("jef-destino-caja").classList.toggle("hidden", j.a_cargo === 0);
+  $("jef-destino").innerHTML = estado.jefaturas
+    .filter((x) => String(x.id) !== String(j.id))
+    .map((x) => `<option value="${esc(x.id)}">${esc(x.nombre)}${
+      x.departamento ? ` · ${esc(x.departamento)}` : ""} (${x.a_cargo} a cargo)</option>`)
+    .join("");
+  $("jef-rol").value = j.rol === "rrhh" || j.rol === "admin" ? "rrhh" : "empleado";
+  $("modal-jefatura").showModal();
+}
+
+$("form-jefatura").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!jefaturaEnBaja) return;
+  try {
+    const r = await api.quitarJefatura(jefaturaEnBaja.id, {
+      nuevo_jefe_id: jefaturaEnBaja.a_cargo > 0 ? $("jef-destino").value : null,
+      rol_destino: $("jef-rol").value,
+    });
+    $("modal-jefatura").close();
+    avisar(r.mensaje);
+    jefaturaEnBaja = null;
+    estado.jefes = null;
+    await cargarJefaturasAdmin();
+  } catch (err) {
+    $("jef-error").textContent = err.message;
+    $("jef-error").classList.remove("hidden");
+  }
+});
+
+$("modal-jefatura").querySelectorAll("[data-cerrar]").forEach((b) =>
+  b.addEventListener("click", () => $("modal-jefatura").close()));

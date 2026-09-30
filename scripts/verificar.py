@@ -222,6 +222,7 @@ async def revisar_base() -> int:
         ("0033 fines de semana cumplidos", "public.v_fines_semana"),
         ("0034 personal temporal sin dinero", "public.v_jornadas_detalle"),
         ("0035 pantalla de depuración", "public.v_cuentas_de_prueba"),
+        ("0036 alta y baja de jefaturas", "public.v_jefaturas_admin"),
     ]
 
     # Las migraciones que solo cambian funciones se comprueban por la función.

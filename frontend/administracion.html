@@ -25,8 +25,65 @@
     <button data-seccion="cotejo" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Cotejo de la carga</button>
     <button data-seccion="cambios-ficha" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Cambios de ficha</button>
     <button data-seccion="lineamientos" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Lineamientos</button>
+    <button data-seccion="jefaturas" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Jefaturas</button>
     <button data-seccion="depuracion" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Depuración</button>
   </nav>
+
+  <!-- ===== Jefaturas =====
+       Quién tiene gente a cargo. Nombrar una jefatura es un cambio de rol y
+       ya bastaba con eso; quitarla no, porque la gente se queda apuntando a
+       alguien que ya no puede aprobarle nada. Por eso la baja pide a quién
+       pasan antes de hacer nada. -->
+  <section data-panel="jefaturas" class="hidden space-y-4">
+    <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <h2 class="font-medium">Nombrar una jefatura</h2>
+      <p class="mt-0.5 text-sm text-slate-600">
+        Busque a la persona y nómbrela. Después asígnele su gente desde la ficha
+        de cada colaborador, en Usuarios.
+      </p>
+      <div class="mt-3 flex flex-wrap items-end gap-3">
+        <label class="min-w-0 flex-1">
+          <span class="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Persona</span>
+          <input id="jef-buscar" type="search" autocomplete="off"
+                 placeholder="Nombre o cédula"
+                 class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1
+                        ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </label>
+        <button id="jef-nombrar" type="button" disabled
+                class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white
+                       hover:bg-slate-800 disabled:bg-slate-300">Nombrar jefatura</button>
+      </div>
+      <ul id="jef-candidatos" class="mt-2 space-y-1 empty:hidden"></ul>
+    </div>
+
+    <div class="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+      <header class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-5 py-3.5">
+        <div>
+          <h2 class="font-medium">Jefaturas vigentes</h2>
+          <p id="jef-cuantas" class="mt-0.5 text-sm text-slate-600"></p>
+        </div>
+        <input id="jef-filtro" type="search" placeholder="Filtrar"
+               class="rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
+      </header>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th class="px-5 py-2.5 font-medium">Jefatura</th>
+              <th class="px-3 py-2.5 font-medium">Área</th>
+              <th class="px-3 py-2.5 font-medium">Rol</th>
+              <th class="px-3 py-2.5 text-right font-medium">A cargo</th>
+              <th class="px-3 py-2.5 text-right font-medium">Esperando firma</th>
+              <th class="px-3 py-2.5 font-medium"></th>
+            </tr>
+          </thead>
+          <tbody id="jef-tabla"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
 
   <!-- ===== Depuración =====
        Lo que hay que revisar a mano después de la carga inicial, sin abrir un
@@ -366,6 +423,55 @@
       </p>
     </footer>
   </div>
+</dialog>
+
+<!-- ============ Modal: quitar una jefatura ============ -->
+<dialog id="modal-jefatura" class="w-[min(100vw-1.5rem,32rem)] rounded-2xl p-0">
+  <form id="form-jefatura" method="dialog">
+    <div class="border-b border-slate-200 px-5 py-4">
+      <h2 class="font-semibold">Quitar la jefatura</h2>
+      <p id="jef-quien" class="mt-0.5 text-sm text-slate-500"></p>
+    </div>
+
+    <div class="space-y-4 px-5 py-4">
+      <p id="jef-aviso" class="rounded-xl bg-amber-50 p-3 text-sm leading-relaxed text-amber-900
+                               ring-1 ring-amber-200"></p>
+
+      <div id="jef-destino-caja">
+        <label for="jef-destino" class="block text-sm font-medium text-slate-700">
+          ¿A qué jefatura pasa su gente?</label>
+        <select id="jef-destino"
+                class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm ring-1
+                       ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></select>
+        <p class="mt-1 text-xs text-slate-500">
+          Pasan también las solicitudes que estaban esperando su firma.
+        </p>
+      </div>
+
+      <div>
+        <label for="jef-rol" class="block text-sm font-medium text-slate-700">
+          ¿Con qué rol se queda?</label>
+        <select id="jef-rol"
+                class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm ring-1
+                       ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+          <option value="empleado">Empleado</option>
+          <option value="guardia">Garita</option>
+          <option value="rrhh">Talento Humano</option>
+        </select>
+      </div>
+
+      <p id="jef-error" class="hidden rounded-xl bg-rose-50 p-3 text-sm text-rose-800 ring-1 ring-rose-200"></p>
+    </div>
+
+    <div class="flex gap-3 border-t border-slate-200 px-5 py-4">
+      <button type="button" data-cerrar
+              class="flex-1 rounded-xl bg-slate-100 px-4 py-3 font-medium hover:bg-slate-200">Cancelar</button>
+      <button type="submit"
+              class="flex-1 rounded-xl bg-slate-900 px-4 py-3 font-medium text-white hover:bg-slate-800">
+        Quitar la jefatura
+      </button>
+    </div>
+  </form>
 </dialog>
 
 </body>

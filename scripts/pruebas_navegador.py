@@ -865,6 +865,90 @@ async def recorrido_depuracion(nav, capturas) -> Paso:
     return paso
 
 
+async def recorrido_jefaturas(nav, capturas) -> Paso:
+    """Nombrar y quitar jefaturas sin dejar gente sin a quién pedirle permiso.
+
+    La baja es lo que se probaba mal a ojo: en la pantalla no pasa nada raro
+    —el rol cambia, no sale ningún error— y lo que queda roto es invisible.
+    Sus colaboradores siguen apuntándole, piden vacaciones, y el pedido va
+    dirigido a alguien que ya no puede resolverlo.
+    """
+    from app.db import ejecutar, obtener_uno
+
+    paso = Paso("jefaturas")
+
+    pg = await (await nav.new_context(viewport={"width": 1440, "height": 1000})).new_page()
+    await _entrar(pg, ADMIN)
+    await pg.goto(f"{FRONTEND}/administracion.html#jefaturas")
+    await pg.wait_for_selector("#jef-tabla tr", timeout=15000)
+    await pg.wait_for_timeout(800)
+
+    cuantas = " ".join((await pg.inner_text("#jef-cuantas")).split())
+    if "jefatura" not in cuantas:
+        raise Falla(f"La cabecera no dice cuántas jefaturas hay: «{cuantas}».")
+    paso.ok(f"la lista se abre con el resumen: {cuantas}")
+
+    # La jefatura de la semilla, con gente a cargo.
+    jefe = await obtener_uno(
+        """select u.id, u.nombre,
+                  (select count(*) from public.users s where s.jefe_id = u.id and s.activo) as a_cargo
+             from public.users u where u.cedula = %s""", (JEFE,))
+    if not jefe["a_cargo"]:
+        raise Falla("La jefatura de prueba no tiene a nadie a cargo; no hay nada que trasladar.")
+
+    fila = pg.locator(f"[data-quitar-jefatura='{jefe['id']}']")
+    if not await fila.count():
+        raise Falla(f"{jefe['nombre']} no figura entre las jefaturas.")
+    await fila.click()
+    await pg.wait_for_selector("#modal-jefatura[open]", timeout=8000)
+
+    aviso = " ".join((await pg.inner_text("#jef-aviso")).split())
+    if str(jefe["a_cargo"]) not in aviso:
+        raise Falla(f"El diálogo no dice cuánta gente se traslada: «{aviso}».")
+    paso.ok(f"al quitarla, el diálogo advierte primero: {aviso[:95]}")
+
+    if await pg.locator("#jef-destino-caja").is_hidden():
+        raise Falla("Con gente a cargo, el diálogo no pregunta a qué jefatura pasa.")
+    if await pg.locator("#jef-destino option").count() < 1:
+        raise Falla("No ofrece ninguna jefatura de destino.")
+    paso.ok("y obliga a elegir a quién pasan antes de dejar hacerlo")
+
+    destino = await pg.locator("#jef-destino option").first.get_attribute("value")
+    await pg.select_option("#jef-destino", destino)
+    await pg.click("#form-jefatura button[type=submit]")
+    await pg.wait_for_selector("#aviso:not(.hidden)", timeout=10000)
+    mensaje = " ".join((await pg.inner_text("#aviso")).split())
+    paso.ok(f"se traslada en un solo movimiento: {mensaje[:95]}")
+
+    colgando = await obtener_uno(
+        "select count(*) as n from public.users where jefe_id = %s and activo", (jefe["id"],))
+    if colgando["n"]:
+        raise Falla(f"Quedaron {colgando['n']} persona(s) apuntando a quien ya no manda.")
+    paso.ok("nadie queda apuntando a quien ya no puede aprobarle nada")
+
+    # Y se vuelve a nombrar, que es la otra mitad de lo pedido.
+    await pg.fill("#jef-buscar", jefe["nombre"][:14])
+    await pg.wait_for_timeout(1200)
+    if not await pg.locator("#jef-candidatos [data-candidato]").count():
+        raise Falla("La búsqueda para nombrar una jefatura no devuelve a nadie.")
+    await pg.locator("#jef-candidatos [data-candidato]").first.click()
+    await pg.click("#jef-nombrar")
+    await pg.wait_for_timeout(1500)
+    rol = await obtener_uno("select rol::text as rol from public.users where id = %s", (jefe["id"],))
+    if rol["rol"] != "jefe":
+        raise Falla(f"Tras nombrarla, su rol quedó en «{rol['rol']}».")
+    paso.ok("y se vuelve a nombrar jefatura desde la misma pantalla")
+
+    if capturas:
+        await pg.screenshot(path=str(capturas / "jefaturas.png"), full_page=True)
+
+    # Se deja como estaba: la semilla cuenta con esa jefatura y su gente.
+    await ejecutar("update public.users set jefe_id = %s where jefe_id = %s",
+                   (jefe["id"], destino))
+    paso.ok("y la semilla queda como estaba para el resto de los recorridos")
+    return paso
+
+
 async def recorrido_menu(nav, capturas) -> Paso:
     """La navegación, que ahora es vertical y tiene dos formas."""
     paso = Paso("menu")
@@ -1143,6 +1227,8 @@ RECORRIDOS = {
                      "Talento Humano escribe lo que se lee antes de enviar"),
     "depuracion": (recorrido_depuracion,
                    "Depuración de la carga y el desplegable de jefes"),
+    "jefaturas": (recorrido_jefaturas,
+                  "Nombrar y quitar jefaturas trasladando a la gente"),
     "menu": (recorrido_menu, "La navegación vertical: barra en escritorio, cajón en teléfono"),
     "temporal": (recorrido_temporal, "Personal temporal: jornada, cierre manual y semana"),
 }
