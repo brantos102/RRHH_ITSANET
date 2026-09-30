@@ -60,7 +60,7 @@ async function cargar() {
   $("pestana-anulaciones").classList.toggle("hidden", !resuelveAnulaciones);
 
   const [saldo, notificaciones, solicitudes, catalogo, reglas, firma, calendario,
-         pendientes, anulaciones] =
+         pendientes, anulaciones, bloques] =
     await Promise.all([
       api.saldo().catch(() => null),
       api.notificaciones().catch(() => []),
@@ -71,6 +71,9 @@ async function cargar() {
       api.calendario().catch(() => []),
       aprueba ? api.pendientes().catch(() => []) : Promise.resolve([]),
       resuelveAnulaciones ? api.anulacionesPendientes().catch(() => []) : Promise.resolve([]),
+      // `null` y no `[]` a propósito: hay que poder distinguir «el
+      // administrador no dejó ningún bloque» de «no se pudo preguntar».
+      api.misBloques().then((r) => r.bloques).catch(() => null),
     ]);
 
   estado.reglas = reglas ? {
@@ -94,6 +97,9 @@ async function cargar() {
   pintarCalendario();
   pintarPendientes();
   pintarAnulaciones();
+  // Al final: los pintores de arriba encienden y apagan sus propias
+  // secciones, y quien decide lo que se ve tiene que hablar el último.
+  aplicarConfiguracionDelPanel(bloques);
 }
 
 /* ------------------------------------------------------------- pestañas */
@@ -136,6 +142,51 @@ function diasExactos(valor) {
 
 function plural(n, singular, plural_) {
   return `${n} ${n === 1 ? singular : plural_}`;
+}
+
+/* ------------------------------------------- qué se ve en esta pantalla
+
+   El administrador decide desde «Pantalla principal» qué bloques aparecen,
+   en qué orden y para qué roles. Aquí solo se obedece.
+
+   SI LA CONFIGURACIÓN NO LLEGA, SE MUESTRA TODO. Es la regla que hace que
+   esto no pueda romper nada: un fallo en lo accesorio —la red, el servidor,
+   una versión vieja del backend— no puede dejar a nadie mirando una pantalla
+   vacía. Ante la duda, el panel completo, que es como estaba antes de que
+   esto existiera. */
+function aplicarConfiguracionDelPanel(bloques) {
+  if (!Array.isArray(bloques) || !bloques.length) return;
+
+  const porClave = new Map(bloques.map((b) => [b.clave, b]));
+  document.querySelectorAll("[data-bloque]").forEach((nodo) => {
+    const config = porClave.get(nodo.dataset.bloque);
+    if (!config) {
+      // Oculto de verdad y no solo invisible: un bloque que sigue ocupando
+      // sitio deja un hueco que nadie se explica.
+      // En línea y no por clase: las clases de maquetación también fijan
+      // `display`, y cuál gana depende del orden de la hoja de estilos. Un
+      // bloque que el administrador apagó no puede quedar visible por eso.
+      nodo.hidden = true;
+      nodo.style.display = "none";
+      return;
+    }
+    // El orden viaja como número de la base; CSS lo respeta tanto en la
+    // columna del panel como dentro de la fila de tarjetas de arriba.
+    nodo.style.order = String(config.orden);
+  });
+
+  const anuncio = porClave.get("anuncio");
+  if (anuncio) {
+    $("anuncio-titulo").textContent = anuncio.titulo;
+    $("anuncio-cuerpo").textContent = anuncio.cuerpo || "";
+    $("anuncio").classList.remove("hidden");
+  }
+
+  // Si de la fila de tarjetas no queda ninguna, la fila sobra.
+  const resumen = $("resumen");
+  if (resumen && !resumen.querySelector("[data-bloque]:not([hidden])")) {
+    resumen.classList.add("hidden");
+  }
 }
 
 function pintarResumen(perfil, saldo) {

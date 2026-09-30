@@ -13,7 +13,7 @@ from . import registro
 from .config import get_settings
 from .db import abrir_pool, cerrar_pool, obtener_uno
 from .routers import (administracion, aprobaciones, auth, chat, ficha, firmas,
-                      garita, informes, solicitudes, temporal)
+                      garita, informes, panel, solicitudes, temporal)
 
 settings = get_settings()
 
@@ -58,6 +58,10 @@ app.add_middleware(
     allow_origins=settings.origenes_permitidos,
     allow_origin_regex=settings.origen_regex,
     allow_credentials=True,
+    # PUT no está, y es a propósito: en este sistema los cambios parciales
+    # van por PATCH. Un PUT nuevo pasaría las pruebas de la API y fallaría
+    # solo en el navegador, en el vuelo previo, que es de los fallos más
+    # caros de encontrar.
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
     # Sin esto el navegador oculta la cabecera a JavaScript cuando el frontend
@@ -215,6 +219,7 @@ app.include_router(administracion.router)
 app.include_router(ficha.router)
 app.include_router(chat.router)
 app.include_router(temporal.router)
+app.include_router(panel.router)
 
 
 @app.get("/salud", tags=["Sistema"])

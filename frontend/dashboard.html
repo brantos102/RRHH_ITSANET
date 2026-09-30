@@ -47,14 +47,25 @@
 </nav>
 
 <main class="mx-auto max-w-4xl space-y-6 px-4 py-6 pb-24">
-<div id="vista-panel" class="space-y-6">
+<div id="vista-panel" class="flex flex-col gap-6">
 
   <!-- ================= Alertas ================= -->
-  <section id="alertas" class="hidden space-y-3" aria-live="polite"></section>
+  <!-- ================= Aviso de la empresa =================
+       Lo escribe el administrador desde «Pantalla principal». Vacío no se
+       muestra: un recuadro vacío arriba de todo es peor que no tener aviso. -->
+  <section id="anuncio" data-bloque="anuncio"
+           class="hidden rounded-2xl bg-slate-900 p-5 text-white shadow-sm">
+    <p class="text-xs font-medium uppercase tracking-wide text-slate-400"
+       id="anuncio-titulo">Aviso de la empresa</p>
+    <p id="anuncio-cuerpo" class="mt-2 whitespace-pre-line text-sm leading-relaxed"></p>
+  </section>
+
+  <!-- ================= Alertas ================= -->
+  <section id="alertas" data-bloque="alertas" class="hidden space-y-3" aria-live="polite"></section>
 
   <!-- ================= Resumen ================= -->
-  <section class="grid gap-3 sm:grid-cols-3">
-    <article class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:col-span-1">
+  <section id="resumen" class="grid gap-3 sm:grid-cols-3">
+    <article data-bloque="saldo" class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:col-span-1">
       <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Días disponibles</p>
       <!-- La cifra grande es la que la persona reconoce como suya: la misma
            que Talento Humano lleva en su hoja. Mostrar aquí solo los días de
@@ -114,13 +125,13 @@
       </button>
     </article>
 
-    <article class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <article data-bloque="antiguedad" class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
       <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Antigüedad</p>
       <p id="antiguedad" class="mt-2 text-2xl font-semibold">—</p>
       <p id="fecha-ingreso" class="mt-1 text-sm text-slate-500">—</p>
     </article>
 
-    <article class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <article data-bloque="fines_semana" class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
       <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Fines de semana</p>
       <p id="fds-pendientes" class="mt-2 text-2xl font-semibold">—</p>
       <p id="fds-detalle" class="mt-1 text-sm leading-snug text-slate-500">
@@ -134,7 +145,7 @@
   </section>
 
   <!-- ================= Acciones ================= -->
-  <section class="grid gap-3 sm:grid-cols-2">
+  <section data-bloque="acciones" class="grid gap-3 sm:grid-cols-2">
     <button data-nueva="vacacion"
             class="flex items-center gap-3 rounded-2xl bg-slate-900 p-5 text-left text-white
                    transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2">
@@ -157,7 +168,7 @@
   </section>
 
   <!-- ================= Calendario del equipo ================= -->
-  <section class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+  <section data-bloque="calendario" class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
         <h2 class="font-medium">Ausencias del equipo</h2>
@@ -173,7 +184,7 @@
   </section>
 
   <!-- ================= Firma ================= -->
-  <section id="tarjeta-firma" class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+  <section id="tarjeta-firma" data-bloque="firma" class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
         <h2 class="font-medium">Mi firma electrónica</h2>
@@ -189,13 +200,13 @@
   </section>
 
   <!-- ================= Logros ================= -->
-  <section id="seccion-logros" class="hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+  <section id="seccion-logros" data-bloque="logros" class="hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
     <h2 class="font-medium">Mis logros</h2>
     <ul id="lista-logros" class="mt-3 space-y-2"></ul>
   </section>
 
   <!-- ================= Solicitudes ================= -->
-  <section>
+  <section data-bloque="solicitudes">
     <div class="mb-3 flex flex-wrap items-center justify-between gap-3 px-1">
       <h2 class="font-medium">Mis solicitudes</h2>
       <input id="filtro-solicitudes" type="search" placeholder="Buscar por Nº, tipo o estado"

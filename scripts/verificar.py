@@ -199,6 +199,7 @@ async def revisar_base() -> int:
         ("0024 personal temporal", "public.personal_temporal"),
         ("0025 historial de vacaciones", "public.vacaciones_historicas"),
         ("0026 panel de garita del día", "public.v_garita_hoy"),
+        ("0027 pantalla principal configurable", "public.panel_bloques"),
     ]
 
     # Las migraciones que solo cambian funciones se comprueban por la función.

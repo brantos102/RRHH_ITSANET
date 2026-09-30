@@ -518,6 +518,76 @@ async def recorrido_panel_garita(nav, capturas) -> Paso:
     return paso
 
 
+async def recorrido_pantalla_principal(nav, capturas) -> Paso:
+    """El administrador decide qué ve el colaborador al entrar.
+
+    Lo que se comprueba no es que los interruptores se muevan, sino las dos
+    cosas que pueden salir caras: que apagar un bloque lo quite de verdad del
+    panel de otra persona, y que los bloques imprescindibles no se dejen
+    apagar. Un administrador que apaga el saldo por error deja a 350 personas
+    con una pantalla en blanco.
+    """
+    from app.db import ejecutar
+
+    paso = Paso("pantalla-principal")
+
+    # Se parte del panel como viene de fábrica para que el recorrido se pueda
+    # repetir, y se deja igual al terminar.
+    await ejecutar("update public.panel_bloques set visible = true, cuerpo = null")
+
+    pg = await (await nav.new_context(viewport={"width": 1280, "height": 1000})).new_page()
+    await _entrar(pg, ADMIN)
+    await pg.goto(f"{FRONTEND}/pantalla-principal.html")
+    await pg.wait_for_selector("[data-clave='firma']", timeout=15000)
+    paso.ok(f"{await pg.locator('#lista [data-clave]').count()} bloques listados")
+
+    # Lo imprescindible ni siquiera se ofrece: el interruptor está inactivo.
+    saldo = pg.locator("[data-clave='saldo'] [data-visible]")
+    if not await saldo.is_disabled():
+        raise Falla("El interruptor del saldo se puede apagar y no debería.")
+    paso.ok("el saldo no se deja apagar: el interruptor está inactivo")
+
+    # Se pulsa la etiqueta y no la casilla: la casilla está oculta a la vista
+    # —el interruptor que se ve es el recuadro de al lado— y solo se deja
+    # pulsar a través de ella, igual que le pasa a una persona.
+    await pg.locator("[data-clave='firma'] [data-interruptor]").click()
+    await pg.wait_for_timeout(900)
+    await pg.fill("#anuncio", "Prueba automatica: el viernes se cierra a la una.")
+    await pg.click("#btn-anuncio")
+    await pg.wait_for_timeout(900)
+    paso.ok("firma apagada y aviso escrito")
+
+    # Y ahora lo que importa: cómo lo ve otra persona.
+    otra = await (await nav.new_context(viewport={"width": 1280, "height": 1000})).new_page()
+    await _entrar(otra, EMPLEADA)
+    await otra.wait_for_selector("#saldo-dias", timeout=15000)
+    await otra.wait_for_timeout(1200)
+
+    if await otra.locator("[data-bloque='firma']").is_visible():
+        raise Falla("El administrador apagó «Mi firma electrónica» y el colaborador la sigue viendo.")
+    paso.ok("el bloque apagado desapareció del panel del colaborador")
+
+    if not await otra.locator("[data-bloque='saldo']").is_visible():
+        raise Falla("El saldo dejó de verse: es lo único que no puede pasar.")
+    paso.ok("el saldo sigue en su sitio")
+
+    aviso = otra.locator("#anuncio")
+    if not await aviso.is_visible():
+        raise Falla("El aviso de la empresa no aparece en el panel.")
+    if "viernes" not in (await aviso.inner_text()):
+        raise Falla("El aviso aparece pero con otro texto.")
+    paso.ok("el aviso de la empresa se ve arriba del panel")
+
+    if capturas:
+        await otra.screenshot(path=str(capturas / "panel-configurado.png"), full_page=True)
+
+    # Se deja como estaba: el aviso de una prueba no puede quedarse puesto en
+    # el panel de 350 personas.
+    await ejecutar("update public.panel_bloques set visible = true, cuerpo = null")
+    paso.ok("panel repuesto: todo visible y sin aviso")
+    return paso
+
+
 async def recorrido_menu(nav, capturas) -> Paso:
     """La navegación, que ahora es vertical y tiene dos formas."""
     paso = Paso("menu")
@@ -711,6 +781,8 @@ RECORRIDOS = {
     "garita": (recorrido_garita, "Salida, regreso y exceso sobre la hora autorizada"),
     "panel-garita": (recorrido_panel_garita,
                      "Panel del día: quién está fuera y a quién se le pasó la hora"),
+    "pantalla-principal": (recorrido_pantalla_principal,
+                          "El administrador decide qué bloques ve el colaborador"),
     "menu": (recorrido_menu, "La navegación vertical: barra en escritorio, cajón en teléfono"),
     "temporal": (recorrido_temporal, "Personal temporal: jornada, cierre manual y semana"),
 }

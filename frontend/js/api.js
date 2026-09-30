@@ -249,6 +249,16 @@ export const api = {
   cambiarParametro: (clave, valor) =>
     peticion(`/admin/configuracion/${clave}`, { method: "PATCH", body: JSON.stringify({ valor }) }),
   bitacora: (limite = 100) => peticion(`/admin/bitacora?limite=${limite}`),
+
+  // La pantalla principal: qué bloques se ven, en qué orden y para qué roles.
+  misBloques: () => peticion("/panel/bloques"),
+  panelConfiguracion: () => peticion("/panel/configuracion"),
+  panelCambiar: (clave, cambios) =>
+    peticion(`/panel/configuracion/${clave}`,
+             { method: "PATCH", body: JSON.stringify(cambios) }),
+  panelReordenar: (claves) =>
+    peticion("/panel/configuracion/orden",
+             { method: "POST", body: JSON.stringify({ claves }) }),
   colaboradores: () => peticion("/rrhh/colaboradores"),
 
   miFirma: () => peticion("/firmas/mia"),

@@ -50,6 +50,9 @@ const MODULOS = [
   {
     id: "admin", texto: "Administrador", roles: ["admin"],
     opciones: [
+      // Lo primero del menú del administrador es lo que ven las 350
+      // personas al entrar. Antes eso solo se cambiaba editando el HTML.
+      { texto: "Pantalla principal", href: "pantalla-principal.html" },
       { texto: "Configuración", href: "administracion.html#configuracion" },
       { texto: "Usuarios", href: "administracion.html#usuarios" },
       { texto: "Tipos de solicitud", href: "administracion.html#tipos" },
