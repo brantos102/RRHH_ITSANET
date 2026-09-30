@@ -116,3 +116,61 @@ def test_si_de_verdad_no_esta_lo_dice_y_se_detiene(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as salida:
         ch.localizar(Path("NO_EXISTE.xlsx"))
     assert salida.value.code == 2
+
+
+def test_encuentra_el_archivo_aunque_la_extension_sea_otra(tmp_path, monkeypatch):
+    """Windows esconde las extensiones, y ahí se pierde media tarde.
+
+    En el explorador se lee «REGISTRO_DE_VACACIONES» y no hay forma de saber
+    si el archivo es .xlsx, .xlsm o .xlsb. Quien lo teclea pone .xlsx porque
+    es lo que suena, y recibe un «no existe» sobre un archivo que tiene
+    delante.
+    """
+    real = _libro(tmp_path, {"REGISTRO DE VACACIONE": True},
+                  nombre="REGISTRO_DE_VACACIONES.xlsm")
+    monkeypatch.setattr(ch, "DONDE_BUSCAR", (tmp_path,))
+    assert ch.localizar(Path("REGISTRO_DE_VACACIONES.xlsx")) == real
+
+
+def test_tambien_si_esta_escrito_con_otras_mayusculas(tmp_path, monkeypatch):
+    real = _libro(tmp_path, {"REGISTRO DE VACACIONE": True},
+                  nombre="Registro_De_Vacaciones.xlsx")
+    monkeypatch.setattr(ch, "DONDE_BUSCAR", (tmp_path,))
+    assert ch.localizar(Path("REGISTRO_DE_VACACIONES.xlsx")) == real
+
+
+def test_con_dos_extensiones_del_mismo_nombre_pregunta(tmp_path, monkeypatch):
+    """Un .xlsx y un .xlsm con el mismo nombre suelen ser dos versiones.
+
+    Elegir por el programa cuál es la buena es decidir de qué año son los
+    datos que se cargan, y eso no lo decide un guion.
+    """
+    _libro(tmp_path, {"REGISTRO DE VACACIONE": True}, nombre="HOJA.xlsx")
+    _libro(tmp_path, {"REGISTRO DE VACACIONE": True}, nombre="HOJA.xlsm")
+    monkeypatch.setattr(ch, "DONDE_BUSCAR", (tmp_path,))
+    with pytest.raises(SystemExit) as salida:
+        ch.localizar(Path("HOJA.xlsb"))
+    assert salida.value.code == 2
+
+
+def test_no_confunde_el_archivo_temporal_que_deja_excel(tmp_path, monkeypatch):
+    """Con el libro abierto, Excel deja un «~$nombre.xlsx» al lado.
+
+    No es una hoja: es un candado de bloqueo de unos pocos bytes, y abrirlo
+    falla de una forma que no se entiende.
+    """
+    real = _libro(tmp_path, {"REGISTRO DE VACACIONE": True}, nombre="HOJA.xlsm")
+    (tmp_path / "~$HOJA.xlsx").write_bytes(b"bloqueo")
+    monkeypatch.setattr(ch, "DONDE_BUSCAR", (tmp_path,))
+    assert ch.localizar(Path("HOJA.xlsx")) == real
+
+
+def test_la_carpeta_que_se_escribio_se_mira_primero(tmp_path, monkeypatch):
+    """Si alguien dice «..\\hoja.xlsx», ahí es donde cree que está."""
+    arriba = tmp_path / "arriba"
+    abajo = tmp_path / "arriba" / "repo"
+    abajo.mkdir(parents=True)
+    real = _libro(arriba, {"REGISTRO DE VACACIONE": True}, nombre="HOJA.xlsm")
+
+    monkeypatch.setattr(ch, "DONDE_BUSCAR", (abajo,))
+    assert ch.localizar(arriba / "HOJA.xlsx") == real

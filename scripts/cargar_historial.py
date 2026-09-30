@@ -327,27 +327,61 @@ def localizar(pedido: Path) -> Path:
     # actual y la raíz son el mismo, y listarlo dos veces hace dudar de si el
     # guion sabe dónde está mirando.
     carpetas = list(dict.fromkeys(c.resolve() for c in DONDE_BUSCAR))
+    # La carpeta que el usuario escribió delante del nombre va primero: si
+    # dijo «..\hoja.xlsx», ahí es donde cree que está.
+    if pedido.parent != Path("."):
+        carpetas.insert(0, pedido.parent.resolve())
+        carpetas = list(dict.fromkeys(carpetas))
 
+    # 1. El nombre tal cual.
     for carpeta in carpetas:
         candidato = carpeta / pedido.name
         if candidato.exists():
-            print(f"{AMARILLO}«{pedido}» no está ahí; se usa "
-                  f"{candidato}{FIN}")
+            if candidato != pedido.resolve():
+                print(f"{AMARILLO}«{pedido}» no está ahí; se usa {candidato}{FIN}")
             return candidato
+
+    # 2. El mismo nombre con otra extensión, o escrito con otras mayúsculas.
+    #
+    #    Windows esconde las extensiones: en el explorador se lee
+    #    «REGISTRO_DE_VACACIONES» y nadie puede saber si el archivo es .xlsx,
+    #    .xlsm o .xlsb. Quien lo teclea pone .xlsx porque es lo que suena, y
+    #    recibe un «no existe» sobre un archivo que está delante de sus ojos.
+    buscado = clave(pedido.stem)
+    for carpeta in carpetas:
+        if not carpeta.is_dir():
+            continue
+        iguales = sorted(f for f in carpeta.glob("*.xls*")
+                         if clave(f.stem) == buscado and not f.name.startswith("~$"))
+        if len(iguales) == 1:
+            print(f"{AMARILLO}«{pedido.name}» no está; se usa {iguales[0]}{FIN}")
+            print(f"{GRIS}   (mismo nombre, otra extensión: Windows las esconde){FIN}")
+            return iguales[0]
+        if len(iguales) > 1:
+            print(f"{ROJO}Hay varios «{pedido.stem}» en {carpeta}:{FIN}")
+            for f in iguales:
+                print(f"      {f.name}")
+            print("   Diga cuál, con su extensión.")
+            raise SystemExit(2)
 
     print(f"{ROJO}No se encuentra «{pedido}».{FIN}")
     print(f"   Se buscó en: {', '.join(str(c) for c in carpetas)}")
 
     # Lo que sí hay cerca, para no dejar a nadie adivinando el nombre exacto.
+    # Con la extensión a la vista, que es justo lo que el explorador oculta.
     parecidos = sorted({
         str(f) for carpeta in carpetas if carpeta.is_dir()
         for f in carpeta.glob("*.xls*")
-        if "VACACION" in clave(f.name)
+        if "VACACION" in clave(f.name) and not f.name.startswith("~$")
     })
     if parecidos:
         print(f"\n{GRIS}Hojas de vacaciones que sí están cerca:{FIN}")
         for f in parecidos[:8]:
             print(f"   {f}")
+        print(f"{GRIS}   Copie una de estas rutas entera, con su extensión.{FIN}")
+    else:
+        print(f"\n{GRIS}No hay ninguna hoja de cálculo con «vacaciones» en el "
+              f"nombre en esas carpetas.{FIN}")
     raise SystemExit(2)
 
 
