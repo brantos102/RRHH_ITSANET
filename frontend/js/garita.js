@@ -180,9 +180,26 @@ function detenerCamara() {
   $("caja-camara").classList.add("hidden");
 }
 
-/* ------------------------------------------------------- panel del día */
-function tarjetaPersona(p, autorizada) {
+/* ----------------------------------------------------- personal de hoy
+
+   El estado sale de `situacion`, que es lo mismo que mira el panel de
+   arriba. Antes esta lista lo deducía de `qr_usado_en` y el panel de los
+   registros de acceso: dos fuentes para el mismo hecho, y dos sitios de la
+   misma pantalla diciendo cosas distintas sobre si alguien salió o no. Eso
+   no se discute, se elimina. */
+const ETIQUETA_SITUACION = {
+  sin_salir:      ["puede salir", "text-emerald-700"],
+  fuera:          ["fuera", "text-amber-700"],
+  fuera_atrasado: ["fuera y atrasado", "text-rose-700"],
+  no_vuelve_hoy:  ["fuera, no vuelve hoy", "text-sky-700"],
+  completo:       ["salió y volvió", "text-slate-500"],
+};
+
+function tarjetaPersona(p, autorizada, situacion) {
   const horas = p.hora_inicio ? `${p.hora_inicio} a ${p.hora_fin}` : "todo el día";
+  const [texto, tinta] = autorizada
+    ? (ETIQUETA_SITUACION[situacion] || ETIQUETA_SITUACION.sin_salir)
+    : ["en trámite", "text-amber-700"];
   return `
     <div class="flex items-center gap-3 rounded-xl px-3 py-2.5 ${
       autorizada ? "bg-emerald-50 ring-1 ring-emerald-100" : "bg-amber-50 ring-1 ring-amber-100"}">
@@ -196,23 +213,92 @@ function tarjetaPersona(p, autorizada) {
           ${esc(p.cedula)} · ${esc(p.departamento || "—")} · ${esc(horas)}
         </p>
       </div>
-      <span class="shrink-0 text-xs font-medium ${autorizada ? "text-emerald-700" : "text-amber-700"}">
-        ${autorizada ? (p.qr_usado_en ? "ya salió" : "puede salir") : "en trámite"}
-      </span>
+      <span class="shrink-0 text-xs font-medium ${tinta}">${texto}</span>
     </div>`;
 }
 
 async function cargarHoy() {
   const datos = await api.garitaHoy();
   $("cuenta-hoy").textContent = `${datos.aprobadas.length} autorizada(s)`;
+  const situaciones = Object.fromEntries(
+    (datos.movimientos || []).map((m) => [m.request_id, m.situacion]));
   $("lista-hoy").innerHTML = datos.aprobadas.length
-    ? datos.aprobadas.map((p) => tarjetaPersona(p, true)).join("")
+    ? datos.aprobadas.map((p) => tarjetaPersona(p, true, situaciones[p.id])).join("")
     : `<p class="rounded-xl bg-slate-50 p-4 text-center text-sm text-slate-500">
          Nadie tiene autorización vigente hoy.</p>`;
 
   $("caja-tramite").classList.toggle("hidden", datos.en_tramite.length === 0);
   $("cuenta-tramite").textContent = datos.en_tramite.length;
-  $("lista-tramite").innerHTML = datos.en_tramite.map((p) => tarjetaPersona(p, false)).join("");
+  $("lista-tramite").innerHTML = datos.en_tramite.map((p) => tarjetaPersona(p, false, null)).join("");
+
+  pintarPanelDelDia(datos);
+}
+
+/* --------------------------------------------------------- panel del día
+
+   Cinco situaciones, y solo una exige actuar. El atrasado va primero, en
+   rojo y con los minutos contados, porque es lo único que el guardia tiene
+   que hacer algo al respecto; el resto es contexto.
+
+   «No vuelve hoy» merece su propia categoría: quien salió por una ausencia
+   de jornada completa no está atrasado, y marcarlo como tal sería una falsa
+   alarma diaria que enseña a ignorar el panel. */
+const SITUACION = {
+  fuera_atrasado: ["Fuera y atrasado", "bg-rose-50 ring-rose-300", "text-rose-800"],
+  fuera:          ["Fuera, se le espera", "bg-amber-50 ring-amber-200", "text-amber-800"],
+  sin_salir:      ["Sin salir todavía", "bg-slate-50 ring-slate-200", "text-slate-600"],
+  no_vuelve_hoy:  ["Fuera, no vuelve hoy", "bg-sky-50 ring-sky-200", "text-sky-800"],
+  completo:       ["Salió y volvió", "bg-emerald-50 ring-emerald-200", "text-emerald-800"],
+};
+
+const soloHora = (v) => v
+  ? new Date(v).toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" })
+  : "—";
+
+function conAtraso(minutos) {
+  const h = Math.floor(minutos / 60), m = minutos % 60;
+  return h ? `${h} h ${m} min` : `${m} min`;
+}
+
+function pintarPanelDelDia(datos) {
+  const gente = datos.movimientos || [];
+  $("panel-dia").classList.toggle("hidden", gente.length === 0);
+  if (!gente.length) return;
+
+  $("panel-cuenta").innerHTML = Object.entries(SITUACION)
+    .filter(([clave]) => datos.cuenta?.[clave])
+    .map(([clave, [texto, fondo, tinta]]) => `
+      <span class="rounded-full px-2.5 py-1 font-medium ring-1 ${fondo} ${tinta}">
+        ${datos.cuenta[clave]} ${texto.toLowerCase()}
+      </span>`).join("");
+
+  $("panel-lista").innerHTML = gente.map((p) => {
+    const [texto, fondo, tinta] = SITUACION[p.situacion] || SITUACION.sin_salir;
+    return `
+    <article class="flex flex-wrap items-center gap-3 rounded-xl p-3 ring-1 ${fondo}">
+      <div class="min-w-0 flex-1">
+        <p class="font-medium">${esc(p.nombre)}</p>
+        <p class="text-xs text-slate-600">
+          ${esc(p.cedula)}${p.cargo ? ` · ${esc(p.cargo)}` : ""} · Nº ${p.folio}
+          ${p.hora_inicio ? ` · permiso de ${esc(p.hora_inicio)} a ${esc(p.hora_fin)}` : ""}
+        </p>
+        <p class="mt-0.5 text-xs ${tinta}">
+          ${p.salio_en ? `Salió ${soloHora(p.salio_en)}` : "Aún no ha salido"}${
+            p.retorno_en ? ` · volvió ${soloHora(p.retorno_en)}` : ""}${
+            p.debe_volver_hoy && !p.retorno_en
+              ? ` · debía volver ${soloHora(p.se_espera_a_las)}` : ""}
+        </p>
+      </div>
+      <div class="shrink-0 text-right">
+        <span class="rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${fondo} ${tinta}">
+          ${texto}
+        </span>
+        ${p.minutos_de_atraso
+          ? `<p class="mt-1 text-sm font-bold text-rose-700">${conAtraso(p.minutos_de_atraso)}</p>`
+          : ""}
+      </div>
+    </article>`;
+  }).join("");
 }
 
 async function cargarVisitas() {

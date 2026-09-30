@@ -263,9 +263,42 @@ async def personal_de_hoy(guardia: Guardia) -> dict:
          "hora_fin": str(f["hora_fin"])[:5] if f["hora_fin"] else None}
         for f in filas
     ]
+    # En qué punto va cada uno. La pregunta que se hace un guardia a las
+    # cuatro de la tarde no es «¿quién tiene permiso?» sino «¿quién está
+    # fuera y ya debería haber vuelto?», y eso no se puede responder mirando
+    # una lista de autorizaciones.
+    panel = await obtener_todos(
+        """select request_id, folio, cedula, nombre, cargo, departamento,
+                  tipo, categoria, hora_inicio, hora_fin,
+                  salio_en, retorno_en, retorno_exceso_minutos,
+                  debe_volver_hoy, se_espera_a_las, situacion, minutos_de_atraso
+             from public.v_garita_hoy
+            order by case situacion
+                       when 'fuera_atrasado' then 0
+                       when 'fuera'          then 1
+                       when 'sin_salir'      then 2
+                       when 'no_vuelve_hoy'  then 3
+                       else 4 end,
+                     minutos_de_atraso desc nulls last, nombre"""
+    )
+    movimientos = [
+        {**f, "request_id": str(f["request_id"]),
+         "hora_inicio": str(f["hora_inicio"])[:5] if f["hora_inicio"] else None,
+         "hora_fin": str(f["hora_fin"])[:5] if f["hora_fin"] else None,
+         "minutos_de_atraso": int(f["minutos_de_atraso"])
+                              if f["minutos_de_atraso"] is not None else None}
+        for f in panel
+    ]
+    cuenta: dict[str, int] = {}
+    for m in movimientos:
+        cuenta[m["situacion"]] = cuenta.get(m["situacion"], 0) + 1
+
     return {
         "aprobadas": [f for f in normalizadas if f["estado"] == "aprobado"],
         "en_tramite": [f for f in normalizadas if f["estado"] != "aprobado"],
+        "movimientos": movimientos,
+        "cuenta": cuenta,
+        "atrasados": cuenta.get("fuera_atrasado", 0),
     }
 
 

@@ -40,6 +40,8 @@ BACKEND = "http://localhost:8000"
 EMPLEADA = "0926687856"
 ADMIN = "0602910945"
 GUARDIA = "1713175071"
+JEFE = "1710034065"
+RRHH = "0703886002"
 
 
 class Falla(Exception):
@@ -385,6 +387,137 @@ async def recorrido_garita(nav, capturas) -> Paso:
     return paso
 
 
+async def recorrido_panel_garita(nav, capturas) -> Paso:
+    """El panel del día: quién está fuera y a quién ya se le pasó la hora.
+
+    La garita tenía la lista de quién tiene permiso hoy. Lo que no tenía era
+    la respuesta a la pregunta que el guardia se hace a media tarde: de esos,
+    ¿quién salió y todavía no vuelve? Se comprueba además que las dos listas
+    de la pantalla digan lo mismo: durante un rato una miraba `qr_usado_en` y
+    la otra los registros de acceso, y la misma pantalla se contradecía sobre
+    si alguien había salido.
+
+    Usa al jefe y a Talento Humano, no a la empleada: el recorrido `garita`
+    ya le crea a ella un permiso de hoy, y el sistema —con razón— no admite
+    dos ausencias solapadas de la misma persona.
+    """
+    from app.db import obtener_todos, obtener_uno
+
+    paso = Paso("panel-garita")
+
+    # El tipo de permiso se elige por lo que la comprobación necesita y no
+    # por su nombre: uno que admita horas y no exija respaldo ni justificación,
+    # que aquí no hay ninguna que dar. Su tope de horas manda sobre el largo
+    # de las franjas: el sistema rechaza un permiso que lo pase, y tiene razón.
+    tipo = await obtener_uno(
+        """select id, coalesce(max_horas, 4)::numeric as tope
+             from public.permission_types
+            where activo and admite_horas
+              and not coalesce(descuenta_vacaciones, false)
+              and not coalesce(requiere_adjunto, false)
+              and not coalesce(requiere_justificacion, false)
+            order by coalesce(max_horas, 4) desc, id limit 1""")
+
+    async def permiso(cedula: str, desde: str, hasta: str) -> dict:
+        fila = await obtener_uno(
+            """insert into public.requests
+                 (user_id, tipo, permission_type_id, fecha_inicio, fecha_fin,
+                  hora_inicio, hora_fin, horas_solicitadas, descripcion,
+                  justificacion, estado)
+               select u.id, 'permiso', %s, current_date, current_date,
+                      %s::time, %s::time,
+                      round(extract(epoch from (%s::time - %s::time)) / 3600.0, 2),
+                      'Comprobacion automatica del panel de garita',
+                      'Permiso creado por scripts/pruebas_navegador.py para '
+                      'comprobar el panel de movimientos del dia',
+                      'pendiente_jefe'
+                 from public.users u where u.cedula = %s
+               returning id""",
+            (tipo["id"], desde, hasta, hasta, desde, cedula))
+        if fila is None:
+            raise Falla(f"No se pudo crear el permiso de prueba de {cedula}.")
+        for etapa in ("pendiente_rrhh", "aprobado"):
+            fila = await obtener_uno(
+                """update public.requests set estado = %s
+                    where id = %s returning id, folio, qr_hash""",
+                (etapa, fila["id"]))
+        return fila
+
+    # La franja vencida se calcula desde la hora actual y no con un valor
+    # fijo, para que el atraso sea real a cualquier hora del día. De
+    # madrugada no hay horas hacia atrás sin cambiar de día, así que se cae a
+    # una franja mínima que a las 00:02 ya está vencida igual.
+    h = await obtener_uno(
+        """select case when current_time > time '04:00'
+                       then to_char(now() - interval '40 minutes'
+                                    - least(%s, 2) * interval '1 hour', 'HH24:MI')
+                       else '00:01' end as desde,
+                  case when current_time > time '04:00'
+                       then to_char(now() - interval '40 minutes', 'HH24:MI')
+                       else '00:02' end as hasta,
+                  to_char(time '00:01' + least(%s, 4) * interval '1 hour',
+                          'HH24:MI') as fin_vigente""",
+        (tipo["tope"], tipo["tope"]))
+    atrasada = await permiso(JEFE, h["desde"], h["hasta"])
+    # Y alguien con permiso vigente que todavía no ha usado su código. Su
+    # franja empieza a las 00:01 a propósito: así no depende de la hora a la
+    # que se corra la prueba ni se pasa de medianoche por la noche.
+    await permiso(RRHH, "00:01", h["fin_vigente"])
+    paso.ok(f"permiso Nº {atrasada['folio']} vencido a las {h['hasta']} y otro sin usar")
+
+    pg = await (await nav.new_context(viewport={"width": 1280, "height": 1000})).new_page()
+    await _entrar(pg, GUARDIA)
+    await pg.goto(f"{FRONTEND}/garita.html")
+    await pg.wait_for_selector("#entrada-qr", timeout=15000)
+
+    # La salida se registra por la pantalla y no por la base: lo que se
+    # comprueba es que el panel refleje lo que hace el guardia.
+    await pg.fill("#entrada-qr", str(atrasada["qr_hash"]))
+    await pg.press("#entrada-qr", "Enter")
+    await pg.wait_for_selector("#veredicto[open]", timeout=15000)
+    await pg.click("#veredicto-cerrar")
+    await pg.wait_for_timeout(900)
+
+    if not await pg.locator("#panel-dia").is_visible():
+        raise Falla("Con dos permisos aprobados hoy, el panel del día no se dibuja.")
+
+    cuenta = " ".join((await pg.inner_text("#panel-cuenta")).split())
+    if "atrasado" not in cuenta.lower():
+        raise Falla(f"El recuento del panel dice «{cuenta}» y no menciona a nadie atrasado.")
+    paso.ok(f"recuento: {cuenta[:80]}")
+
+    primera = " ".join((await pg.locator("#panel-lista > article").first.inner_text()).split())
+    if "Fuera y atrasado" not in primera:
+        raise Falla("Quien está atrasado no encabeza el panel: "
+                    f"el primero dice «{primera[:90]}».")
+    if "min" not in primera:
+        raise Falla("El atrasado aparece sin los minutos de atraso contados.")
+    paso.ok(f"encabeza el panel: {primera[:95]}")
+
+    fila = await obtener_uno(
+        "select nombre from public.v_garita_hoy where request_id = %s", (atrasada["id"],))
+    nombre = fila["nombre"]
+
+    # Las dos listas de la misma pantalla, sobre la misma persona.
+    tarjeta = pg.locator("#lista-hoy > div", has_text=nombre).first
+    if not await tarjeta.count():
+        raise Falla(f"«{nombre}» está en el panel pero no en la lista de autorizados.")
+    if "fuera y atrasado" not in (await tarjeta.inner_text()).lower():
+        raise Falla(f"La misma pantalla se contradice sobre «{nombre}»: el panel dice "
+                    "«fuera y atrasado» y la lista de autorizados dice otra cosa.")
+    paso.ok("las dos listas de la pantalla coinciden en quién salió")
+
+    sin_salir = await obtener_todos(
+        "select 1 from public.v_garita_hoy where situacion = 'sin_salir'")
+    if not sin_salir:
+        raise Falla("Quien tiene permiso y no ha usado su código debía constar «sin salir».")
+    paso.ok(f"{len(sin_salir)} con permiso vigente y sin salir todavía")
+
+    if capturas:
+        await pg.screenshot(path=str(capturas / "garita-panel-del-dia.png"), full_page=True)
+    return paso
+
+
 async def recorrido_menu(nav, capturas) -> Paso:
     """La navegación, que ahora es vertical y tiene dos formas."""
     paso = Paso("menu")
@@ -576,6 +709,8 @@ RECORRIDOS = {
     "chat": (recorrido_chat, "Consulta a Talento Humano, su bandeja y la respuesta"),
     "ficha": (recorrido_ficha, "Ficha personal, quién decide cada dato, confirmación de RR.HH."),
     "garita": (recorrido_garita, "Salida, regreso y exceso sobre la hora autorizada"),
+    "panel-garita": (recorrido_panel_garita,
+                     "Panel del día: quién está fuera y a quién se le pasó la hora"),
     "menu": (recorrido_menu, "La navegación vertical: barra en escritorio, cajón en teléfono"),
     "temporal": (recorrido_temporal, "Personal temporal: jornada, cierre manual y semana"),
 }
