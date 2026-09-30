@@ -39,6 +39,22 @@ def fallo(mensaje: str, remedio: str) -> None:
     problemas.append(mensaje)
 
 
+def _hoja_de_vacaciones() -> Path:
+    """La hoja de Talento Humano, si está a mano.
+
+    Se busca al lado del repositorio y en Documentos, que es donde acaba
+    siempre. Encontrarla permite dar el comando entero, con la ruta que
+    funciona, en vez de un ejemplo que hay que adaptar.
+    """
+    for carpeta in (RAIZ.parent, RAIZ, Path.cwd(), Path.home() / "Documents"):
+        if not carpeta.is_dir():
+            continue
+        for archivo in sorted(carpeta.glob("*.xls*")):
+            if "VACACION" in archivo.name.upper():
+                return archivo
+    return RAIZ.parent / "REGISTRO_DE_VACACIONES.xlsx"
+
+
 def revisar_versiones() -> None:
     """Un backend con librerías distintas a las ancladas falla de formas raras.
 
@@ -340,9 +356,16 @@ async def revisar_base() -> int:
         print(f"  {AVISO} Sin historial de vacaciones cargado")
         print(f"      {GRIS}El colaborador verá «Todavía no hay vacaciones registradas a su"
               f" nombre».{FIN}")
-        print(f"      {GRIS}Cárguelo desde la hoja de Talento Humano:{FIN}")
-        print("          python scripts/cargar_historial.py REGISTRO_DE_VACACIONES.xlsx")
-        print("          python scripts/cargar_historial.py REGISTRO_DE_VACACIONES.xlsx --aplicar")
+        print(f"      {GRIS}Cárguelo desde la hoja de Talento Humano. Primero sin "
+              f"--aplicar, que solo dice qué haría:{FIN}")
+        # La ruta completa del guion, no «scripts/...»: esa forma solo funciona
+        # si uno está parado en la raíz del repositorio, y quien acaba de
+        # ejecutar esto puede estar en cualquier sitio. Un guion que «no
+        # existe» cuando existe es media hora perdida.
+        guion = RAIZ / "scripts" / "cargar_historial.py"
+        hoja = _hoja_de_vacaciones()
+        print(f"          python \"{guion}\" \"{hoja}\"")
+        print(f"          python \"{guion}\" \"{hoja}\" --aplicar")
 
     # Quien no tiene correo entra por «primer ingreso» probando su identidad.
     # Si además le falta la fecha de nacimiento o la de ingreso, ese camino

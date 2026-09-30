@@ -42,13 +42,29 @@ sys.path.insert(0, str(RAIZ / "backend"))
 
 VERDE, ROJO, AMARILLO, GRIS, FIN = "\033[92m", "\033[91m", "\033[93m", "\033[90m", "\033[0m"
 
+# La pestaña que manda, tal como se llama hoy: «REGISTRO DE VACACIONE», sin
+# la ese final. Es una errata de quien creó el archivo, pero es el nombre
+# real y va primero.
+#
+# HAY OTRA PESTAÑA QUE SE LE PARECE. El mismo archivo trae también «registro
+# de vacaciones» —en minúsculas y con ese—, hoy vacía. Cargar la equivocada
+# no daría error: daría cero eventos, o los de otra versión de la hoja, y eso
+# no se nota. Por eso el nombre exacto gana siempre, y el parecido solo sirve
+# cuando el exacto no está y no hay ninguna duda de cuál es.
 HOJA = "REGISTRO DE VACACIONE"
+HOJA_PREFIJO = "REGISTRO DE VACACION"
 
 # Las columnas de la hoja, por posición. Si cambian de sitio, esto se rompe
 # ruidosamente al comprobar el encabezado, que es lo que se quiere.
 COL = {"nombre": 0, "estado": 1, "ingreso": 2, "inicio": 11, "fin": 12,
        "dias": 13, "disponible": 14}
 ENCABEZADOS = {0: "NOMBRE", 1: "ESTADO", 11: "inicio", 12: "fin"}
+
+# Dónde buscar el archivo cuando lo que se teclea no existe ahí. El guion vive
+# dentro del repositorio y la hoja suele estar al lado, en la carpeta de
+# arriba: quien se para en una y nombra la otra acaba con un error que habla
+# de rutas y no de lo que pasó.
+DONDE_BUSCAR = (Path.cwd(), RAIZ, RAIZ.parent, Path.home() / "Documents")
 
 
 def clave(texto) -> str:
@@ -65,11 +81,39 @@ def leer_hoja(archivo: Path) -> tuple[list[dict], Counter]:
         raise SystemExit(2)
 
     libro = openpyxl.load_workbook(archivo, data_only=True)
-    if HOJA not in libro.sheetnames:
-        print(f"{ROJO}El archivo no tiene la hoja «{HOJA}».{FIN}")
-        print(f"   Tiene: {', '.join(libro.sheetnames)}")
-        raise SystemExit(2)
-    hoja = libro[HOJA]
+
+    # 1. El nombre exacto, ignorando mayúsculas y tildes. Es el caso normal y
+    #    resuelve la ambigüedad con la otra pestaña parecida del mismo libro.
+    exactas = [h for h in libro.sheetnames if clave(h) == clave(HOJA)]
+    if len(exactas) == 1:
+        elegida = exactas[0]
+    else:
+        # 2. Si el nombre cambió —alguien corrige la errata y le pone la ese—,
+        #    se acepta el parecido, pero solo si no hay dos: entre dos hojas
+        #    que podrían ser, elegir es adivinar, y adivinar mal aquí no se
+        #    nota nunca.
+        parecidas = [h for h in libro.sheetnames
+                     if clave(h).startswith(HOJA_PREFIJO)]
+        if len(parecidas) == 1:
+            elegida = parecidas[0]
+            print(f"{AMARILLO}No hay una hoja «{HOJA}»; se usa «{elegida}», "
+                  f"que es la única parecida.{FIN}")
+        else:
+            if not parecidas:
+                print(f"{ROJO}El archivo no tiene la hoja «{HOJA}».{FIN}")
+            else:
+                print(f"{ROJO}Hay {len(parecidas)} hojas que podrían ser y "
+                      f"ninguna se llama «{HOJA}»:{FIN}")
+                for h in parecidas:
+                    print(f"      «{h}»")
+                print(f"   Renombre la buena como «{HOJA}», o quite las que "
+                      "sobren. Cargar la equivocada no da error: da datos de otra.")
+            print(f"   El archivo tiene: {', '.join(libro.sheetnames)}")
+            raise SystemExit(2)
+
+    hoja = libro[elegida]
+    print(f"{GRIS}Archivo: {archivo}{FIN}")
+    print(f"{GRIS}Hoja:    «{elegida}»{FIN}")
 
     # Que las columnas sigan donde estaban. Cargar por posición sin comprobar
     # el encabezado es la forma más silenciosa de meter fechas en el campo de
@@ -268,6 +312,45 @@ async def principal(archivo: Path, aplicar: bool, informe: Path | None) -> int:
     return 0
 
 
+def localizar(pedido: Path) -> Path:
+    """El archivo que se pidió, buscándolo donde suele estar.
+
+    El guion vive dentro del repositorio y la hoja de Talento Humano suele
+    estar en la carpeta de arriba, al lado del repositorio. Quien se para en
+    una y nombra la otra recibía «No existe», que es cierto y no ayuda: la
+    hoja está, a un paso de donde se buscó.
+    """
+    if pedido.exists():
+        return pedido
+
+    # Sin repetir: al ejecutarlo desde la raíz del repositorio, el directorio
+    # actual y la raíz son el mismo, y listarlo dos veces hace dudar de si el
+    # guion sabe dónde está mirando.
+    carpetas = list(dict.fromkeys(c.resolve() for c in DONDE_BUSCAR))
+
+    for carpeta in carpetas:
+        candidato = carpeta / pedido.name
+        if candidato.exists():
+            print(f"{AMARILLO}«{pedido}» no está ahí; se usa "
+                  f"{candidato}{FIN}")
+            return candidato
+
+    print(f"{ROJO}No se encuentra «{pedido}».{FIN}")
+    print(f"   Se buscó en: {', '.join(str(c) for c in carpetas)}")
+
+    # Lo que sí hay cerca, para no dejar a nadie adivinando el nombre exacto.
+    parecidos = sorted({
+        str(f) for carpeta in carpetas if carpeta.is_dir()
+        for f in carpeta.glob("*.xls*")
+        if "VACACION" in clave(f.name)
+    })
+    if parecidos:
+        print(f"\n{GRIS}Hojas de vacaciones que sí están cerca:{FIN}")
+        for f in parecidos[:8]:
+            print(f"   {f}")
+    raise SystemExit(2)
+
+
 async def _con_cierre(archivo, aplicar, informe) -> int:
     from app.db import cerrar_pool
     try:
@@ -284,7 +367,5 @@ if __name__ == "__main__":
     p.add_argument("--informe", type=Path, default=None,
                    help="CSV con el detalle de lo emparejado, para cotejar.")
     a = p.parse_args()
-    if not a.archivo.exists():
-        print(f"{ROJO}No existe {a.archivo}{FIN}")
-        raise SystemExit(2)
-    raise SystemExit(asyncio.run(_con_cierre(a.archivo, a.aplicar, a.informe)))
+    archivo = localizar(a.archivo)
+    raise SystemExit(asyncio.run(_con_cierre(archivo, a.aplicar, a.informe)))
