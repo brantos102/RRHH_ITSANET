@@ -16,3 +16,6 @@ build/node_modules/
 # La carga generada lleva datos personales de la planilla (LOPDP): se
 # genera en cada máquina con scripts/importar_planilla.py y no se versiona.
 supabase/carga_inicial.sql
+
+# Informes generados: se regeneran con scripts/informe_devengo.py
+informe_devengo.pdf

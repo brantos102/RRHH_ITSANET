@@ -27,7 +27,7 @@ const CARGADORES = {
   usuarios: cargarUsuarios, tipos: cargarTipos, feriados: cargarFeriados,
   antiguedades: cargarAntiguedades, configuracion: cargarConfiguracion,
   bitacora: cargarBitacora, cotejo: cargarCotejo,
-  "cambios-ficha": cargarCambiosFicha,
+  "cambios-ficha": cargarCambiosFicha, lineamientos: cargarLineamientos,
 };
 
 function mostrar(seccion) {
@@ -557,6 +557,101 @@ async function cargarBitacora() {
 }
 
 $("filtro-bitacora").addEventListener("input", () => cargarBitacora());
+
+/* ----------------------------------------------------------- lineamientos
+
+   Lo que el colaborador lee antes de enviar una solicitud. Estaba escrito
+   dentro del HTML, que es tanto como decir que para cambiar una coma hacía
+   falta un programador. Son reglas internas de la empresa —cuántos días de
+   anticipación, si el período se toma entero— y cambian por una circular.
+
+   Se guarda al salir del campo y no con un botón por renglón: con ocho
+   lineamientos, ocho botones de guardar es una pantalla de botones. */
+
+const AMBITO = {
+  vacacion: ["Vacaciones", "bg-sky-100 text-sky-800 ring-sky-200"],
+  permiso:  ["Permisos", "bg-violet-100 text-violet-800 ring-violet-200"],
+  ambos:    ["Los dos", "bg-slate-100 text-slate-700 ring-slate-200"],
+};
+
+async function cargarLineamientos() {
+  const lista = await api.lineamientos();
+  $("lista-lineamientos").innerHTML = lista.length ? lista.map((l) => {
+    const [texto, clase] = AMBITO[l.ambito] || AMBITO.ambos;
+    return `
+    <div class="flex flex-wrap items-start gap-3 px-5 py-3" data-lineamiento="${l.id}">
+      <span class="mt-1.5 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ${clase}">
+        ${texto}
+      </span>
+      <textarea data-texto rows="1" maxlength="400"
+                class="min-w-0 flex-1 resize-none rounded-lg border-0 bg-transparent px-2 py-1.5
+                       text-sm ring-1 ring-transparent hover:ring-slate-200
+                       focus:bg-white focus:ring-2 focus:ring-slate-900 ${
+                         l.activo ? "" : "text-slate-400 line-through"}"
+                >${esc(l.texto)}</textarea>
+      <label class="mt-1 flex shrink-0 items-center gap-1.5 text-xs text-slate-600">
+        <input type="checkbox" data-activo ${l.activo ? "checked" : ""}
+               class="rounded border-slate-300">
+        Se muestra
+      </label>
+      ${l.actualizado_por_nombre
+        ? `<p class="w-full pl-2 text-xs text-slate-400">Último cambio: ${
+             esc(l.actualizado_por_nombre)}</p>` : ""}
+    </div>`;
+  }).join("") : `<p class="px-5 py-10 text-center text-sm text-slate-500">
+                   Sin lineamientos. El recuadro no aparecerá en el formulario.</p>`;
+
+  // Los textos crecen con lo que se escribe: un renglón fijo esconde la
+  // mitad de lo que uno acaba de teclear.
+  $("lista-lineamientos").querySelectorAll("[data-texto]").forEach((campo) => {
+    const ajustar = () => {
+      campo.style.height = "auto";
+      campo.style.height = `${campo.scrollHeight}px`;
+    };
+    ajustar();
+    campo.addEventListener("input", ajustar);
+    campo.addEventListener("change", async () => {
+      const id = campo.closest("[data-lineamiento]").dataset.lineamiento;
+      const texto = campo.value.trim();
+      if (texto.length < 5) {
+        avisar("El lineamiento es demasiado corto. Se dejó como estaba.", true);
+        return cargarLineamientos();
+      }
+      try {
+        await api.cambiarLineamiento(id, { texto });
+        avisar("Guardado.");
+      } catch (e) {
+        avisar(e.message || "No se pudo guardar.", true);
+        cargarLineamientos();
+      }
+    });
+  });
+
+  $("lista-lineamientos").querySelectorAll("[data-activo]").forEach((casilla) =>
+    casilla.addEventListener("change", async () => {
+      const id = casilla.closest("[data-lineamiento]").dataset.lineamiento;
+      try {
+        await api.cambiarLineamiento(id, { activo: casilla.checked });
+        cargarLineamientos();
+      } catch (e) {
+        avisar(e.message || "No se pudo guardar.", true);
+        cargarLineamientos();
+      }
+    }));
+}
+
+$("btn-nuevo-lineamiento").addEventListener("click", async () => {
+  const texto = $("nuevo-lineamiento").value.trim();
+  if (texto.length < 5) return avisar("Escriba el lineamiento.", true);
+  try {
+    await api.crearLineamiento({ texto, ambito: $("nuevo-lineamiento-ambito").value });
+    $("nuevo-lineamiento").value = "";
+    await cargarLineamientos();
+    avisar("Agregado. Ya se ve en el formulario.");
+  } catch (e) {
+    avisar(e.message || "No se pudo agregar.", true);
+  }
+});
 
 /* --------------------------------------------------------------- arranque */
 const seccionInicial = location.hash.slice(1);

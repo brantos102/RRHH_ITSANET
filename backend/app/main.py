@@ -13,7 +13,8 @@ from . import registro
 from .config import get_settings
 from .db import abrir_pool, cerrar_pool, obtener_uno
 from .routers import (administracion, aprobaciones, auth, chat, ficha, firmas,
-                      garita, informes, panel, solicitudes, temporal)
+                      garita, informes, panel, personas, solicitudes,
+                      temporal)
 
 settings = get_settings()
 
@@ -220,6 +221,7 @@ app.include_router(ficha.router)
 app.include_router(chat.router)
 app.include_router(temporal.router)
 app.include_router(panel.router)
+app.include_router(personas.router)
 
 
 @app.get("/salud", tags=["Sistema"])

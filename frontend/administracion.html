@@ -24,7 +24,52 @@
     <button data-seccion="bitacora" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Bitácora</button>
     <button data-seccion="cotejo" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Cotejo de la carga</button>
     <button data-seccion="cambios-ficha" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Cambios de ficha</button>
+    <button data-seccion="lineamientos" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Lineamientos</button>
   </nav>
+
+  <!-- ===== Lineamientos =====
+       Lo que el colaborador lee antes de enviar una solicitud. Estaba escrito
+       dentro del HTML: para cambiar una coma hacía falta un programador, y
+       son reglas que cambian por circular. -->
+  <section data-panel="lineamientos" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="border-b border-slate-200 px-5 py-3.5">
+      <h2 class="font-medium">Lineamientos de solicitud</h2>
+      <p class="mt-0.5 text-sm text-slate-600">
+        Lo que se lee antes de enviar, plegado bajo «Antes de enviar, tenga presente».
+        Escríbalos cortos: si no caben en un renglón, nadie los lee.
+      </p>
+    </header>
+
+    <div class="border-b border-slate-200 bg-slate-50 px-5 py-4">
+      <div class="flex flex-wrap items-end gap-3">
+        <label class="min-w-0 flex-1">
+          <span class="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Nuevo lineamiento</span>
+          <input id="nuevo-lineamiento" type="text" maxlength="400"
+                 placeholder="Ej.: Las vacaciones de diciembre se piden hasta el 15 de noviembre."
+                 class="mt-1 w-full rounded-xl border-0 bg-white px-3 py-2 text-sm ring-1
+                        ring-slate-300 focus:ring-2 focus:ring-slate-900">
+        </label>
+        <label>
+          <span class="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            ¿Dónde se ve?</span>
+          <select id="nuevo-lineamiento-ambito"
+                  class="mt-1 rounded-xl border-0 bg-white px-3 py-2 text-sm ring-1 ring-slate-300
+                         focus:ring-2 focus:ring-slate-900">
+            <option value="vacacion">Al pedir vacaciones</option>
+            <option value="permiso">Al pedir un permiso</option>
+            <option value="ambos">En los dos</option>
+          </select>
+        </label>
+        <button id="btn-nuevo-lineamiento"
+                class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
+          Agregar
+        </button>
+      </div>
+    </div>
+
+    <div id="lista-lineamientos" class="divide-y divide-slate-100"></div>
+  </section>
 
   <!-- ===== Usuarios ===== -->
   <section data-panel="usuarios" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">

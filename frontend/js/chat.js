@@ -12,7 +12,7 @@
 import { api, sesion, esc, fechaHora } from "./api.js";
 
 const $ = (id) => document.getElementById(id);
-const estado = { abierto: false, conversacion: null, contactos: null, sondeo: null };
+const estado = { abierto: false, conversacion: null, contactos: null, sede: null, sondeo: null };
 
 const ES_RRHH = ["rrhh", "admin"].includes(sesion.perfil?.rol);
 
@@ -42,8 +42,9 @@ export function montarChat() {
     </button>
 
     <section id="chat-panel"
-             class="fixed bottom-5 right-5 z-50 hidden w-[min(100vw-2.5rem,23rem)] flex-col
-                    overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200">
+             class="fixed bottom-5 right-5 z-50 hidden max-h-[min(80dvh,34rem)]
+                    w-[min(100vw-2.5rem,22rem)] flex-col overflow-hidden rounded-2xl
+                    bg-white shadow-2xl ring-1 ring-slate-200">
       <header class="flex items-center gap-2 bg-slate-900 px-4 py-3 text-white">
         <div class="min-w-0 flex-1">
           <p class="truncate text-sm font-medium">Talento Humano</p>
@@ -67,7 +68,20 @@ export function montarChat() {
                 class="rounded-lg p-1.5 text-slate-300 hover:bg-slate-800 hover:text-white">✕</button>
       </header>
 
-      <div id="chat-mensajes" class="h-80 space-y-2 overflow-y-auto bg-slate-50 px-3 py-3"></div>
+      <!-- A qué sede va la consulta.
+
+           Talento Humano está en Quito y en Guayaquil, y cada equipo atiende
+           lo suyo. Antes la sede se deducía de la región de la persona y no
+           se podía cambiar: quien trabaja en una región y tiene el expediente
+           en la otra escribía a la bandeja equivocada, donde nadie esperaba
+           su consulta. Solo se puede elegir al abrir el hilo: una conversación
+           empezada no cambia de sede a mitad, porque ya hay alguien
+           respondiéndola. -->
+      <div id="chat-sedes" class="hidden items-center gap-1.5 border-b border-slate-200
+                                  bg-white px-3 py-2"></div>
+
+      <div id="chat-mensajes" class="min-h-[12rem] flex-1 space-y-2 overflow-y-auto
+                                     bg-slate-50 px-3 py-3 sin-barra"></div>
 
       <form id="chat-form" class="flex items-end gap-2 border-t border-slate-200 p-2">
         <textarea id="chat-texto" rows="1" maxlength="2000" required
@@ -119,18 +133,64 @@ async function cargar() {
   try {
     if (!estado.contactos) {
       estado.contactos = await api.chatContactos();
-      $("chat-sede").textContent =
-        `${estado.contactos.region} · ${estado.contactos.equipo.length} persona(s)`;
+      estado.sede = estado.contactos.propia;
     }
     const hilos = await api.misConversaciones();
-    if (!hilos.length) return pintar([]);
+    if (!hilos.length) {
+      estado.conversacion = null;
+      pintarSedes();
+      return pintar([]);
+    }
     estado.conversacion = hilos[0].id;
     const hilo = await api.leerConversacion(estado.conversacion);
+    pintarSedes();
     pintar(hilo.mensajes);
     $("chat-punto").classList.add("hidden");
   } catch (err) {
     caja.innerHTML = `<p class="py-8 text-center text-sm text-rose-600">${esc(err.message)}</p>`;
   }
+}
+
+/* A qué sede va la consulta.
+
+   Dos botones y no un desplegable: son dos opciones, y un desplegable de dos
+   se abre para elegir lo que ya se veía. Con el hilo abierto desaparecen: la
+   sede quedó fijada al empezar y cambiarla a mitad dejaría la conversación
+   partida entre dos bandejas. */
+function pintarSedes() {
+  const caja = $("chat-sedes");
+  const sedes = estado.contactos?.sedes || [];
+  const eligiendo = !estado.conversacion && sedes.length > 1;
+
+  caja.classList.toggle("hidden", !eligiendo);
+  caja.classList.toggle("flex", eligiendo);
+
+  const actual = sedes.find((s) => s.codigo === estado.sede);
+  $("chat-sede").textContent = actual
+    ? `${actual.sede} (${actual.sigla}) · ${estado.contactos.equipo.length} persona(s)`
+    : (estado.contactos?.region || "");
+
+  if (!eligiendo) return;
+  caja.innerHTML =
+    `<span class="mr-0.5 text-xs text-slate-500">Escribo a:</span>` +
+    sedes.map((s) => `
+      <button type="button" data-sede="${esc(s.codigo)}"
+              class="rounded-lg px-2.5 py-1 text-xs font-medium ring-1 transition ${
+                s.codigo === estado.sede
+                  ? "bg-slate-900 text-white ring-slate-900"
+                  : "bg-white text-slate-600 ring-slate-300 hover:ring-slate-500"}">
+        ${esc(s.sigla)}${s.es_la_suya ? " · su sede" : ""}
+      </button>`).join("");
+
+  caja.querySelectorAll("[data-sede]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      estado.sede = b.dataset.sede;
+      // El equipo que atiende cambia con la sede, y el pie de la cabecera lo
+      // dice: quien escribe tiene derecho a saber a quién le está llegando.
+      try { estado.contactos = await api.chatContactos(estado.sede); } catch { /* se queda el anterior */ }
+      pintarSedes();
+      pintar([]);
+    }));
 }
 
 function pintar(mensajes) {
@@ -169,9 +229,15 @@ async function enviar(e) {
   $("chat-texto").value = "";
   $("chat-texto").style.height = "auto";
   try {
-    const r = await api.enviarMensaje({ texto, conversacion_id: estado.conversacion });
+    const r = await api.enviarMensaje({
+      texto,
+      conversacion_id: estado.conversacion,
+      // Solo cuenta al abrir el hilo; con uno en marcha el servidor la ignora.
+      region: estado.conversacion ? undefined : estado.sede,
+    });
     estado.conversacion = r.conversacion_id;
     const hilo = await api.leerConversacion(estado.conversacion);
+    pintarSedes();
     pintar(hilo.mensajes);
   } catch (err) {
     $("chat-mensajes").insertAdjacentHTML("beforeend",

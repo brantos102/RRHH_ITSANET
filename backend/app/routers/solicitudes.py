@@ -309,6 +309,13 @@ async def tabla_antiguedad(_: Annotated[dict, Depends(usuario_actual)]) -> dict:
              from public.legal_references
             where starts_with(codigo, 'ITSANET_') order by orden"""
     )
+    # Las reglas internas que se leen antes de enviar. Viven en una tabla y no
+    # en el HTML: las decide Talento Humano y cambian por circular, no por
+    # versión del sistema.
+    avisos = await obtener_todos(
+        """select id, ambito, texto from public.lineamientos_solicitud
+            where activo order by ambito, orden, id"""
+    )
     parametros = await obtener_todos(
         """select clave, valor from public.app_config
             where clave in ('vacaciones_bloque_minimo', 'vacaciones_bloque_sugerido',
@@ -317,6 +324,7 @@ async def tabla_antiguedad(_: Annotated[dict, Depends(usuario_actual)]) -> dict:
     return {
         "tabla": filas,
         "lineamientos": lineamientos,
+        "avisos": avisos,
         "parametros": {p["clave"]: p["valor"] for p in parametros},
     }
 

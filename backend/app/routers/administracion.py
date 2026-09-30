@@ -494,3 +494,65 @@ async def colaboradores(usuario: Annotated[dict, Depends(exigir_rol("jefe", "rrh
         """,
         parametros,
     )
+
+
+# --------------------------------------------------------------- lineamientos
+# El recuadro «Antes de enviar, tenga presente» que ve quien pide vacaciones o
+# un permiso estaba escrito dentro del HTML. Son reglas internas de la empresa
+# —cuántos días de anticipación, si el período se toma entero— y cambian por
+# una circular, no por una versión del sistema. Quien las decide es Talento
+# Humano, así que quien las escribe también.
+
+
+class Lineamiento(BaseModel):
+    texto: str | None = Field(None, min_length=5, max_length=400)
+    ambito: Literal["vacacion", "permiso", "ambos"] | None = None
+    orden: int | None = Field(None, ge=0, le=999)
+    activo: bool | None = None
+
+
+@router.get("/rrhh/lineamientos")
+async def lineamientos_listar(
+    _: Annotated[dict, Depends(exigir_rol("rrhh", "admin"))]
+) -> list[dict]:
+    return await obtener_todos("select * from public.v_lineamientos")
+
+
+@router.post("/rrhh/lineamientos", status_code=status.HTTP_201_CREATED)
+async def lineamiento_crear(
+    datos: Lineamiento, request: Request,
+    usuario: Annotated[dict, Depends(exigir_rol("rrhh", "admin"))],
+) -> dict:
+    try:
+        fila = await obtener_uno(
+            """select * from public.lineamiento_guardar(
+                   null, %s, %s, %s, %s::smallint, %s)""",
+            (usuario["id"], datos.texto, datos.ambito, datos.orden, datos.activo),
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise traducir(exc) from exc
+    await registrar(request, "lineamiento.crear", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="lineamientos_solicitud",
+                    entidad_id=str(fila["id"]), detalle={"texto": datos.texto})
+    return dict(fila)
+
+
+@router.patch("/rrhh/lineamientos/{lineamiento_id}")
+async def lineamiento_cambiar(
+    lineamiento_id: int, datos: Lineamiento, request: Request,
+    usuario: Annotated[dict, Depends(exigir_rol("rrhh", "admin"))],
+) -> dict:
+    try:
+        fila = await obtener_uno(
+            """select * from public.lineamiento_guardar(
+                   %s, %s, %s, %s, %s::smallint, %s)""",
+            (lineamiento_id, usuario["id"], datos.texto, datos.ambito,
+             datos.orden, datos.activo),
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise traducir(exc) from exc
+    await registrar(request, "lineamiento.cambiar", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="lineamientos_solicitud",
+                    entidad_id=str(lineamiento_id),
+                    detalle=datos.model_dump(exclude_none=True))
+    return dict(fila)

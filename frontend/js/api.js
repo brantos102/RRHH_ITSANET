@@ -164,7 +164,8 @@ export const api = {
       method: "POST", body: JSON.stringify({ accion, motivo }),
     }),
   // --- chat con Talento Humano ---
-  chatContactos: () => peticion("/chat/contactos"),
+  chatContactos: (region) =>
+    peticion("/chat/contactos" + (region ? `?region=${region}` : "")),
   misConversaciones: () => peticion("/chat/mis-conversaciones"),
   bandejaChat: (estado = "abierta") => peticion(`/chat/bandeja?estado=${estado}`),
   leerConversacion: (id) => peticion(`/chat/conversaciones/${id}`),
@@ -249,6 +250,19 @@ export const api = {
   cambiarParametro: (clave, valor) =>
     peticion(`/admin/configuracion/${clave}`, { method: "PATCH", body: JSON.stringify({ valor }) }),
   bitacora: (limite = 100) => peticion(`/admin/bitacora?limite=${limite}`),
+
+  // Los lineamientos que se leen antes de enviar una solicitud. Los escribe
+  // Talento Humano: cambian por circular, no por versión del sistema.
+  lineamientos: () => peticion("/rrhh/lineamientos"),
+  crearLineamiento: (datos) =>
+    peticion("/rrhh/lineamientos", { method: "POST", body: JSON.stringify(datos) }),
+  cambiarLineamiento: (id, cambios) =>
+    peticion(`/rrhh/lineamientos/${id}`,
+             { method: "PATCH", body: JSON.stringify(cambios) }),
+
+  // El expediente de una persona, para jefaturas y Talento Humano.
+  buscarPersona: (q) => peticion(`/personas/buscar?q=${encodeURIComponent(q)}`),
+  expediente: (id) => peticion(`/personas/${id}`),
 
   // La pantalla principal: qué bloques se ven, en qué orden y para qué roles.
   misBloques: () => peticion("/panel/bloques"),

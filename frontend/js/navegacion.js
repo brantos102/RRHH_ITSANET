@@ -31,6 +31,9 @@ const MODULOS = [
       // ninguna pantalla la consumía, así que las consultas llegaban y
       // nadie podía leerlas.
       { texto: "Mensajes", href: "mensajes.html" },
+      // Lo que el colaborador lee antes de enviar una solicitud. Estaba
+      // escrito en el HTML y lo decide Talento Humano, no el programa.
+      { texto: "Lineamientos", href: "administracion.html#lineamientos" },
       { texto: "Cambios de ficha", href: "administracion.html#cambios-ficha" },
       { texto: "Días no laborables", href: "administracion.html#feriados" },
       { texto: "Antigüedades", href: "administracion.html#antiguedades" },
@@ -82,6 +85,36 @@ const ICONOS = {
   temporal: 'M12 8v4l2.5 2.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
 };
 
+/* Y un icono por opción dentro de cada grupo. Un desplegable abierto con
+   nueve renglones de texto seguido se lee como un párrafo; con una marca a
+   la izquierda de cada uno, se recorre. */
+const ICONOS_OPCION = {
+  "Por autorizar":            'M9 12.5l2 2 4-4.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
+  "Anulaciones por resolver": 'M12 9v4m0 3h.01M10.3 3.9 2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z',
+  "Períodos del equipo":      'M8 2v4M16 2v4M3.5 9.5h17M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z',
+  "Calendario":               'M8 2v4M16 2v4M3.5 9.5h17M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z',
+  "Colaboradores":            'M17 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9.5 6.5a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0ZM22 20v-2a4 4 0 0 0-3-3.9',
+  "Mensajes":                 'M8 10.5h8M8 14h5m7-1.5a8.5 8.5 0 0 1-12.2 7.7L4 21l.9-3.6A8.5 8.5 0 1 1 20 12.5Z',
+  "Cambios de ficha":         'M11 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5m-2.5-9.5a2.1 2.1 0 0 1 3 3L12 16l-4 1 1-4 8.5-8.5Z',
+  "Días no laborables":       'M8 2v4M16 2v4M3.5 9.5h17M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm4 10 6 4m0-4-6 4',
+  "Antigüedades":             'M12 8v4l2.5 2.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
+  "Bitácora":                 'M4 5a2 2 0 0 1 2-2h11a1 1 0 0 1 1 1v15H6a2 2 0 0 0-2 2V5Zm4 3h7M8 12h7',
+  "Solicitudes":              'M9 3h6a1 1 0 0 1 1 1v1h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2V4a1 1 0 0 1 1-1Zm-1 9h8m-8 4h5',
+  "Por departamento":         'M3 3v18h18M7 17v-5m5 5V8m5 9v-7',
+  "Pantalla principal":       'M3 9.5 12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1V9.5Z',
+  "Lineamientos":             'M9 3h6a1 1 0 0 1 1 1v1h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2V4a1 1 0 0 1 1-1Zm-1 8h8m-8 4h5',
+  "Configuración":            'M10.3 3.3a1 1 0 0 1 1-.8h1.4a1 1 0 0 1 1 .8l.3 1.6 1.4.8 1.5-.6a1 1 0 0 1 1.2.4l.7 1.2a1 1 0 0 1-.2 1.3l-1.2 1v1.6l1.2 1a1 1 0 0 1 .2 1.3l-.7 1.2a1 1 0 0 1-1.2.4l-1.5-.6-1.4.8-.3 1.6a1 1 0 0 1-1 .8h-1.4a1 1 0 0 1-1-.8M14.5 12a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z',
+  "Usuarios":                 'M17 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9.5 6.5a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0Z',
+  "Tipos de solicitud":       'M4 7h16M4 12h10M4 17h7',
+};
+
+const iconoOpcion = (texto) => `
+  <svg class="h-4 w-4 shrink-0 opacity-70" fill="none" stroke="currentColor" stroke-width="1.7"
+       viewBox="0 0 24 24" aria-hidden="true">
+    <path stroke-linecap="round" stroke-linejoin="round"
+          d="${ICONOS_OPCION[texto] || 'M5 12h14'}"/>
+  </svg>`;
+
 const icono = (id) => `
   <svg class="h-5 w-5 shrink-0" fill="none" stroke="currentColor" stroke-width="1.7"
        viewBox="0 0 24 24" aria-hidden="true">
@@ -115,25 +148,79 @@ export function montarNavegacion(contenedor, { activo = "panel", contadores = {}
       : "";
   };
 
+  /* Cada grupo se pliega y se despliega, y recuerda cómo lo dejó cada quien.
+
+     Antes estaban todos abiertos siempre: veinte renglones que no caben en
+     una pantalla de portátil y obligan a desplazar el menú para llegar a lo
+     de abajo. Quien usa dos módulos cierra los otros una vez y no vuelve a
+     verlos. Se guarda en el navegador de cada persona, que es donde
+     corresponde: es una preferencia de uso, no un dato de la empresa.
+
+     El grupo de la pantalla en la que se está aparece siempre abierto, y lo
+     que tiene pendientes también: un contador escondido dentro de un grupo
+     cerrado no avisa de nada. */
+  const LLAVE = "rrhh.menu.cerrados";
+  const cerrados = new Set(leerCerrados());
+
+  const pendientesDe = (m) =>
+    (m.opciones || []).some((o) => o.contador && contadores[o.contador]);
+
+  const abierto = (m) =>
+    activo === m.id || pendientesDe(m) || !cerrados.has(m.id);
+
   const seccion = (m) => m.opciones ? `
-    <div class="mt-3">
-      <p class="flex items-center gap-2 px-3 pb-1 text-[11px] font-semibold uppercase
-                tracking-wider text-slate-500">
-        ${icono(m.id)} <span>${esc(m.texto)}</span>
-      </p>
-      ${m.opciones.map((o) => `
-        <a href="${o.href}" class="flex items-center gap-2 rounded-lg py-1.5 pl-9 pr-3 text-sm
-                                   text-slate-300 hover:bg-slate-800 hover:text-white">
-          <span class="min-w-0 truncate">${esc(o.texto)}</span>
-          ${o.contador && contadores[o.contador]
-            ? `<span class="ml-auto rounded-full bg-rose-500 px-1.5 text-[11px] font-bold text-white">${contadores[o.contador]}</span>`
-            : ""}
-        </a>`).join("")}
+    <div class="mt-2" data-grupo="${m.id}">
+      <button type="button" data-plegar="${m.id}" aria-expanded="${abierto(m)}"
+              class="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-[11px]
+                     font-semibold uppercase tracking-wider text-slate-400
+                     hover:bg-slate-800 hover:text-slate-200">
+        ${icono(m.id)}
+        <span class="min-w-0 flex-1 truncate text-left">${esc(m.texto)}</span>
+        ${pendientesDe(m) && !abierto(m)
+          ? `<span class="rounded-full bg-rose-500 px-1.5 text-[11px] font-bold text-white">•</span>`
+          : ""}
+        <svg data-flecha class="h-3.5 w-3.5 shrink-0 transition-transform duration-150
+             ${abierto(m) ? "" : "-rotate-90"}"
+             fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/>
+        </svg>
+      </button>
+      <div data-opciones class="${abierto(m) ? "" : "hidden"} mt-0.5">
+        ${m.opciones.map((o) => `
+          <a href="${o.href}" class="flex items-center gap-2 rounded-lg py-1.5 pl-6 pr-3 text-sm
+                                     text-slate-300 hover:bg-slate-800 hover:text-white">
+            ${iconoOpcion(o.texto)}
+            <span class="min-w-0 truncate">${esc(o.texto)}</span>
+            ${o.contador && contadores[o.contador]
+              ? `<span class="ml-auto rounded-full bg-rose-500 px-1.5 text-[11px] font-bold text-white">${contadores[o.contador]}</span>`
+              : ""}
+          </a>`).join("")}
+      </div>
     </div>` : `
     <a href="${m.href}" class="mt-1 flex items-center gap-2 rounded-lg px-3 py-2 text-sm
               ${activo === m.id ? "bg-slate-800 font-medium text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"}">
       ${icono(m.id)} <span>${esc(m.texto)}</span>${insignia(m.id)}
     </a>`;
+
+  /* El buscador de personas, para quien tiene gente a cargo.
+
+     Responde a lo que no se podía hacer: abrir el expediente de alguien por
+     su nombre. Antes había que saber en qué pantalla estaba cada cosa —la
+     ficha en una, los períodos en otra, las solicitudes en una tercera— y
+     cruzarlas a mano. */
+  const PUEDE_BUSCAR = ["jefe", "rrhh", "admin"].includes(perfil.rol);
+  const buscador = (sufijo) => PUEDE_BUSCAR ? `
+    <div class="relative mb-2 px-1">
+      <input type="search" data-buscar-persona autocomplete="off"
+             placeholder="Buscar una persona…"
+             class="w-full rounded-lg border-0 bg-slate-800 px-3 py-2 text-sm text-slate-100
+                    placeholder:text-slate-500 focus:bg-slate-700 focus:outline-none
+                    focus:ring-2 focus:ring-cyan-400">
+      <div data-resultados
+           class="absolute inset-x-1 top-full z-50 mt-1 hidden max-h-72 overflow-y-auto
+                  rounded-xl bg-white py-1 text-slate-900 shadow-2xl ring-1 ring-slate-300
+                  sin-barra"></div>
+    </div>` : "";
 
   const campana = (sufijo) => `
     <button id="nav-campana${sufijo}" data-campana
@@ -169,7 +256,8 @@ export function montarNavegacion(contenedor, { activo = "panel", contadores = {}
       <img src="${esc(cfg.LOGO_OSCURO || cfg.LOGO || "img/logo-oscuro.png")}"
            alt="${esc(cfg.EMPRESA || "")}" class="h-8 w-auto">
     </a>
-    <nav class="flex-1 overflow-y-auto" aria-label="Módulos">
+    ${buscador(sufijo)}
+    <nav class="sin-barra flex-1 overflow-y-auto overscroll-contain" aria-label="Módulos">
       ${modulos.map(seccion).join("")}
     </nav>
     ${pie}`;
@@ -229,6 +317,26 @@ export function montarNavegacion(contenedor, { activo = "panel", contadores = {}
       location.href = "index.html";
     }));
 
+  // Plegar y desplegar. Se enganchan por atributo y no por identificador
+  // porque hay dos copias del menú —la fija y la del cajón— y las dos tienen
+  // los mismos grupos.
+  contenedor.querySelectorAll("[data-plegar]").forEach((boton) =>
+    boton.addEventListener("click", () => {
+      const grupo = boton.dataset.plegar;
+      const estaAbierto = boton.getAttribute("aria-expanded") === "true";
+      if (estaAbierto) cerrados.add(grupo); else cerrados.delete(grupo);
+      guardarCerrados([...cerrados]);
+      // Las dos copias a la vez: si no, abrir un grupo en el cajón lo dejaba
+      // cerrado en la barra y al girar el teléfono el menú cambiaba solo.
+      contenedor.querySelectorAll(`[data-plegar="${grupo}"]`).forEach((b) => {
+        b.setAttribute("aria-expanded", String(!estaAbierto));
+        b.querySelector("[data-flecha]")?.classList.toggle("-rotate-90", estaAbierto);
+        b.parentElement.querySelector("[data-opciones]")
+          ?.classList.toggle("hidden", estaAbierto);
+      });
+    }));
+
+  montarBuscadorDePersonas(contenedor);
   montarNotificaciones(contenedor);
   // El chat se monta desde aquí y no desde cada pantalla: antes solo lo
   // llamaba el panel, de modo que en el calendario, los informes o
@@ -368,3 +476,88 @@ export const ROL_TEXTO = {
   admin: "Administrador", rrhh: "Talento Humano", jefe: "Jefe inmediato",
   empleado: "Empleado", guardia: "Guardia de seguridad",
 };
+
+
+/* --------------------------------------------------- qué grupos van cerrados
+
+   En el navegador de cada persona y no en la base: es una preferencia de uso
+   —cómo le gusta ver su menú— y no un dato de la empresa. Envuelto en
+   try/catch porque en una ventana privada o con el almacenamiento bloqueado
+   leerlo lanza, y un menú que no se dibuja por esto sería absurdo. */
+function leerCerrados() {
+  try {
+    return JSON.parse(localStorage.getItem("rrhh.menu.cerrados") || "[]");
+  } catch { return []; }
+}
+
+function guardarCerrados(lista) {
+  try {
+    localStorage.setItem("rrhh.menu.cerrados", JSON.stringify(lista));
+  } catch { /* sin memoria: el menú funciona igual, solo no recuerda */ }
+}
+
+/* ------------------------------------------------- buscar a una persona
+
+   Escribir dos letras del nombre y llegar a su expediente. Lo usan las
+   jefaturas y Talento Humano, que es a quienes les corresponde; el servidor
+   además solo devuelve a quien cada quien puede ver, así que un jefe no
+   encuentra gente de otra área ni probando. */
+function montarBuscadorDePersonas(contenedor) {
+  contenedor.querySelectorAll("[data-buscar-persona]").forEach((entrada) => {
+    const caja = entrada.parentElement.querySelector("[data-resultados]");
+    let temporizador;
+    let ultima = 0;
+
+    const pintar = (gente) => {
+      if (!gente.length) {
+        caja.innerHTML = `<p class="px-3 py-2 text-sm text-slate-500">
+                            Nadie coincide con eso.</p>`;
+      } else {
+        caja.innerHTML = gente.map((p) => `
+          <a href="persona.html?id=${encodeURIComponent(p.id)}"
+             class="block px-3 py-2 hover:bg-slate-100">
+            <p class="truncate text-sm font-medium">${esc(p.nombre)}</p>
+            <p class="truncate text-xs text-slate-500">
+              ${esc(p.cedula)}${p.cargo ? ` · ${esc(p.cargo)}` : ""}</p>
+          </a>`).join("");
+      }
+      caja.classList.remove("hidden");
+    };
+
+    entrada.addEventListener("input", () => {
+      clearTimeout(temporizador);
+      const texto = entrada.value.trim();
+      if (texto.length < 2) { caja.classList.add("hidden"); return; }
+      // Se espera a que deje de teclear: sin esto, «Espinosa» son ocho
+      // consultas y la que contesta última no es la última que se pidió.
+      temporizador = setTimeout(async () => {
+        const mio = ++ultima;
+        try {
+          const { api } = await import("./api.js");
+          const gente = await api.buscarPersona(texto);
+          if (mio === ultima) pintar(gente);
+        } catch {
+          if (mio === ultima) {
+            caja.innerHTML = `<p class="px-3 py-2 text-sm text-rose-600">
+                                No se pudo buscar.</p>`;
+            caja.classList.remove("hidden");
+          }
+        }
+      }, 250);
+    });
+
+    entrada.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { entrada.value = ""; caja.classList.add("hidden"); }
+      // Enter abre el primero: quien escribe un nombre y pulsa Enter espera
+      // llegar, no quedarse mirando una lista de uno.
+      if (e.key === "Enter") {
+        e.preventDefault();
+        caja.querySelector("a")?.click();
+      }
+    });
+
+    document.addEventListener("click", (e) => {
+      if (!entrada.parentElement.contains(e.target)) caja.classList.add("hidden");
+    });
+  });
+}

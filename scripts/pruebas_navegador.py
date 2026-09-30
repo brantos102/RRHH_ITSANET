@@ -149,7 +149,21 @@ async def recorrido_acceso(nav, capturas) -> Paso:
 
 async def recorrido_chat(nav, capturas) -> Paso:
     """La consulta llega a Talento Humano y la respuesta vuelve."""
+    from app.db import ejecutar
+
     paso = Paso("chat")
+    # Se parte sin hilos abiertos: la sede solo se ofrece al empezar uno, y
+    # con una conversación en marcha el selector desaparece a propósito.
+    await ejecutar(
+        """delete from public.mensajes m using public.conversaciones c
+            where m.conversacion_id = c.id
+              and c.user_id in (select id from public.users where cedula = %s)""",
+        (EMPLEADA,))
+    await ejecutar(
+        """delete from public.conversaciones
+            where user_id in (select id from public.users where cedula = %s)""",
+        (EMPLEADA,))
+
     emp = await (await nav.new_context(viewport={"width": 390, "height": 844},
                                        is_mobile=True, has_touch=True)).new_page()
     await _entrar(emp, EMPLEADA)
@@ -171,6 +185,27 @@ async def recorrido_chat(nav, capturas) -> Paso:
     await emp.wait_for_selector("#chat-burbuja", timeout=15000)
     await emp.click("#chat-burbuja")
     await emp.wait_for_selector("#chat-panel:not(.hidden)")
+
+    # Una ventana pequeña, no una pantalla. En el teléfono ocupa el ancho
+    # menos los márgenes; lo que no puede es tapar la pantalla entera.
+    caja = await emp.locator("#chat-panel").bounding_box()
+    alto = await emp.evaluate("() => window.innerHeight")
+    if caja["height"] > alto * 0.9:
+        raise Falla(f"El chat ocupa {caja['height']:.0f} de {alto} px de alto: "
+                    "es una ventana, no una pantalla.")
+    paso.ok(f"se abre como ventana de {caja['width']:.0f}x{caja['height']:.0f} px")
+
+    # Y se elige a qué sede va: Talento Humano está en Quito y en Guayaquil.
+    sedes = emp.locator("#chat-sedes [data-sede]")
+    if await sedes.count() < 2:
+        raise Falla("No se puede elegir a qué sede va la consulta (UIO o GYE).")
+    siglas = [(await sedes.nth(i).inner_text()).strip() for i in range(await sedes.count())]
+    if not any("UIO" in s for s in siglas) or not any("GYE" in s for s in siglas):
+        raise Falla(f"Las sedes ofrecidas son {siglas} y deberían ser UIO y GYE.")
+    if "su sede" not in siglas[0]:
+        raise Falla(f"La sede propia no va primero: {siglas}")
+    paso.ok(f"se elige la sede: {' · '.join(siglas)}")
+
     consulta = "Comprobacion automatica: me quedan dias del periodo anterior?"
     await emp.fill("#chat-texto", consulta)
     await emp.click("#chat-form button[type=submit]")
@@ -588,6 +623,130 @@ async def recorrido_pantalla_principal(nav, capturas) -> Paso:
     return paso
 
 
+async def recorrido_expediente(nav, capturas) -> Paso:
+    """Escribir un nombre en la barra y llegar a su expediente.
+
+    Era lo que no se podía hacer: la ficha vivía en una pantalla, los
+    períodos en otra, las solicitudes en una tercera y el historial de la
+    hoja dentro de un diálogo del panel de cada quien. Para responder
+    «¿cuándo tomó vacaciones Fulano y qué tiene pendiente?» había que abrir
+    las tres y cruzarlas a mano.
+    """
+    paso = Paso("expediente")
+
+    pg = await (await nav.new_context(viewport={"width": 1440, "height": 950})).new_page()
+    await _entrar(pg, ADMIN)
+    await pg.wait_for_timeout(1200)
+
+    entrada = pg.locator("aside [data-buscar-persona]").first
+    if not await entrada.count():
+        raise Falla("La barra no tiene el buscador de personas.")
+
+    # Sin tilde a propósito: con trescientas cincuenta personas, un buscador
+    # que exige escribir el acento no lo usa nadie.
+    await entrada.fill("suarez")
+    await pg.wait_for_timeout(1400)
+    resultados = pg.locator("aside [data-resultados] a")
+    if not await resultados.count():
+        raise Falla("Buscar «suarez» sin tilde no encontró a «Suárez».")
+    paso.ok(f"«suarez» sin tilde encuentra {await resultados.count()} resultado(s)")
+
+    await resultados.first.click()
+    await pg.wait_for_selector("#contenido:not(.hidden)", timeout=15000)
+    nombre = (await pg.inner_text("#nombre")).strip()
+    paso.ok(f"abre el expediente de {nombre}")
+
+    for identificador, que in (("saldo", "el saldo"), ("antiguedad", "la antigüedad"),
+                               ("veces", "las vacaciones tomadas"),
+                               ("en-tramite", "lo que está en trámite")):
+        valor = (await pg.inner_text(f"#{identificador}")).strip()
+        if not valor or valor == "—":
+            raise Falla(f"El expediente no muestra {que}.")
+    paso.ok("saldo, antigüedad, vacaciones tomadas y trámites, en una pantalla")
+
+    if not await pg.locator("#vacaciones, #solicitudes").count():
+        raise Falla("Faltan el historial de vacaciones o las solicitudes.")
+    paso.ok("historial de vacaciones y solicitudes, juntos")
+
+    if capturas:
+        await pg.screenshot(path=str(capturas / "expediente.png"), full_page=True)
+
+    # Y quien no tiene por qué verlo, no lo ve.
+    otra = await (await nav.new_context(viewport={"width": 1280, "height": 900})).new_page()
+    await _entrar(otra, EMPLEADA)
+    await otra.wait_for_timeout(1000)
+    if await otra.locator("aside [data-buscar-persona]").count():
+        raise Falla("Un colaborador ve el buscador de personas y no debería.")
+    await otra.goto(f"{FRONTEND}{pg.url[len(FRONTEND):]}")
+    await otra.wait_for_timeout(2000)
+    if await otra.locator("#contenido").is_visible():
+        raise Falla("Un colaborador abrió el expediente de otra persona escribiendo la dirección.")
+    paso.ok("un compañero no lo abre ni escribiendo la dirección")
+    return paso
+
+
+async def recorrido_lineamientos(nav, capturas) -> Paso:
+    """Talento Humano escribe lo que el colaborador lee antes de enviar.
+
+    El recuadro «Antes de enviar, tenga presente» estaba dentro del HTML:
+    para cambiar una coma hacía falta un programador, y son reglas que
+    cambian por una circular.
+    """
+    from app.db import ejecutar, obtener_uno
+
+    paso = Paso("lineamientos")
+    TEXTO = "Comprobacion automatica: esta regla la escribio la prueba."
+
+    pg = await (await nav.new_context(viewport={"width": 1280, "height": 950})).new_page()
+    await _entrar(pg, ADMIN)
+    await pg.goto(f"{FRONTEND}/administracion.html#lineamientos")
+    await pg.wait_for_selector("#lista-lineamientos [data-lineamiento]", timeout=15000)
+    cuantos = await pg.locator("#lista-lineamientos [data-lineamiento]").count()
+    paso.ok(f"{cuantos} lineamiento(s) listados y editables")
+
+    await pg.fill("#nuevo-lineamiento", TEXTO)
+    await pg.select_option("#nuevo-lineamiento-ambito", "vacacion")
+    await pg.click("#btn-nuevo-lineamiento")
+    await pg.wait_for_timeout(1200)
+    if await pg.locator("#lista-lineamientos [data-lineamiento]").count() != cuantos + 1:
+        raise Falla("El lineamiento nuevo no aparece en la lista.")
+    paso.ok("se agrega desde la pantalla, sin tocar el código")
+
+    try:
+        # Y ahora lo que importa: qué lee el colaborador.
+        otra = await (await nav.new_context(viewport={"width": 1280, "height": 950})).new_page()
+        await _entrar(otra, EMPLEADA)
+        await otra.wait_for_timeout(1000)
+        await otra.click("[data-nueva='vacacion']")
+        await otra.wait_for_timeout(1200)
+
+        aviso = otra.locator("#aviso-vacaciones")
+        if not await aviso.is_visible():
+            raise Falla("El recuadro de lineamientos no aparece al pedir vacaciones.")
+        if await aviso.evaluate("e => e.open"):
+            raise Falla("El recuadro sale abierto: son cinco renglones delante de "
+                        "quien solo quiere pedir tres días.")
+        paso.ok(f"plegado y con la cuenta: «{(await otra.inner_text('#aviso-titulo')).strip()}»")
+
+        await otra.click("#aviso-titulo")
+        await otra.wait_for_timeout(400)
+        if TEXTO not in (await otra.inner_text("#aviso-lista")):
+            raise Falla("Lo que escribió Talento Humano no llegó al formulario.")
+        paso.ok("lo escrito por Talento Humano se lee en el formulario")
+        if capturas:
+            await otra.screenshot(path=str(capturas / "lineamientos.png"))
+    finally:
+        # No se deja puesta una regla de prueba en el formulario de 350 personas.
+        await ejecutar("delete from public.lineamientos_solicitud where texto = %s", (TEXTO,))
+
+    restante = await obtener_uno(
+        "select count(*) as n from public.lineamientos_solicitud where texto = %s", (TEXTO,))
+    if restante["n"]:
+        raise Falla("La regla de prueba quedó puesta.")
+    paso.ok("y la regla de prueba se retira al terminar")
+    return paso
+
+
 async def recorrido_menu(nav, capturas) -> Paso:
     """La navegación, que ahora es vertical y tiene dos formas."""
     paso = Paso("menu")
@@ -626,6 +785,42 @@ async def recorrido_menu(nav, capturas) -> Paso:
         if caja["y"] + caja["height"] > 950:
             raise Falla(f"«{texto}» queda por debajo del corte de la pantalla.")
     paso.ok("Garita y Personal temporal se ven sin desplazar")
+
+    # El riel gris permanente a la derecha del menú, fuera; la rueda, dentro.
+    barra = await pg.evaluate("""() => {
+        const n = document.querySelector('aside nav');
+        return { riel: n.offsetWidth - n.clientWidth,
+                 desplazable: n.scrollHeight > n.clientHeight + 1,
+                 desborde: getComputedStyle(n).overflowY };
+    }""")
+    if barra["riel"] > 0:
+        raise Falla(f"El menú sigue enseñando la barra de desplazamiento ({barra['riel']} px).")
+    if barra["desborde"] not in ("auto", "scroll"):
+        raise Falla("El menú no se puede desplazar con la rueda.")
+    paso.ok("sin riel de desplazamiento, y la rueda sigue sirviendo")
+
+    # Los grupos se pliegan, y el que se plegó sigue plegado al volver.
+    grupos = pg.locator("aside [data-plegar]")
+    if await grupos.count() < 3:
+        raise Falla("El menú no tiene grupos plegables.")
+    # `.first` en todo: hay dos copias del menú —la fija y la del cajón— y en
+    # esta anchura solo una está a la vista.
+    grupo = pg.locator('aside [data-plegar="informes"]').first
+    opciones = pg.locator('aside [data-grupo="informes"] [data-opciones]').first
+    antes = await opciones.locator("a").count()
+    await grupo.click()
+    await pg.wait_for_timeout(300)
+    if await opciones.is_visible():
+        raise Falla("Un grupo plegado sigue mostrando sus opciones.")
+    paso.ok(f"los grupos se pliegan ({antes} opciones de Informes recogidas)")
+
+    await pg.goto(f"{FRONTEND}/dashboard.html")
+    await pg.wait_for_timeout(1500)
+    if await pg.locator('aside [data-grupo="informes"] [data-opciones]').first.is_visible():
+        raise Falla("El grupo plegado volvió a abrirse solo al cambiar de pantalla.")
+    paso.ok("y siguen plegados al cambiar de pantalla")
+    await pg.locator('aside [data-plegar="informes"]').first.click()
+    await pg.wait_for_timeout(300)
 
     await pg.click("#nav-campana")
     await pg.wait_for_selector("#modal-notificaciones[open]", timeout=10000)
@@ -783,6 +978,10 @@ RECORRIDOS = {
                      "Panel del día: quién está fuera y a quién se le pasó la hora"),
     "pantalla-principal": (recorrido_pantalla_principal,
                           "El administrador decide qué bloques ve el colaborador"),
+    "expediente": (recorrido_expediente,
+                   "Buscar a una persona por su nombre y abrir su expediente"),
+    "lineamientos": (recorrido_lineamientos,
+                     "Talento Humano escribe lo que se lee antes de enviar"),
     "menu": (recorrido_menu, "La navegación vertical: barra en escritorio, cajón en teléfono"),
     "temporal": (recorrido_temporal, "Personal temporal: jornada, cierre manual y semana"),
 }

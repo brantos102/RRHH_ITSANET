@@ -253,18 +253,26 @@
         <p id="info-permiso" class="hidden rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-600"></p>
       </div>
 
-      <!-- Lineamientos de vacaciones, a la vista de quien solicita -->
-      <div id="aviso-vacaciones"
-           class="hidden rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-600 ring-1 ring-slate-200">
-        <p class="font-medium text-slate-800">Antes de enviar, tenga presente:</p>
-        <ul class="mt-1.5 list-disc space-y-1 pl-4">
-          <li>Se proponen <strong>15 días</strong>, que es el período completo. La regla es tomarlo entero.</li>
-          <li>Se comunican con <strong>10 días de anticipación</strong>, para que su jefe organice la cobertura.</li>
-          <li>Registrar una fecha <strong>no significa que estén aprobadas</strong>: deciden su jefe y Talento Humano.</li>
-          <li>Los días son <strong>calendario</strong>: incluyen los fines de semana que caigan dentro.</li>
-          <li>Para un asunto personal de un día, corresponde un <strong>permiso</strong>, no vacaciones.</li>
-        </ul>
-      </div>
+      <!-- Lineamientos, plegados.
+
+           El texto ya no vive aquí: lo escribe Talento Humano desde su
+           módulo, porque son reglas internas que cambian por circular y no
+           por versión del sistema.
+
+           Y va plegado. Cinco renglones de texto delante de quien solo
+           quiere pedir tres días se convierten en cinco renglones que nadie
+           lee: el que tiene la duda lo abre, y el que no, no tropieza con
+           ellos. El título dice cuántos son, para que abrirlo no sea a
+           ciegas. -->
+      <details id="aviso-vacaciones"
+               class="hidden rounded-xl bg-slate-50 text-xs leading-relaxed text-slate-600
+                      ring-1 ring-slate-200">
+        <summary id="aviso-titulo"
+                 class="cursor-pointer select-none px-3 py-2.5 font-medium text-slate-800">
+          Antes de enviar, tenga presente
+        </summary>
+        <ul id="aviso-lista" class="list-disc space-y-1 px-3 pb-3 pl-7"></ul>
+      </details>
 
       <!-- Duración: día completo o unas horas del mismo día -->
       <div id="campo-modalidad" class="hidden">

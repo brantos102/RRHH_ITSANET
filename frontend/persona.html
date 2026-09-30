@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>Expediente</title>
+<link rel="icon" type="image/png" href="img/icono.png">
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="vendor/tailwind.css">
+<script src="config.js"></script>
+</head>
+
+<body class="min-h-dvh bg-slate-100 text-slate-900 antialiased">
+<div id="barra"></div>
+
+<main class="mx-auto max-w-4xl px-4 py-5 pb-24">
+  <div id="cargando" class="rounded-2xl bg-white p-8 text-center text-sm text-slate-500
+                            shadow-sm ring-1 ring-slate-200">Cargando el expediente…</div>
+
+  <div id="contenido" class="hidden space-y-4">
+    <!-- Quién es -->
+    <header class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <div class="flex flex-wrap items-start gap-4">
+        <span id="iniciales" class="grid h-14 w-14 shrink-0 place-items-center rounded-full
+              bg-slate-900 text-lg font-semibold text-white"></span>
+        <div class="min-w-0 flex-1">
+          <h1 id="nombre" class="text-xl font-semibold"></h1>
+          <p id="puesto" class="mt-0.5 text-sm text-slate-600"></p>
+          <p id="datos" class="mt-1 text-xs text-slate-500"></p>
+        </div>
+        <div class="shrink-0 text-right">
+          <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Días disponibles</p>
+          <p id="saldo" class="text-3xl font-semibold tabular-nums">—</p>
+          <p id="saldo-pie" class="text-xs text-slate-500"></p>
+        </div>
+      </div>
+    </header>
+
+    <!-- Lo que se pregunta siempre -->
+    <section class="grid gap-3 sm:grid-cols-4">
+      <article class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Antigüedad</p>
+        <p id="antiguedad" class="mt-1 text-xl font-semibold">—</p>
+      </article>
+      <article class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Vacaciones tomadas</p>
+        <p id="veces" class="mt-1 text-xl font-semibold">—</p>
+        <p id="dias-gozados" class="text-xs text-slate-500"></p>
+      </article>
+      <article class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">En trámite</p>
+        <p id="en-tramite" class="mt-1 text-xl font-semibold">—</p>
+      </article>
+      <article class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Fines de semana</p>
+        <p id="fines-semana" class="mt-1 text-xl font-semibold">—</p>
+        <p class="text-xs text-slate-500">obligatorios pendientes</p>
+      </article>
+    </section>
+
+    <!-- Historial de vacaciones -->
+    <section class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <h2 class="font-medium">Historial de vacaciones</h2>
+        <input id="buscar-vacaciones" type="search" placeholder="Buscar por año o fecha"
+               class="w-full max-w-xs rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm
+                      ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900 sm:w-56">
+      </div>
+      <div id="vacaciones" class="mt-3 space-y-2"></div>
+      <p id="vacaciones-vacio" class="hidden pt-2 text-sm text-slate-500"></p>
+      <p class="mt-3 border-t border-slate-100 pt-3 text-xs leading-relaxed text-slate-500">
+        Lo marcado como <strong>registro de Talento Humano</strong> viene de la hoja que el
+        departamento llevaba antes de este sistema: no pasó por aquí, así que no tiene número
+        de solicitud.
+      </p>
+    </section>
+
+    <!-- Solicitudes -->
+    <section class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <h2 class="font-medium">Solicitudes en el sistema</h2>
+        <input id="buscar-solicitudes" type="search" placeholder="Buscar por Nº, tipo o estado"
+               class="w-full max-w-xs rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm
+                      ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900 sm:w-56">
+      </div>
+      <div id="solicitudes" class="mt-3 space-y-2"></div>
+      <p id="solicitudes-vacio" class="hidden pt-2 text-sm text-slate-500"></p>
+    </section>
+
+    <!-- Períodos, plegado: interesa a Talento Humano, no al abrir la pantalla -->
+    <details class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <summary class="cursor-pointer font-medium">Períodos de vacaciones, año por año</summary>
+      <div id="periodos" class="mt-3 overflow-x-auto"></div>
+      <p id="devengo" class="mt-3 text-xs leading-relaxed text-slate-500"></p>
+    </details>
+  </div>
+
+  <div id="error" class="hidden rounded-2xl bg-rose-50 p-5 text-sm text-rose-800
+                         shadow-sm ring-1 ring-rose-200"></div>
+</main>
+
+<script type="module" src="js/persona.js"></script>
+</body>
+</html>

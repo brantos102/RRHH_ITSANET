@@ -200,6 +200,10 @@ async def revisar_base() -> int:
         ("0025 historial de vacaciones", "public.vacaciones_historicas"),
         ("0026 panel de garita del día", "public.v_garita_hoy"),
         ("0027 pantalla principal configurable", "public.panel_bloques"),
+        ("0028 devengo como la hoja", "public.v_devengo_cotejo"),
+        ("0029 nadie sin forma de entrar", "public.v_sin_entrada"),
+        ("0030 lineamientos editables", "public.lineamientos_solicitud"),
+        ("0031 ningún día se pierde", None),
     ]
 
     # Las migraciones que solo cambian funciones se comprueban por la función.
@@ -221,6 +225,11 @@ async def revisar_base() -> int:
     dentro_de = {
         "0017 excepción sin regla de fin de semana":
             ("tg_requests_before_insert", "bloque_menor_justificado"),
+        # Esta no crea nada: corrige lo que un aviso le dice a la gente. Se
+        # comprueba por el texto, porque que la función exista no dice nada
+        # sobre lo que afirma.
+        "0031 ningún día se pierde":
+            ("generar_alertas_vacaciones", "Ningún día se pierde"),
     }
 
     # Y una que solo quita una línea de una vista: se comprueba que la vista
@@ -314,6 +323,44 @@ async def revisar_base() -> int:
         print(f"  {OK} {conteos['feriados']} feriados cargados para este año")
     else:
         print(f"  {AVISO} Sin feriados este año: todos los días contarán como laborables")
+
+    # El historial de vacaciones no viaja en el repositorio: son los datos
+    # personales de 350 personas reales y no tienen por qué estar en GitHub.
+    # Se carga desde la hoja de Talento Humano en cada instalación, y por eso
+    # hay que decir aquí cuando falta: la migración crea la tabla vacía y la
+    # pantalla queda diciendo «todavía no hay vacaciones registradas», que
+    # parece un fallo del sistema y no un paso pendiente.
+    historial = await obtener_uno(
+        """select (select count(*) from public.vacaciones_historicas) as filas,
+                  (select count(distinct user_id) from public.vacaciones_historicas) as personas""")
+    if historial and historial["filas"]:
+        print(f"  {OK} {historial['filas']} vacaciones históricas de "
+              f"{historial['personas']} persona(s)")
+    else:
+        print(f"  {AVISO} Sin historial de vacaciones cargado")
+        print(f"      {GRIS}El colaborador verá «Todavía no hay vacaciones registradas a su"
+              f" nombre».{FIN}")
+        print(f"      {GRIS}Cárguelo desde la hoja de Talento Humano:{FIN}")
+        print("          python scripts/cargar_historial.py REGISTRO_DE_VACACIONES.xlsx")
+        print("          python scripts/cargar_historial.py REGISTRO_DE_VACACIONES.xlsx --aplicar")
+
+    # Quien no tiene correo entra por «primer ingreso» probando su identidad.
+    # Si además le falta la fecha de nacimiento o la de ingreso, ese camino
+    # está cerrado y no le queda ninguno: ni código al correo ni alta guiada.
+    # Es un encierro silencioso —la pantalla no lo dice— y por eso se cuenta.
+    encerradas = await obtener_uno(
+        """select count(*) as n from public.users
+            where activo and email is null
+              and (fecha_nacimiento is null or fecha_ingreso is null
+                   or ficha_completa or not correo_pendiente)""")
+    sin_correo = await obtener_uno(
+        "select count(*) as n from public.users where activo and email is null")
+    if encerradas and encerradas["n"]:
+        fallo(f"{encerradas['n']} persona(s) sin correo y sin forma de entrar",
+              "No tienen correo para el código ni datos para el primer ingreso. "
+              "Consulte public.v_sin_entrada")
+    elif sin_correo and sin_correo["n"]:
+        print(f"  {OK} {sin_correo['n']} sin correo, todas con primer ingreso disponible")
 
     # Quién puede entrar
     if conteos["personas"]:

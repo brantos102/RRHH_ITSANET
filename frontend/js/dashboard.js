@@ -81,6 +81,7 @@ async function cargar() {
     sugerido: reglas.parametros?.vacaciones_bloque_sugerido,
     minimo: reglas.parametros?.vacaciones_bloque_minimo,
     tabla: reglas.tabla, lineamientos: reglas.lineamientos,
+    avisos: reglas.avisos || [],
   } : null;
   Object.assign(estado, { firma, saldo, solicitudes, calendario, pendientes, anulaciones });
   montarNavegacion($("barra"), {
@@ -969,6 +970,30 @@ $("archivo-firma").addEventListener("change", async (e) => {
    Antes eran veinte opciones planas en un desplegable: para elegir bien
    había que leerlas todas. Ahora se responde una pregunta —emergencia del
    hogar, salud o asunto propio— y se afina dentro de ese grupo. */
+/* Cómo se ve una tarjeta de pilar, elegida o no.
+
+   En un solo sitio a propósito. Estaba en tres —al dibujarlas, al elegir una
+   y al limpiar el formulario— y el tercero se quedó con las clases viejas:
+   la tarjeta perdía su comentario flotante justo al abrir el formulario, que
+   es siempre. */
+function pintarPilar(boton, elegido) {
+  boton.className = `con-ayuda ayuda-abajo rounded-xl p-3 text-left ring-1 ${elegido
+    ? "bg-slate-900 text-white ring-slate-900"
+    : "ring-slate-200 hover:ring-slate-400"} focus:outline-none focus-visible:ring-2
+    focus-visible:ring-slate-900`;
+  const titulo = boton.querySelector("span");
+  if (titulo) {
+    titulo.className = `block text-sm font-medium ${elegido ? "text-white" : "text-slate-900"}`;
+  }
+  // La explicación solo se dibuja en pantallas sin cursor: donde hay cursor
+  // vive en el comentario flotante y aquí sobra.
+  const detalle = boton.querySelectorAll("span")[1];
+  if (detalle) {
+    detalle.className =
+      `mt-0.5 block text-xs leading-snug sm:hidden ${elegido ? "text-slate-300" : "text-slate-500"}`;
+  }
+}
+
 function montarPilares(catalogo) {
   estado.catalogo = catalogo;
   estado.tipos = (catalogo.pilares || []).flatMap((p) => p.subtipos);
@@ -990,16 +1015,31 @@ function montarPilares(catalogo) {
     return;
   }
 
+  /* Tres botones con el nombre solo, y la explicación al pasar el cursor.
+
+     Antes cada tarjeta llevaba debajo su párrafo: tres párrafos que el
+     operativo tiene delante cada vez que pide un permiso, y que deja de leer
+     a la segunda. Con el nombre solo, las tres opciones se comparan de un
+     vistazo; quien duda cuál es la suya pasa el cursor y lo lee.
+
+     En el teléfono no hay cursor, así que la explicación va debajo: ahí el
+     comentario flotante no se puede invocar y esconderlo dejaría la tarjeta
+     sin decir nada. Lo resuelve el CSS, no un condicional aquí. */
   $("pilares").innerHTML = (catalogo.pilares || []).map((p) => `
     <button type="button" data-pilar="${esc(p.codigo)}"
-            class="rounded-xl p-3 text-left ring-1 ring-slate-200 hover:ring-slate-400">
+            data-ayuda="${esc(p.descripcion)}"
+            class="con-ayuda ayuda-abajo rounded-xl p-3 text-left ring-1 ring-slate-200
+                   hover:ring-slate-400 focus:outline-none focus-visible:ring-2
+                   focus-visible:ring-slate-900">
       <span class="block text-sm font-medium text-slate-900">${esc(p.nombre)}</span>
-      <span class="mt-0.5 block text-xs leading-snug text-slate-500">${esc(p.descripcion)}</span>
+      <span class="mt-0.5 block text-xs leading-snug text-slate-500 sm:hidden">
+        ${esc(p.descripcion)}</span>
     </button>`).join("");
 
-  $("pilares").querySelectorAll("[data-pilar]").forEach((boton) =>
-    boton.addEventListener("click", () => elegirPilar(boton.dataset.pilar))
-  );
+  $("pilares").querySelectorAll("[data-pilar]").forEach((boton) => {
+    pintarPilar(boton, false);
+    boton.addEventListener("click", () => elegirPilar(boton.dataset.pilar));
+  });
 }
 
 function elegirPilar(codigo) {
@@ -1007,16 +1047,8 @@ function elegirPilar(codigo) {
   estado.pilarActual = pilar || null;
   estado.tipoActual = null;
 
-  $("pilares").querySelectorAll("[data-pilar]").forEach((b) => {
-    const activo = b.dataset.pilar === codigo;
-    b.className = `rounded-xl p-3 text-left ring-1 ${activo
-      ? "bg-slate-900 text-white ring-slate-900"
-      : "ring-slate-200 hover:ring-slate-400"}`;
-    b.querySelector("span").className =
-      `block text-sm font-medium ${activo ? "text-white" : "text-slate-900"}`;
-    b.querySelectorAll("span")[1].className =
-      `mt-0.5 block text-xs leading-snug ${activo ? "text-slate-300" : "text-slate-500"}`;
-  });
+  $("pilares").querySelectorAll("[data-pilar]")
+    .forEach((b) => pintarPilar(b, b.dataset.pilar === codigo));
 
   $("tipo-permiso").innerHTML =
     `<option value="">Seleccione…</option>` +
@@ -1059,11 +1091,7 @@ function abrirFormulario(tipo) {
   $("fecha-fin").parentElement.classList.remove("opacity-50");
   estado.modalidad = null;
   estado.pilarActual = null;
-  $("pilares").querySelectorAll("[data-pilar]").forEach((b) => {
-    b.className = "rounded-xl p-3 text-left ring-1 ring-slate-200 hover:ring-slate-400";
-    b.querySelector("span").className = "block text-sm font-medium text-slate-900";
-    b.querySelectorAll("span")[1].className = "mt-0.5 block text-xs leading-snug text-slate-500";
-  });
+  $("pilares").querySelectorAll("[data-pilar]").forEach((b) => pintarPilar(b, false));
   $("previsualizacion").classList.add("hidden");
   $("error-solicitud").classList.add("hidden");
   $("lista-adjuntos").innerHTML = "";
@@ -1084,10 +1112,10 @@ function abrirFormulario(tipo) {
     const fin = new Date(Date.now() + (aviso + bloque - 1) * 86400000);
     $("fecha-inicio").value = primera;
     $("fecha-fin").value = fin.toISOString().slice(0, 10);
-    $("aviso-vacaciones").classList.remove("hidden");
+    pintarLineamientos("vacacion");
     setTimeout(previsualizar, 50);
   } else {
-    $("aviso-vacaciones").classList.add("hidden");
+    pintarLineamientos("permiso");
   }
 
   $("aviso-sin-firma").classList.toggle("hidden", !!estado.firma?.registrada);
@@ -1155,6 +1183,31 @@ $("tipo-permiso").addEventListener("change", (e) => {
 });
 
 /* ------------------------------------------- días completos u horas sueltas */
+/* Los lineamientos que se leen antes de enviar.
+
+   Los escribe Talento Humano desde su módulo: son reglas internas de la
+   empresa —cuántos días de anticipación, si el período se toma entero— y
+   cambian por una circular, no por una versión del sistema. Estaban escritas
+   dentro del HTML, que es tanto como decir que para cambiar una coma hacía
+   falta un programador. */
+function pintarLineamientos(ambito) {
+  const caja = $("aviso-vacaciones");
+  const suyos = (estado.reglas?.avisos || [])
+    .filter((a) => a.ambito === ambito || a.ambito === "ambos");
+
+  // Sin lineamientos no se deja un recuadro vacío con un título prometiendo
+  // algo: simplemente no aparece.
+  caja.classList.toggle("hidden", suyos.length === 0);
+  if (!suyos.length) return;
+
+  $("aviso-titulo").textContent =
+    `Antes de enviar, tenga presente (${suyos.length})`;
+  $("aviso-lista").innerHTML = suyos.map((a) => `<li>${esc(a.texto)}</li>`).join("");
+  // Plegado cada vez que se abre el formulario: quien ya lo leyó una vez no
+  // tiene que volver a cerrarlo.
+  caja.open = false;
+}
+
 function elegirModalidad(modo) {
   estado.modalidad = modo;
   const porHoras = modo === "horas";

@@ -14,7 +14,7 @@ y su base legal— es un proyecto aparte, no un botón.
 """
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -33,6 +33,12 @@ class NuevoMensaje(BaseModel):
     texto: str = Field(..., min_length=1, max_length=2000)
     conversacion_id: str | None = None
     asunto: str | None = Field(None, max_length=120)
+    # A qué sede va la consulta. Se toma la de la persona cuando no se dice,
+    # que es lo que corresponde casi siempre; pero hay quien trabaja en una
+    # región y tiene su expediente en la otra, y quien pregunta por algo que
+    # resuelve la otra sede. Antes no había forma de decirlo y la consulta
+    # aterrizaba en la bandeja equivocada, donde nadie la esperaba.
+    region: Literal["sierra", "costa"] | None = None
 
 
 def _es_rrhh(usuario: dict) -> bool:
@@ -132,7 +138,9 @@ async def escribir(
             conversacion = await obtener_uno(
                 """insert into public.conversaciones (user_id, region, asunto)
                    values (%s, %s, %s) returning id, user_id, region, estado""",
-                (usuario["id"], usuario.get("region") or "sierra", datos.asunto),
+                (usuario["id"],
+                 datos.region or usuario.get("region") or "sierra",
+                 datos.asunto),
             )
 
         # Quien responde queda anotado: para el colaborador es saber con
@@ -177,18 +185,36 @@ async def cerrar(conversacion_id: str, usuario: RRHH) -> dict:
 
 
 @router.get("/contactos")
-async def contactos(usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
-    """Con quién se puede hablar: el equipo de la región de esta persona."""
+async def contactos(usuario: Annotated[dict, Depends(usuario_actual)],
+                    region: Literal["sierra", "costa"] | None = None) -> dict:
+    """Con quién se puede hablar, y a qué sedes se puede escribir.
+
+    La sede propia viene marcada, pero se devuelven las dos: hay quien
+    trabaja en una región y tiene su expediente en la otra. Del equipo se
+    dan nombre y cargo, no el correo de cada persona: para eso está el chat,
+    que además deja constancia.
+    """
+    propia = usuario.get("region") or "sierra"
+    elegida = region or propia
+
     filas = await obtener_todos(
-        "select nombre, cargo, email from public.rrhh_de_region(%s)",
-        (usuario.get("region") or "sierra",),
-    )
-    region = await obtener_uno(
-        "select nombre, sede from public.regiones where codigo = %s",
-        (usuario.get("region") or "sierra",),
-    )
+        "select nombre, cargo from public.rrhh_de_region(%s)", (elegida,))
+    sedes = await obtener_todos(
+        """select codigo, nombre, sede,
+                  case sede when 'Quito' then 'UIO' when 'Guayaquil' then 'GYE'
+                            else upper(left(sede, 3)) end as sigla
+             from public.regiones where activo order by codigo""")
+
+    datos = await obtener_uno(
+        "select nombre, sede from public.regiones where codigo = %s", (elegida,))
     return {
-        "region": region["nombre"] if region else "Sierra y Oriente",
-        "sede": region["sede"] if region else "Quito",
+        "region": datos["nombre"] if datos else "Sierra y Oriente",
+        "sede": datos["sede"] if datos else "Quito",
+        "codigo": elegida,
+        "propia": propia,
+        # La suya primero: es la que elige nueve de cada diez veces, y la
+        # que está a la izquierda se pulsa sin leer.
+        "sedes": sorted(({**s, "es_la_suya": s["codigo"] == propia} for s in sedes),
+                        key=lambda s: (not s["es_la_suya"], s["codigo"])),
         "equipo": filas,
     }
