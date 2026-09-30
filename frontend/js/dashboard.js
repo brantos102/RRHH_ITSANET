@@ -122,23 +122,65 @@ function diasEnteros(valor) {
   return Math.floor(Number(valor || 0));
 }
 
+/* La cifra tal cual es, con coma decimal y sin ceros de relleno: 8,75 · 15 · 1,25.
+
+   Redondear hacia abajo parecía amable —«8 días» se lee mejor que «8,75»—,
+   pero le quitaba a la persona tres cuartos de día y dejaba de cuadrar con la
+   hoja que Talento Humano le muestra si pregunta. Una cifra que no cuadra con
+   la del departamento no genera confianza, genera un reclamo. El decimal se
+   explica en el desplegable de la tarjeta: son 1,25 días por mes. */
+function diasExactos(valor) {
+  const n = Number(valor || 0);
+  return n.toLocaleString("es-EC", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
 function plural(n, singular, plural_) {
   return `${n} ${n === 1 ? singular : plural_}`;
 }
 
 function pintarResumen(perfil, saldo) {
-  // El número grande es lo EXIGIBLE HOY: los años de servicio ya cumplidos
-  // (Art. 69 CT), que además se pueden acumular hasta tres años (Art. 75 CT).
-  //
-  // Antes se mostraba `perfil.dias_vacaciones`, que suma también lo que se
-  // lleva acumulado del año en marcha. De ahí salía un titular de «45 días»
-  // encima de un detalle que decía «año 6 (8.75)»: dos cosas distintas
-  // presentadas como si fueran la misma, y ninguna de las dos se entendía.
-  const ganados = saldo?.dias_ganados ?? perfil.dias_vacaciones;
-  const enCurso = Number(saldo?.dias_en_curso || 0);
+  /* El número grande es EL SALDO: los días que la persona tiene, la misma
+     cifra que Talento Humano lleva en su hoja y la única que alguien
+     reconoce como suya.
 
-  $("saldo-dias").textContent = diasEnteros(ganados);
-  $("saldo-unidad").textContent = diasEnteros(ganados) === 1 ? "día" : "días";
+     Hubo dos versiones anteriores y las dos estaban mal por motivos
+     opuestos. La primera sumaba todo y mostraba «45 días» encima de un
+     detalle que decía «año 6 (8.75)». La segunda mostraba solo los días de
+     años cumplidos, y a quien ya había gozado todos sus años anteriores le
+     ponía un «0 días» enorme teniendo 8,75 disponibles. Un cero es peor que
+     un número raro: el número raro se pregunta, el cero se cree.
+
+     La distinción entre lo exigible y lo del año en marcha es real y sigue
+     estando —tomar lo del año en curso es un adelanto que autoriza Talento
+     Humano—, pero es un matiz del saldo, no un saldo distinto. Va debajo y
+     en palabras. */
+  const ganados = Number(saldo?.dias_ganados ?? 0);
+  const enCurso = Number(saldo?.dias_en_curso || 0);
+  const disponibles = saldo ? ganados + enCurso : Number(perfil.dias_vacaciones || 0);
+
+  $("saldo-dias").textContent = diasExactos(disponibles);
+  $("saldo-unidad").textContent = Number(disponibles) === 1 ? "día" : "días";
+
+  // Y se dice de qué se compone, que es lo que convierte una cifra en algo
+  // que la persona puede comprobar.
+  const composicion = $("saldo-composicion");
+  if (!saldo) {
+    composicion.textContent = "";
+  } else if (ganados > 0 && enCurso > 0) {
+    composicion.innerHTML =
+      `<strong>${diasExactos(ganados)}</strong> de años que ya cumplió y ` +
+      `<strong>${diasExactos(enCurso)}</strong> acumulados del año en marcha ` +
+      `(1,25 por mes).`;
+  } else if (ganados > 0) {
+    composicion.textContent =
+      `Todos de años que ya cumplió: puede pedirlos cuando quiera.`;
+  } else if (enCurso > 0) {
+    composicion.textContent =
+      `Acumulados del año en marcha, a razón de 1,25 por mes. Como el año ` +
+      `todavía no se cumple, tomarlos antes los autoriza Talento Humano.`;
+  } else {
+    composicion.textContent = "Todavía no ha acumulado días en este período.";
+  }
   $("antiguedad").textContent =
     perfil.anios_servicio === 1 ? "1 año" : `${perfil.anios_servicio} años`;
   $("fecha-ingreso").textContent = `Ingresó el ${fecha(perfil.fecha_ingreso)}`;
@@ -153,18 +195,23 @@ function pintarResumen(perfil, saldo) {
 
   const periodos = saldo?.periodos || [];
   const ganadosVivos = periodos.filter((p) => !p.caducado && p.devengado && Number(p.saldo) > 0);
-  $("periodos-resumen").textContent = ganadosVivos.length
-    ? `De ${plural(ganadosVivos.length, "año cumplido", "años cumplidos")}: ` +
-      ganadosVivos.map((p) => `año ${p.periodo} (${diasEnteros(p.saldo)})`).join(", ")
-    : "Aún no tiene días de años cumplidos";
+  // El detalle por período solo se muestra cuando hay más de uno: con uno
+  // solo repetiría lo que ya dice la línea de arriba.
+  $("periodos-resumen").textContent = ganadosVivos.length > 1
+    ? `Vienen de ${plural(ganadosVivos.length, "año", "años")}: ` +
+      ganadosVivos.map((p) => `${p.periodo}º (${diasExactos(p.saldo)})`).join(", ")
+    : "";
 
   // Lo del año en marcha, aparte y dicho como lo que es.
+  // Solo cuando hay de los dos tipos: si no, la línea de composición ya lo
+  // dijo y repetirlo hace que nadie lea ninguna de las dos.
   const curso = $("saldo-en-curso");
-  curso.classList.toggle("hidden", diasEnteros(enCurso) < 1);
-  if (diasEnteros(enCurso) >= 1) {
+  const mezcla = ganados > 0 && enCurso > 0;
+  curso.classList.toggle("hidden", !mezcla);
+  if (mezcla) {
     curso.textContent =
-      `Además lleva ${plural(diasEnteros(enCurso), "día acumulado", "días acumulados")} ` +
-      `del año en curso. Para tomarlos antes de cumplir el año, los autoriza Talento Humano.`;
+      `Los del año en marcha se pueden tomar por adelantado, pero eso lo ` +
+      `autoriza Talento Humano.`;
   }
 
   // Lo que se pierde si no se toma: es la única cifra que exige actuar.

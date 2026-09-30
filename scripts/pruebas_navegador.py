@@ -48,19 +48,26 @@ class Falla(Exception):
 
 # --------------------------------------------------------------- utilidades
 
-def _codigos() -> list[str]:
-    """Los códigos de acceso salen por el registro del backend.
+def _ultimo_codigo() -> str | None:
+    """El último código de acceso que escribió el backend.
 
-    En desarrollo el correo no se envía: se escribe. Es la única forma de
-    entrar sin un buzón real, y por eso estas pruebas solo corren fuera de
-    producción.
+    En desarrollo el correo no se envía: se escribe en el registro. Es la
+    única forma de entrar sin un buzón real, y por eso estas pruebas solo
+    corren fuera de producción.
+
+    Se mira el último y no cuántos hay. Contar dentro de una ventana fija del
+    registro parecía más seguro, pero el propio navegador genera tantas
+    líneas por pantalla que los códigos viejos se salen de la ventana: la
+    cuenta no subía nunca y la prueba se quedaba esperando un código que sí
+    había llegado.
     """
     salida = subprocess.run(
         [sys.executable, str(RAIZ / "scripts" / "ver_logs.py"), "--buscar",
-         "Código de acceso", "--ultimas", "400"],
+         "Código de acceso", "--ultimas", "300"],
         capture_output=True, text=True,
     )
-    return re.findall(r"Código de acceso: (\d{6})", salida.stdout)
+    codigos = re.findall(r"Código de acceso: (\d{6})", salida.stdout)
+    return codigos[-1] if codigos else None
 
 
 class Paso:
@@ -76,19 +83,20 @@ class Paso:
 
 
 async def _entrar(pagina, cedula: str) -> None:
-    antes = len(_codigos())
+    antes = _ultimo_codigo()
     await pagina.goto(f"{FRONTEND}/index.html")
     await pagina.fill("#cedula", cedula)
     await pagina.click("#btn-enviar")
     await pagina.wait_for_selector("#paso-codigo:not(.hidden)", timeout=15000)
     for _ in range(60):
-        if len(_codigos()) > antes:
+        ahora = _ultimo_codigo()
+        if ahora is not None and ahora != antes:
             break
         await pagina.wait_for_timeout(250)
     else:
         raise Falla(f"No llegó el código de acceso de {cedula}. "
-                    "¿Está el backend escribiendo su registro?")
-    await pagina.fill("#codigo", _codigos()[-1])
+                    "¿Está el backend escribiendo su registro en backend/logs/?")
+    await pagina.fill("#codigo", ahora)
     await pagina.wait_for_url("**/dashboard.html", timeout=20000)
 
 
@@ -108,11 +116,29 @@ async def recorrido_acceso(nav, capturas) -> Paso:
 
     await _entrar(pg, EMPLEADA)
     await pg.wait_for_selector("#saldo-dias", timeout=15000)
-    saldo = await pg.inner_text("#saldo-dias")
-    if "." in saldo or "," in saldo:
-        raise Falla(f"El saldo se muestra con decimales: «{saldo}». "
-                    "Al colaborador se le muestran días enteros.")
-    paso.ok(f"la colaboradora entra y ve su saldo: {saldo} día(s)")
+    await pg.wait_for_timeout(1200)
+    saldo = (await pg.inner_text("#saldo-dias")).strip()
+
+    # La cifra tiene que ser la real, decimales incluidos. Hubo una versión
+    # que redondeaba hacia abajo «para que se leyera mejor» y otra que
+    # mostraba solo los días de años cumplidos: a quien ya había gozado sus
+    # años anteriores le ponía un «0 días» enorme teniendo 8,75. Una cifra
+    # que no cuadra con la que lleva Talento Humano no genera confianza,
+    # genera un reclamo.
+    from app.db import obtener_uno
+    real = await obtener_uno(
+        "select dias_vacaciones from public.users where cedula = %s", (EMPLEADA,))
+    esperado = f"{float(real['dias_vacaciones']):g}".replace(".", ",")
+    if saldo != esperado:
+        raise Falla(f"El panel muestra «{saldo}» y la persona tiene {esperado} días. "
+                    "La cifra grande debe ser la misma que lleva Talento Humano.")
+    paso.ok(f"la colaboradora entra y ve su saldo exacto: {saldo} día(s)")
+
+    composicion = (await pg.inner_text("#saldo-composicion")).strip()
+    if not composicion:
+        raise Falla("El panel no explica de qué se compone el saldo. "
+                    "Una cifra sin explicación es una cifra que se discute.")
+    paso.ok(f"y de qué se compone: «{composicion[:70]}…»")
 
     if capturas:
         await pg.screenshot(path=str(capturas / "panel-empleada.png"), full_page=True)

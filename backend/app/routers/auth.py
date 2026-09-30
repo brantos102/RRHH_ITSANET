@@ -86,11 +86,18 @@ async def solicitar_token(datos: SolicitudToken, request: Request) -> RespuestaE
         (datos.cedula,),
     )
 
-    # Cédula no registrada o empleado inactivo: misma respuesta, sin pistas.
-    if usuario is None or not usuario["activo"]:
+    # Cédula no registrada, empleado inactivo, o sin correo donde enviar: la
+    # misma respuesta para los tres, sin pistas. Quien no tiene correo llega
+    # aquí desde que el campo admite nulo —antes traía una dirección
+    # inventada—, y sin esta comprobación el registro del código intentaba
+    # guardar un nulo y devolvía un 500 al que nadie le encuentra sentido. La
+    # pantalla de acceso ya consulta `necesita-ficha` antes y ofrece el alta
+    # guiada; esto es la red por debajo.
+    if usuario is None or not usuario["activo"] or not usuario["email"]:
         await registrar(
             request, "otp_cedula_no_registrada", cedula=datos.cedula,
-            detalle={"motivo": "sin_usuario" if usuario is None else "inactivo"},
+            detalle={"motivo": "sin_usuario" if usuario is None
+                     else "inactivo" if not usuario["activo"] else "sin_correo"},
         )
         return RespuestaEnvio(
             enviado=True, mensaje=MENSAJE_GENERICO, correo=None,

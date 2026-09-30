@@ -192,3 +192,81 @@ async def test_la_vista_de_control_deja_verlo_de_un_vistazo():
         "quedan períodos marcados como caducados con la caducidad apagada"
     )
     assert fila["periodos_con_fecha_de_vencimiento"] == 0
+
+
+async def test_se_avisa_de_la_acumulacion_que_si_hay_que_resolver(empleado):
+    """El aviso cambia de sentido, no desaparece.
+
+    Antes decía «Perderá 2,83 días el 07/02/2029», en rojo, citando un
+    Art. 75 que no dice eso. Ahora dice lo que sí corresponde: esta persona
+    arrastra tres o más años sin gozar, el Art. 75 agota ahí lo que ella
+    puede decidir por su cuenta, y programar las vacaciones pasa a ser cosa
+    de la empresa (Art. 73). Ningún día se pierde: lo no gozado se paga
+    (Art. 76).
+    """
+    # Una antigüedad que deja tres períodos cumplidos sin gozar.
+    await ejecutar(
+        """update public.users set fecha_ingreso = current_date - interval '5 years'
+            where id = %s""", (empleado["id"],))
+    await ejecutar("delete from public.vacation_periods where user_id = %s", (empleado["id"],))
+    await obtener_uno("select public.generar_periodos_vacaciones(%s) as n", (empleado["id"],))
+    await ejecutar("delete from public.notifications where user_id = %s", (empleado["id"],))
+
+    acumula = await obtener_uno(
+        "select periodos_sin_gozar, dias_de_anios_cumplidos "
+        "from public.v_acumulacion_excesiva where user_id = %s", (empleado["id"],))
+    assert acumula is not None, "cinco años sin gozar nada deberían figurar"
+    assert acumula["periodos_sin_gozar"] >= 3
+
+    await obtener_uno("select public.generar_alertas_vacaciones() as r")
+
+    avisos = await obtener_todos(
+        """select titulo, mensaje from public.notifications
+            where user_id = %s and tipo = 'vacaciones_acumuladas'""", (empleado["id"],))
+    assert avisos, "debería avisarse de la acumulación"
+    texto = " ".join(a["mensaje"] for a in avisos)
+    assert "Ningún día se pierde" in texto, "el aviso tiene que decir que los días no se pierden"
+    assert "Art. 76" in texto, "y citar el artículo que dice que se pagan"
+    for aviso in avisos:
+        assert "Perderá" not in aviso["titulo"]
+
+
+async def test_quien_esta_al_dia_no_recibe_ese_aviso(empleado):
+    await ejecutar("delete from public.notifications where user_id = %s", (empleado["id"],))
+    await obtener_uno("select public.generar_periodos_vacaciones(%s) as n", (empleado["id"],))
+    # Consumido todo lo de años cumplidos: no arrastra nada.
+    await ejecutar(
+        """update public.vacation_periods set dias_consumidos = dias_asignados
+            where user_id = %s and devengado""", (empleado["id"],))
+
+    await obtener_uno("select public.generar_alertas_vacaciones() as r")
+    avisos = await obtener_todos(
+        """select titulo from public.notifications
+            where user_id = %s and tipo = 'vacaciones_acumuladas'""", (empleado["id"],))
+    assert not avisos, "quien está al día no tiene por qué recibir este aviso"
+
+
+async def test_el_texto_del_articulo_75_es_el_de_la_ley():
+    """Citar mal un artículo en un sistema oficial no es un detalle de estilo.
+
+    El sistema tenía guardado «Si no las gozare, perderá el derecho sobre las
+    acumuladas de más de tres años». Esa frase no está en la ley, y de ella
+    salía todo lo demás: la fecha de vencimiento, los 9.554 días marcados
+    como perdidos y las alertas de severidad crítica.
+    """
+    art75 = await obtener_uno(
+        "select texto from public.legal_references where codigo = 'CT_ART_75'")
+    assert "perderá" not in art75["texto"].lower(), (
+        "el Art. 75 no habla de perder días; el Art. 76 dice que se pagan"
+    )
+    assert "tres años" in art75["texto"]
+
+    art76 = await obtener_uno(
+        "select texto from public.legal_references where codigo = 'CT_ART_76'")
+    assert art76 is not None, "faltaba el artículo que dice qué pasa con lo no gozado"
+    assert "equivalente de las remuneraciones" in art76["texto"]
+
+    const = await obtener_uno(
+        "select texto from public.legal_references where codigo = 'CONST_ART_326_2'")
+    assert const is not None
+    assert "irrenunciables" in const["texto"]

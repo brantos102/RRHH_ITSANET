@@ -55,22 +55,57 @@
   <!-- ================= Resumen ================= -->
   <section class="grid gap-3 sm:grid-cols-3">
     <article class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:col-span-1">
-      <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Vacaciones que puede tomar</p>
+      <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Días disponibles</p>
+      <!-- La cifra grande es la que la persona reconoce como suya: la misma
+           que Talento Humano lleva en su hoja. Mostrar aquí solo los días de
+           años cumplidos ponía un «0 días» enorme delante de alguien que
+           tenía 8,75, y ese cero no se lo explica nadie. El desglose —qué
+           parte es exigible y qué parte se lleva acumulada del año en
+           marcha— va debajo, dicho en palabras. -->
       <p class="mt-2 flex items-baseline gap-1.5">
         <span id="saldo-dias" class="text-4xl font-semibold tabular-nums">—</span>
         <span id="saldo-unidad" class="text-sm text-slate-500">días</span>
       </p>
-      <p id="periodos-resumen" class="mt-2 text-sm text-slate-500"></p>
-      <!-- Lo que se acumula del año en marcha va aparte: todavía no se cumple
-           el año, así que tomarlo es un adelanto y lo autoriza Talento Humano.
-           Sumarlo al número grande era lo que hacía incomprensible la cifra. -->
+      <p id="saldo-composicion" class="mt-2 text-sm leading-relaxed text-slate-600"></p>
+      <p id="periodos-resumen" class="mt-1 text-sm text-slate-500"></p>
       <p id="saldo-en-curso" class="mt-1 hidden text-sm text-slate-500"></p>
       <p id="saldo-por-vencer" class="mt-1 hidden text-sm font-medium text-amber-700"></p>
       <p id="saldo-aviso" class="mt-2 hidden rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900"></p>
+
+      <!-- Un desplegable y no otra pantalla: quien no tiene la duda no lo
+           abre, y quien la tiene la resuelve sin salir de aquí. -->
+      <details class="mt-3 rounded-xl bg-slate-50 px-3 py-2">
+        <summary class="cursor-pointer text-sm font-medium text-slate-700">
+          ¿De dónde salen estos días?
+        </summary>
+        <div class="mt-2 space-y-2 text-xs leading-relaxed text-slate-600">
+          <p>
+            La ley le da <strong>15 días por cada año trabajado</strong>, y uno
+            más por cada año a partir del sexto, hasta 15 adicionales
+            (Art.&nbsp;69 del Código del Trabajo).
+          </p>
+          <p>
+            Esos 15 días no aparecen de golpe al cumplir el año: se van
+            acumulando <strong>1,25 días cada mes</strong> —15 dividido para
+            12—. Por eso su saldo tiene decimales. Si lleva tres meses en el
+            año en curso, lleva acumulados 3,75 días.
+          </p>
+          <p>
+            Son <strong>días calendario</strong>, no laborables: cuentan los
+            sábados y domingos que caigan dentro de su descanso.
+          </p>
+          <p>
+            Los días que no tome <strong>no se pierden</strong>. Puede
+            acumularlos hasta tres años (Art.&nbsp;75) y, si al final no los
+            goza, se le pagan (Art.&nbsp;76).
+          </p>
+        </div>
+      </details>
+
       <button id="btn-detalle-saldo"
               class="mt-3 text-sm font-medium text-slate-900 underline decoration-slate-300 underline-offset-4
                      hover:decoration-slate-900">
-        ¿Por qué tengo estos días?
+        Ver mi historial de vacaciones
       </button>
     </article>
 

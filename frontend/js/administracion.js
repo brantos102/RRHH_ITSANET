@@ -210,6 +210,15 @@ async function cargarTipos() {
     `<input type="checkbox" data-tipo="${t.id}" data-campo="${campo}" ${t[campo] ? "checked" : ""}
             class="h-4 w-4 rounded border-slate-300">`;
 
+  // Vacío es «sin tope». Se distingue de cero, que prohibiría el tipo entero.
+  const tope = (t, campo, unidad) =>
+    `<input type="text" inputmode="decimal" data-tope="${t.id}" data-campo="${campo}"
+            value="${t[campo] == null ? "" : dias(t[campo])}" placeholder="sin tope"
+            aria-label="Máximo de ${unidad} de ${esc(t.nombre)}"
+            class="w-20 rounded-lg border-0 bg-slate-50 px-2 py-1 text-right text-sm tabular-nums
+                   ring-1 ring-slate-300 placeholder:text-xs placeholder:text-slate-400
+                   focus:bg-white focus:ring-2 focus:ring-slate-900">`;
+
   $("tabla-tipos").innerHTML = `
     <table class="w-full text-left text-sm">
       <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
@@ -231,12 +240,42 @@ async function cargarTipos() {
             <td class="px-3 py-2.5 text-center">${casilla(t, "requiere_justificacion")}</td>
             <td class="px-3 py-2.5 text-center">${casilla(t, "requiere_firma")}</td>
             <td class="px-3 py-2.5 text-center">${casilla(t, "descuenta_vacaciones")}</td>
-            <td class="px-3 py-2.5 text-right tabular-nums">${t.max_dias ?? "—"}</td>
-            <td class="px-3 py-2.5 text-right tabular-nums">${t.max_horas ?? "—"}</td>
+            <td class="px-3 py-2.5 text-right">${tope(t, "max_dias", "días")}</td>
+            <td class="px-3 py-2.5 text-right">${tope(t, "max_horas", "horas")}</td>
             <td class="px-3 py-2.5 text-center">${casilla(t, "activo")}</td>
           </tr>`).join("")}
       </tbody>
     </table>`;
+
+  /* Los topes se editan escribiendo encima, no en otro formulario.
+
+     Un tope mal puesto bloquea solicitudes legítimas —«Cita médica» con un
+     máximo de 1 día impide pedir dos días de reposo—, y hasta ahora la única
+     salida era tocar la base a mano. Se guarda al salir del campo, no en cada
+     tecla: escribir «10» pasaría por «1» y guardaría eso primero.
+
+     Vacío significa «sin tope», que es distinto de cero: cero prohibiría el
+     tipo entero. */
+  $("tabla-tipos").querySelectorAll("input[data-tope]").forEach((campo) => {
+    const original = campo.value;
+    campo.addEventListener("change", async () => {
+      const texto = campo.value.trim().replace(",", ".");
+      const valor = texto === "" ? null : Number(texto);
+      if (valor !== null && (!Number.isFinite(valor) || valor <= 0)) {
+        campo.value = original;
+        return avisar("El tope debe ser un número mayor que cero, o quedar vacío "
+                      + "si ese tipo no tiene límite.", true);
+      }
+      try {
+        const r = await api.editarTipo(campo.dataset.tope, { [campo.dataset.campo]: valor });
+        avisar(r.mensaje);
+        await cargarTipos();
+      } catch (err) {
+        campo.value = original;
+        avisar(err.message, true);
+      }
+    });
+  });
 
   $("tabla-tipos").querySelectorAll("input[data-tipo]").forEach((c) =>
     c.addEventListener("change", async () => {
@@ -310,7 +349,6 @@ async function cargarAntiguedades() {
         <tr><th class="px-3 py-2.5">Nombre</th><th class="px-3 py-2.5">Departamento</th>
             <th class="px-3 py-2.5">Ingreso</th><th class="px-3 py-2.5 text-right">Años</th>
             <th class="px-3 py-2.5 text-right">Días por año</th><th class="px-3 py-2.5 text-right">Saldo</th>
-            <th class="px-3 py-2.5 text-center">Caducados</th>
             <th class="px-3 py-2.5 text-right">Períodos</th></tr>
       </thead>
       <tbody class="divide-y divide-slate-100">
@@ -322,12 +360,6 @@ async function cargarAntiguedades() {
             <td class="px-3 py-2.5 text-right tabular-nums">${p.anios}</td>
             <td class="px-3 py-2.5 text-right tabular-nums font-medium">${Number(p.dias_por_anio)}</td>
             <td class="px-3 py-2.5 text-right tabular-nums">${Number(p.saldo)}</td>
-            <td class="px-3 py-2.5 text-center">
-              ${p.periodos_caducados
-                ? `<span class="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">
-                     ${p.periodos_caducados}</span>`
-                : `<span class="text-slate-300">—</span>`}
-            </td>
             <td class="px-3 py-2.5 text-right">
               <button type="button" data-periodos="${p.id}" data-nombre="${esc(p.nombre)}"
                       class="rounded-lg px-2.5 py-1 text-xs font-medium text-slate-600
@@ -346,6 +378,17 @@ async function cargarAntiguedades() {
    ya los tomó antes de que existiera el sistema, y entonces la regla le
    bloquea unas vacaciones normales por un dato que no refleja la realidad.
    Solo Talento Humano lo corrige, y queda constancia de por qué. */
+/* Un período ya gozado por completo no tiene fines de semana que confirmar:
+   se fueron con los días. Antes ofrecía «corregir» igual, y eso mandaba a
+   Talento Humano a revisar a mano algo que la propia tabla ya respondía. */
+const agotado = (p) => Number(p.dias_saldo) <= 0 && Number(p.dias_asignados) > 0;
+
+/* Con coma decimal y sin ceros de relleno: 15 · 8,75 · 1,25. Aquí sí se
+   muestran los decimales —es la pantalla de quien lleva la cuenta— y la
+   cabecera de cada columna explica de dónde salen. */
+const dias = (v) => Number(v || 0).toLocaleString("es-EC",
+  { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+
 async function abrirPeriodos(userId, nombre) {
   $("periodos-persona").textContent = nombre;
   $("periodos-cuerpo").innerHTML =
@@ -357,11 +400,21 @@ async function abrirPeriodos(userId, nombre) {
     $("periodos-cuerpo").innerHTML = periodos.length ? `
       <table class="w-full text-left text-sm">
         <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-          <tr><th class="px-3 py-2">Año</th><th class="px-3 py-2">Desde</th>
-              <th class="px-3 py-2">Hasta</th><th class="px-3 py-2 text-right">Días</th>
-              <th class="px-3 py-2 text-right">Saldo</th>
-              <th class="px-3 py-2 text-center">Fines de semana</th>
-              <th class="px-3 py-2">Estado</th></tr>
+          <tr>
+            <th class="px-3 py-2" title="Año de servicio contado desde la fecha de ingreso">Año</th>
+            <th class="px-3 py-2">Desde</th>
+            <th class="px-3 py-2">Hasta</th>
+            <th class="px-3 py-2 text-right"
+                title="Días que le corresponden por ese año (Art. 69). Del año en curso se acumulan 1,25 por mes.">
+              Le tocan</th>
+            <th class="px-3 py-2 text-right"
+                title="Días de ese año que ya gozó">Gozó</th>
+            <th class="px-3 py-2 text-right"
+                title="Lo que queda de ese año">Le queda</th>
+            <th class="px-3 py-2 text-center"
+                title="Fines de semana obligatorios dentro del descanso, consumidos sobre el total">
+              Fines de semana</th>
+            <th class="px-3 py-2">Estado</th></tr>
         </thead>
         <tbody class="divide-y divide-slate-100">
           ${periodos.map((p) => `
@@ -369,12 +422,13 @@ async function abrirPeriodos(userId, nombre) {
               <td class="px-3 py-2 font-medium">${p.periodo}</td>
               <td class="px-3 py-2 whitespace-nowrap text-slate-600">${fecha(p.fecha_desde)}</td>
               <td class="px-3 py-2 whitespace-nowrap text-slate-600">${fecha(p.fecha_hasta)}</td>
-              <td class="px-3 py-2 text-right tabular-nums">${Number(p.dias_asignados)}</td>
-              <td class="px-3 py-2 text-right tabular-nums">${Number(p.dias_saldo)}</td>
+              <td class="px-3 py-2 text-right tabular-nums">${dias(p.dias_asignados)}</td>
+              <td class="px-3 py-2 text-right tabular-nums text-slate-600">${dias(p.dias_consumidos)}</td>
+              <td class="px-3 py-2 text-right font-medium tabular-nums">${dias(p.dias_saldo)}</td>
               <td class="px-3 py-2 text-center">
                 ${p.fines_semana_obligatorios ? `
                   <span class="tabular-nums">${p.fines_semana_consumidos}/${p.fines_semana_obligatorios}</span>
-                  ${p.caducado ? "" : `
+                  ${(p.caducado || agotado(p)) ? "" : `
                     <button type="button" data-fds="${p.periodo}"
                             data-user="${userId}" data-tope="${p.fines_semana_obligatorios}"
                             data-actual="${p.fines_semana_consumidos}"
@@ -384,8 +438,9 @@ async function abrirPeriodos(userId, nombre) {
               </td>
               <td class="px-3 py-2 text-xs">
                 ${p.caducado ? '<span class="text-rose-600">caducado</span>'
-                  : p.devengado ? '<span class="text-emerald-700">ganado</span>'
-                  : '<span class="text-slate-500">en curso</span>'}
+                  : agotado(p) ? '<span class="text-slate-500">gozado completo</span>'
+                  : p.devengado ? '<span class="text-emerald-700">disponible</span>'
+                  : '<span class="text-sky-700">en curso</span>'}
               </td>
             </tr>`).join("")}
         </tbody>

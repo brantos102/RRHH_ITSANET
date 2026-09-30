@@ -193,6 +193,8 @@ async def revisar_base() -> int:
         ("0018 hora real de regreso", "public.v_retornos"),
         ("0019 confirmar correo, cargo y jefe", "public.confirmaciones_correo"),
         ("0020 sin caducidad inventada", "public.v_caducidad"),
+        ("0021 Art. 75 correcto y control de acumulación", "public.v_acumulacion_excesiva"),
+        ("0022 correo en blanco de quien no lo tiene", None),
     ]
 
     # Las migraciones que solo cambian funciones se comprueban por la función.
@@ -206,12 +208,27 @@ async def revisar_base() -> int:
     # Hay migraciones que no crean nada: solo cambian el cuerpo de una función
     # que ya existía. Comprobar que la función existe no diría nada, así que se
     # busca la marca del cambio dentro de su código.
+    # Y una que solo cambia una restricción: se comprueba la restricción.
+    columnas_nulas = {
+        "0022 correo en blanco de quien no lo tiene": ("users", "email"),
+    }
+
     dentro_de = {
         "0017 excepción sin regla de fin de semana":
             ("tg_requests_before_insert", "bloque_menor_justificado"),
     }
     for nombre, objeto in migraciones:
-        if nombre in dentro_de:
+        if nombre in columnas_nulas:
+            tabla, columna = columnas_nulas[nombre]
+            fila = await obtener_uno(
+                """select is_nullable = 'YES' as existe
+                     from information_schema.columns
+                    where table_schema = 'public' and table_name = %s
+                      and column_name = %s""",
+                (tabla, columna),
+            )
+            fila = fila or {"existe": False}
+        elif nombre in dentro_de:
             funcion, marca = dentro_de[nombre]
             fila = await obtener_uno(
                 """select coalesce(position(%s in prosrc) > 0, false) as existe

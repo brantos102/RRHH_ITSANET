@@ -43,6 +43,9 @@ sys.path.insert(0, str(RAIZ / "backend"))
 
 VERDE, ROJO, AMARILLO, GRIS, FIN = "\033[92m", "\033[91m", "\033[93m", "\033[90m", "\033[0m"
 
+# Dominio que la carga usaba para fabricar direcciones. Se conserva solo
+# para reconocer y limpiar lo ya cargado: la migración 0022 borra esas
+# direcciones y el campo pasa a admitir nulo.
 DOMINIO_MARCADOR = "pendiente.itsanet.local"
 
 
@@ -346,11 +349,16 @@ select count(*)                             as personas_activas,
 def generar(personas: list[dict], saldos: dict[str, float], destino: Path) -> dict:
     filas, con_correo, con_saldo = [], 0, 0
     for p in personas:
+        # Quien no trae correo llega SIN correo. Antes se le fabricaba uno
+        # —«0927127886@pendiente.itsanet.local»— porque la columna no admitía
+        # nulos, y eso dejaba 225 direcciones inventadas en la nómina, un
+        # dominio que no existe al que se enviaban los códigos de acceso, y
+        # el formulario de primer ingreso mostrando esa dirección falsa como
+        # si fuera un dato de la persona. Los correos aquí son personales: la
+        # empresa no los inventa, los registra cada quien al entrar.
         correo = p["correo"]
         pendiente = not correo
-        if pendiente:
-            correo = f"{p['cedula']}@{DOMINIO_MARCADOR}"
-        else:
+        if not pendiente:
             con_correo += 1
         saldo = saldos.get(p["nombre_clave"])
         if saldo is not None:
@@ -358,7 +366,8 @@ def generar(personas: list[dict], saldos: dict[str, float], destino: Path) -> di
 
         filas.append(
             "  (" + ", ".join([
-                comilla(p["cedula"]), comilla(p["nombre"]), comilla(correo),
+                comilla(p["cedula"]), comilla(p["nombre"]),
+                "null" if pendiente else comilla(correo),
                 "true" if pendiente else "false",
                 comilla(p["telefono"]), comilla(p["cargo"]), comilla(p["departamento"]),
                 comilla(p["bodega"]), comilla(p["centro_costo"]), comilla(p["cliente"]),
