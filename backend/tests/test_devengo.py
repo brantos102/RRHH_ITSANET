@@ -51,24 +51,37 @@ async def test_al_cumplir_el_anio_se_completa_el_periodo():
     assert float(fila["dias_vacaciones"]) >= 15
 
 
-async def test_la_antiguedad_larga_no_acumula_mas_de_lo_que_la_ley_permite():
-    """Un período que nace vencido está caducado desde el primer momento.
+async def test_una_antiguedad_larga_no_pierde_dias_por_el_camino():
+    """Ningún período nace extinguido, por viejo que sea.
 
-    Con 18 años de servicio la suma de todos los períodos pasa de 360 días.
-    Si no se marcan caducados al crearlos, el saldo desborda el rango de la
-    columna y la persona no puede cargarse: era la mayoría de la planilla.
+    Antes sí: los que quedaban fuera del plazo de acumulación del Art. 75
+    nacían marcados como caducados, y eso mantenía el saldo por debajo del
+    tope de la columna. Pero el artículo PERMITE acumular hasta tres años, no
+    obliga a extinguir lo que pase de ahí, y la empresa no extingue nada. Un
+    sistema que da por perdidos días de un trabajador tiene que estar muy
+    seguro, y aquí no había ninguna razón para estarlo.
+
+    Con dieciocho años sin gozar un solo día la suma pasa de 360. Eso no es
+    un saldo realista —es una persona cuyo historial todavía no se ha
+    cargado—, pero tiene que caber: durante la carga inicial el sistema pasa
+    por ese estado antes de descontar lo gozado.
     """
     user_id = await _crear("1700000019", 18 * 12 + 7)
     fila = await obtener_uno(
         "select dias_vacaciones from public.users where id = %s", (user_id,))
     saldo = float(fila["dias_vacaciones"])
-    assert 0 < saldo < 100, f"saldo irreal tras 18 años: {saldo}"
+    assert saldo > 300, f"con 18 años sin gozar nada el saldo debería ser alto: {saldo}"
 
-    vencidos = await obtener_uno(
+    periodos = await obtener_uno(
         """select count(*) filter (where caducado) as caducados,
+                  count(*) filter (where vence_en is not null) as con_vencimiento,
                   count(*) as total
              from public.vacation_periods where user_id = %s""", (user_id,))
-    assert vencidos["caducados"] > 0, "los períodos viejos deben nacer caducados"
+    assert periodos["total"] >= 18
+    assert periodos["caducados"] == 0, "ningún período debe nacer extinguido"
+    assert periodos["con_vencimiento"] == 0, (
+        "ni con una fecha de vencimiento que nadie va a hacer cumplir"
+    )
 
 
 async def test_la_carga_inicial_respeta_el_saldo_de_la_planilla():

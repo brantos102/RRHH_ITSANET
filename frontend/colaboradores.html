@@ -17,7 +17,7 @@
       <div>
         <h1 class="font-medium">Períodos de mis colaboradores</h1>
         <p class="mt-0.5 text-sm text-slate-500">
-          Saldo, antigüedad y días en riesgo de caducar de la gente a su cargo
+          Saldo, antigüedad y fines de semana pendientes de la gente a su cargo
         </p>
       </div>
       <input type="search" id="buscar-colaborador" placeholder="Nombre, cédula o cargo"
@@ -42,6 +42,15 @@ montarNavegacion(document.getElementById("barra"), { activo: "jefe" });
 const hoy = new Date();
 try {
   const gente = await api.colaboradores();
+  /* La columna «Vence» solo existe si la caducidad existe.
+
+     El sistema llegó a mostrar «vence el 31 may 2030» a alguien que había
+     entrado cuatro meses antes. Esa fecha salía de aplicar el Art. 75 como
+     si obligara a extinguir días, y no obliga: permite acumular hasta tres
+     años. La empresa no extingue nada, así que la columna no tiene qué
+     decir, y una columna entera de guiones invita a preguntarse qué falta.
+     Se muestra solo cuando la regla está en vigor de verdad. */
+  const hayCaducidad = gente.some((p) => p.caducidad_activa);
   document.getElementById("tabla").innerHTML = gente.length ? `
     <table class="w-full text-left text-sm">
       <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
@@ -49,7 +58,8 @@ try {
             <th class="px-3 py-2.5">Ingreso</th><th class="px-3 py-2.5 text-right">Años</th>
             <th class="px-3 py-2.5 text-right">Saldo</th>
             <th class="px-3 py-2.5 text-right">Fines de semana</th>
-            <th class="px-3 py-2.5">Vence</th><th class="px-3 py-2.5 text-center">En trámite</th></tr>
+            ${hayCaducidad ? `<th class="px-3 py-2.5">Vence</th>` : ""}
+            <th class="px-3 py-2.5 text-center">En trámite</th></tr>
       </thead>
       <tbody class="divide-y divide-slate-100">
         ${gente.map((p) => {
@@ -65,10 +75,10 @@ try {
             <td class="px-3 py-2.5 text-right tabular-nums">${p.anios}</td>
             <td class="px-3 py-2.5 text-right tabular-nums font-medium">${Number(p.saldo)}</td>
             <td class="px-3 py-2.5 text-right tabular-nums">${p.fines_semana_pendientes}</td>
-            <td class="px-3 py-2.5 whitespace-nowrap">
+            ${hayCaducidad ? `<td class="px-3 py-2.5 whitespace-nowrap">
               ${vence ? `<span class="${urgente ? "font-medium text-rose-700" : "text-slate-600"}">
                           ${fecha(p.proximo_vencimiento)}</span>` : "—"}
-            </td>
+            </td>` : ""}
             <td class="px-3 py-2.5 text-center">
               ${p.en_tramite ? `<span class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
                                  ${p.en_tramite}</span>` : `<span class="text-slate-300">—</span>`}

@@ -5,6 +5,10 @@ __pycache__/
 .env.local
 .pytest_cache/
 *.log
+# Y los rotados: `*.log` no cubre `sistema.log.1`, y esos archivos
+# llevan la cédula de cada persona en cada línea (LOPDP).
+*.log.[0-9]*
+backend/logs/
 
 # Dependencias del compilador de estilos (no hacen falta para ejecutar)
 build/node_modules/

@@ -64,9 +64,15 @@ async def test_el_saldo_separa_lo_ganado_de_lo_que_se_acumula(persona_con_cinco_
             == pytest.approx(float(d["saldo_cacheado"])))
     assert d["desalineado"] is False
 
-    # Y lo que caducó se informa aparte: son días que la persona perdió.
-    assert float(d["dias_caducados"]) > 0, "con ocho años de antigüedad algo caducó"
-    assert d["proximo_vence_en"] is not None
+    # Y no caducó nada, porque la empresa no extingue días. Las dos claves
+    # siguen existiendo —la tarjeta las lee y el día que haya un contrato de
+    # plazo fijo harán falta—, pero vienen vacías.
+    assert float(d["dias_caducados"]) == 0, (
+        "con la caducidad apagada nadie pierde días, por antiguo que sea"
+    )
+    assert d["proximo_vence_en"] is None, (
+        "una fecha de vencimiento que no va a cumplirse no se muestra"
+    )
 
 
 async def test_el_desglose_llega_por_la_api(cliente, auth, empleado):

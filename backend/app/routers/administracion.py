@@ -480,8 +480,12 @@ async def colaboradores(usuario: Annotated[dict, Depends(exigir_rol("jefe", "rrh
                public.anios_cumplidos(u.fecha_ingreso) as anios,
                u.dias_vacaciones as saldo,
                public.fines_semana_pendientes(u.id) as fines_semana_pendientes,
+               -- Nulo mientras la caducidad esté apagada, que es lo normal:
+               -- la empresa no extingue días y una fecha de vencimiento que
+               -- no va a cumplirse asusta sin motivo.
                (select min(p.vence_en) from public.vacation_periods p
                  where p.user_id = u.id and not p.caducado and p.dias_saldo > 0) as proximo_vencimiento,
+               public.caducidad_activa() as caducidad_activa,
                (select count(*) from public.requests r
                  where r.user_id = u.id and r.estado in ('pendiente_jefe','pendiente_rrhh')) as en_tramite
         from public.users u
