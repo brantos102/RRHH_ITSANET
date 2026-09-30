@@ -67,7 +67,13 @@ try {
           const urgente = vence && (vence - hoy) / 86400000 < 120;
           return `<tr class="hover:bg-slate-50">
             <td class="px-3 py-2.5">
-              <p class="font-medium">${esc(p.nombre)}</p>
+              <!-- El nombre lleva a su expediente: ficha, historial de
+                   vacaciones —incluido lo de la hoja de Talento Humano—,
+                   solicitudes y períodos, en una pantalla. Era la pregunta
+                   que no tenía respuesta: «¿cuándo tomó vacaciones Fulano?». -->
+              <a href="persona.html?id=${encodeURIComponent(p.id)}"
+                 class="font-medium text-slate-900 underline decoration-slate-300
+                        underline-offset-4 hover:decoration-slate-900">${esc(p.nombre)}</a>
               <p class="text-xs text-slate-500">${esc(p.cedula)}</p>
             </td>
             <td class="px-3 py-2.5 text-slate-600">${esc(p.cargo || "—")}</td>

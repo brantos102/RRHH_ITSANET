@@ -78,8 +78,14 @@ function tablaUsuarios(usuarios) {
         ${usuarios.map((u) => `
           <tr class="${u.activo ? "" : "opacity-50"} hover:bg-slate-50">
             <td class="px-3 py-2.5">
-              <p class="font-medium">${esc(u.nombre)}</p>
-              <p class="text-xs text-slate-500">${esc(u.email)}</p>
+              <!-- Al expediente: historial de vacaciones, solicitudes y
+                   períodos en una pantalla. Desde aquí se administra la
+                   ficha; para ver qué ha tomado hay que ir a su expediente. -->
+              <a href="persona.html?id=${encodeURIComponent(u.id)}"
+                 class="font-medium text-slate-900 underline decoration-slate-300
+                        underline-offset-4 hover:decoration-slate-900">${esc(u.nombre)}</a>
+              <p class="text-xs text-slate-500">${
+                esc(u.email || "sin correo registrado")}</p>
             </td>
             <td class="px-3 py-2.5 font-mono text-xs">${esc(u.cedula)}</td>
             <td class="px-3 py-2.5"><span class="whitespace-nowrap rounded-full bg-slate-100 px-2 py-0.5 text-xs">

@@ -689,6 +689,16 @@ async def recorrido_expediente(nav, capturas) -> Paso:
     if await otra.locator("#contenido").is_visible():
         raise Falla("Un colaborador abrió el expediente de otra persona escribiendo la dirección.")
     paso.ok("un compañero no lo abre ni escribiendo la dirección")
+
+    # Y se llega también por el nombre, desde donde ya se está mirando gente.
+    for pantalla, selector in (("colaboradores.html", "#tabla a[href^='persona.html']"),
+                               ("administracion.html#usuarios", "#tabla-usuarios a[href^='persona.html']")):
+        await pg.goto(f"{FRONTEND}/{pantalla}")
+        await pg.wait_for_timeout(2500)
+        if not await pg.locator(selector).count():
+            raise Falla(f"Desde {pantalla} no se puede abrir el expediente de nadie: "
+                        "el nombre tendría que llevar a él.")
+    paso.ok("se llega por el nombre desde Colaboradores y desde Usuarios")
     return paso
 
 
