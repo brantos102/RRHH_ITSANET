@@ -127,6 +127,22 @@ export const api = {
   confirmarCargoYJefe: (datos) =>
     peticion("/mi-ficha/confirmar", { method: "POST", body: JSON.stringify(datos) }),
   jefaturas: () => peticion("/catalogos/jefaturas"),
+  // --- personal temporal ---
+  temporales: (buscar = "") =>
+    peticion(`/temporal${buscar ? `?buscar=${encodeURIComponent(buscar)}` : ""}`),
+  crearTemporal: (datos) =>
+    peticion("/temporal", { method: "POST", body: JSON.stringify(datos) }),
+  editarTemporal: (id, datos) =>
+    peticion(`/temporal/${id}`, { method: "PATCH", body: JSON.stringify(datos) }),
+  temporalEntrada: (temporal_id) =>
+    peticion("/temporal/entrada", { method: "POST", body: JSON.stringify({ temporal_id }) }),
+  temporalSalida: (temporal_id) =>
+    peticion("/temporal/salida", { method: "POST", body: JSON.stringify({ temporal_id }) }),
+  temporalesDentro: () => peticion("/temporal/dentro"),
+  temporalesSinCerrar: () => peticion("/temporal/sin-cerrar"),
+  cerrarJornadaTemporal: (id, datos) =>
+    peticion(`/temporal/jornadas/${id}/cerrar`, { method: "POST", body: JSON.stringify(datos) }),
+  temporalSemana: (params = "") => peticion(`/temporal/semana${params}`),
 
   tiposPermiso: () => peticion("/catalogos/tipos-permiso"),
   catalogoPermisos: () => peticion("/catalogos/permisos"),

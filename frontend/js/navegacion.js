@@ -6,6 +6,13 @@ import { sesion, esc } from "./api.js";
 
 const MODULOS = [
   { id: "panel",    texto: "Mi panel",     href: "dashboard.html",   roles: "*" },
+  // Lo operativo va arriba: son un enlace cada uno, se usan a diario y al
+  // final de la lista quedaban por debajo del corte de la barra.
+  { id: "garita", texto: "Garita", href: "garita.html", roles: ["guardia", "rrhh", "admin"] },
+  // El personal temporal es otro sistema: viene por jornadas y se le paga por
+  // semana. Lo usa la garita para registrar y Talento Humano para liquidar.
+  { id: "temporal", texto: "Personal temporal", href: "temporal.html",
+    roles: ["guardia", "rrhh", "admin"] },
   {
     id: "jefe", texto: "Jefe", roles: ["jefe", "rrhh", "admin"],
     opciones: [
@@ -49,7 +56,6 @@ const MODULOS = [
       { texto: "Bitácora", href: "administracion.html#bitacora" },
     ],
   },
-  { id: "garita", texto: "Garita", href: "garita.html", roles: ["guardia", "rrhh", "admin"] },
 ];
 
 function visible(modulo, rol) {
@@ -70,6 +76,7 @@ const ICONOS = {
   informes: 'M3 3v18h18M7 15l3.5-4.5 3 3L20 7',
   admin: 'M10.3 3.3a1 1 0 0 1 1-.8h1.4a1 1 0 0 1 1 .8l.3 1.6a7 7 0 0 1 1.4.8l1.5-.6a1 1 0 0 1 1.2.4l.7 1.2a1 1 0 0 1-.2 1.3l-1.2 1a7 7 0 0 1 0 1.6l1.2 1a1 1 0 0 1 .2 1.3l-.7 1.2a1 1 0 0 1-1.2.4l-1.5-.6a7 7 0 0 1-1.4.8l-.3 1.6a1 1 0 0 1-1 .8h-1.4a1 1 0 0 1-1-.8l-.3-1.6a7 7 0 0 1-1.4-.8l-1.5.6a1 1 0 0 1-1.2-.4l-.7-1.2a1 1 0 0 1 .2-1.3l1.2-1a7 7 0 0 1 0-1.6l-1.2-1a1 1 0 0 1-.2-1.3l.7-1.2a1 1 0 0 1 1.2-.4l1.5.6a7 7 0 0 1 1.4-.8l.3-1.6ZM14.5 12a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z',
   garita: 'M12 2 4 6v6c0 4.4 3.4 8.5 8 10 4.6-1.5 8-5.6 8-10V6l-8-4Zm0 7v4m0 3h.01',
+  temporal: 'M12 8v4l2.5 2.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
 };
 
 const icono = (id) => `

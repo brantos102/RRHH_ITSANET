@@ -413,6 +413,17 @@ async def recorrido_menu(nav, capturas) -> Paso:
         raise Falla(f"Estas opciones no caben y salen cortadas: {cortados}")
     paso.ok("y ninguna etiqueta se corta")
 
+    # Lo operativo tiene que verse sin desplazar la barra: es lo que un
+    # guardia usa a diario, y al final de la lista quedaba fuera de pantalla.
+    for texto in ("Garita", "Personal temporal"):
+        enlace = lateral.locator(f'nav a:has-text("{texto}")').first
+        if not await enlace.is_visible():
+            raise Falla(f"«{texto}» no se ve sin desplazar el menú.")
+        caja = await enlace.bounding_box()
+        if caja["y"] + caja["height"] > 950:
+            raise Falla(f"«{texto}» queda por debajo del corte de la pantalla.")
+    paso.ok("Garita y Personal temporal se ven sin desplazar")
+
     await pg.click("#nav-campana")
     await pg.wait_for_selector("#modal-notificaciones[open]", timeout=10000)
     await pg.keyboard.press("Escape")
@@ -456,12 +467,117 @@ async def recorrido_menu(nav, capturas) -> Paso:
     return paso
 
 
+async def recorrido_temporal(nav, capturas) -> Paso:
+    """Personal temporal: entra, sale, y la semana cuadra."""
+    from app.db import ejecutar, obtener_uno
+
+    paso = Paso("temporal")
+    CEDULA_OP = "1300000054"
+
+    # Se parte de cero: el guion tiene que poder repetirse.
+    await ejecutar("delete from public.personal_temporal where cedula = %s", (CEDULA_OP,))
+
+    pg = await (await nav.new_context(viewport={"width": 1280, "height": 950})).new_page()
+    await _entrar(pg, ADMIN)
+    await pg.goto(f"{FRONTEND}/temporal.html")
+    await pg.wait_for_selector("#lista-temporal", timeout=15000)
+
+    await pg.click("#btn-nuevo-temporal")
+    await pg.wait_for_selector("#modal-temporal[open]", timeout=8000)
+    await pg.fill("#t-cedula", CEDULA_OP)
+    await pg.fill("#t-nombre", "Operario De Comprobacion")
+    await pg.fill("#t-labor", "Estibador")
+    await pg.fill("#t-proveedor", "Servicios de prueba")
+    await pg.fill("#t-valor", "4.50")
+    await pg.click("#form-temporal button[type=submit]")
+    await pg.wait_for_selector("#aviso:not(.hidden)", timeout=10000)
+    paso.ok(f"alta del operario: {(await pg.inner_text('#aviso')).strip()}")
+
+    async def boton():
+        await pg.fill("#buscar-temporal", "Comprobacion")
+        await pg.wait_for_timeout(400)
+        return pg.locator("[data-mover]").first
+
+    b = await boton()
+    if (await b.inner_text()).strip() != "Entró":
+        raise Falla(f"El botón dice «{await b.inner_text()}» y debería ofrecer registrar la entrada.")
+    await b.click()
+    await pg.wait_for_selector("#aviso:not(.hidden)", timeout=10000)
+    paso.ok("entrada registrada; el botón pasa a ofrecer la salida")
+
+    b = await boton()
+    if (await b.inner_text()).strip() != "Salió":
+        raise Falla(f"Tras entrar el botón dice «{await b.inner_text()}».")
+    await pg.wait_for_timeout(600)
+    await b.click()
+    # Se espera a que el aviso CAMBIE, no a que exista: el de la entrada
+    # sigue en pantalla cinco segundos y se leería ese.
+    await pg.wait_for_function(
+        "() => (document.getElementById('aviso').textContent || '').includes('salió')",
+        timeout=10000)
+    paso.ok(f"salida registrada: {(await pg.inner_text('#aviso')).strip()}")
+
+    b = await boton()
+    if not await b.is_disabled():
+        raise Falla("Con la jornada cumplida el botón no debe dejar registrar otra: "
+                    "dos jornadas del mismo día se pagan dos veces.")
+    paso.ok("y con la jornada cumplida el botón queda inactivo")
+
+    # La liquidación de la semana.
+    horas = (await pg.inner_text("#semana-horas")).strip()
+    total = (await pg.inner_text("#semana-total")).strip()
+    if total == "—":
+        raise Falla("El total de la semana sale «—» aunque el operario tiene "
+                    "valor por hora. Cero es un total, no la ausencia de uno.")
+    paso.ok(f"la semana suma {horas} y {total}")
+    if capturas:
+        await pg.screenshot(path=str(capturas / "personal-temporal.png"), full_page=True)
+
+    # Una jornada de ayer sin cerrar tiene que saltar a la vista.
+    persona = await obtener_uno(
+        "select id from public.personal_temporal where cedula = %s", (CEDULA_OP,))
+    await ejecutar(
+        """insert into public.jornadas_temporales (temporal_id, fecha, entrada_en)
+           values (%s, current_date - 1, now() - interval '1 day')""", (persona["id"],))
+    await pg.reload()
+    await pg.wait_for_selector("#caja-sin-cerrar:not(.hidden)", timeout=15000)
+    paso.ok("una jornada de ayer sin salida aparece señalada en rojo")
+
+    aviso = await pg.inner_text("#semana-aviso")
+    if "incompleto" not in aviso:
+        raise Falla("El total de la semana no avisa de que está incompleto.")
+    paso.ok("y el total de la semana avisa de que está incompleto")
+
+    # Talento Humano la cierra a mano, con motivo.
+    await pg.click("[data-cerrar-jornada]")
+    await pg.wait_for_selector("#modal-cerrar[open]", timeout=8000)
+    await pg.fill("#c-salida", "2026-09-29T17:00")
+    await pg.fill("#c-motivo", "Se retiró sin timbrar; lo confirma el supervisor de bodega")
+    await pg.click("#form-cerrar button[type=submit]")
+    await pg.wait_for_selector("#aviso:not(.hidden)", timeout=10000)
+    await pg.wait_for_timeout(900)
+    if not await pg.locator("#caja-sin-cerrar").is_hidden():
+        raise Falla("Tras cerrarla, la jornada sigue figurando como pendiente.")
+    paso.ok("Talento Humano la cierra con motivo y deja de estar pendiente")
+
+    guardada = await obtener_uno(
+        """select observacion from public.jornadas_temporales
+            where temporal_id = %s and fecha = current_date - 1""", (persona["id"],))
+    if "Cerrada a mano" not in (guardada["observacion"] or ""):
+        raise Falla("El cierre manual no quedó anotado en la jornada.")
+    paso.ok("y queda constancia de que la cerró una persona, no la garita")
+
+    await ejecutar("delete from public.personal_temporal where cedula = %s", (CEDULA_OP,))
+    return paso
+
+
 RECORRIDOS = {
     "acceso": (recorrido_acceso, "Entrar con cédula y código; el saldo sin decimales"),
     "chat": (recorrido_chat, "Consulta a Talento Humano, su bandeja y la respuesta"),
     "ficha": (recorrido_ficha, "Ficha personal, quién decide cada dato, confirmación de RR.HH."),
     "garita": (recorrido_garita, "Salida, regreso y exceso sobre la hora autorizada"),
     "menu": (recorrido_menu, "La navegación vertical: barra en escritorio, cajón en teléfono"),
+    "temporal": (recorrido_temporal, "Personal temporal: jornada, cierre manual y semana"),
 }
 
 
