@@ -20,3 +20,4 @@ supabase/carga_inicial.sql
 # Informes generados: se regeneran con scripts/informe_devengo.py
 informe_devengo.pdf
 estructura_base_datos.pdf
+depuracion_base_datos.pdf
