@@ -385,11 +385,83 @@ async def recorrido_garita(nav, capturas) -> Paso:
     return paso
 
 
+async def recorrido_menu(nav, capturas) -> Paso:
+    """La navegación, que ahora es vertical y tiene dos formas."""
+    paso = Paso("menu")
+
+    pg = await (await nav.new_context(viewport={"width": 1440, "height": 950})).new_page()
+    await _entrar(pg, ADMIN)
+    await pg.wait_for_timeout(1200)
+
+    lateral = pg.locator("aside").first
+    if not await lateral.is_visible():
+        raise Falla("No se dibuja la barra lateral en pantalla de escritorio.")
+    enlaces = await lateral.locator("nav a").count()
+    if enlaces < 10:
+        raise Falla(f"La barra lateral solo tiene {enlaces} enlaces. En vertical los "
+                    "módulos van abiertos: si hay menos, algo no se está dibujando.")
+    paso.ok(f"barra lateral con {enlaces} opciones a la vista, sin desplegables")
+
+    # Que no se corte ningún texto: es lo que obligó a acortar las etiquetas.
+    cortados = await pg.evaluate("""() => {
+        const a = document.querySelector('aside');
+        return [...a.querySelectorAll('nav a span')]
+          .filter(s => s.scrollWidth > s.clientWidth + 1)
+          .map(s => s.textContent.trim());
+    }""")
+    if cortados:
+        raise Falla(f"Estas opciones no caben y salen cortadas: {cortados}")
+    paso.ok("y ninguna etiqueta se corta")
+
+    await pg.click("#nav-campana")
+    await pg.wait_for_selector("#modal-notificaciones[open]", timeout=10000)
+    await pg.keyboard.press("Escape")
+    paso.ok("la campana de la barra abre las notificaciones")
+
+    for pantalla in ("equipo.html", "informes.html", "colaboradores.html",
+                     "administracion.html", "mensajes.html", "mi-ficha.html", "garita.html"):
+        await pg.goto(f"{FRONTEND}/{pantalla}")
+        try:
+            await pg.wait_for_selector("aside", timeout=12000)
+            if not await pg.locator("aside").first.is_visible():
+                raise Exception("invisible")
+        except Exception as exc:
+            raise Falla(f"La barra lateral no aparece en {pantalla}.") from exc
+    paso.ok("y está en las siete pantallas")
+    if capturas:
+        await pg.goto(f"{FRONTEND}/dashboard.html")
+        await pg.wait_for_timeout(1500)
+        await pg.screenshot(path=str(capturas / "menu-escritorio.png"))
+
+    # En teléfono la barra se guarda en un cajón.
+    pm = await (await nav.new_context(viewport={"width": 390, "height": 844},
+                                      is_mobile=True, has_touch=True)).new_page()
+    await _entrar(pm, EMPLEADA)
+    await pm.wait_for_timeout(1000)
+    if await pm.locator("aside").first.is_visible():
+        raise Falla("En teléfono la barra lateral no debe ocupar la pantalla.")
+    await pm.click("#nav-abrir")
+    await pm.wait_for_selector("#nav-cajon:not(.hidden)", timeout=8000)
+    paso.ok("en teléfono se abre como cajón")
+    if capturas:
+        await pm.screenshot(path=str(capturas / "menu-movil.png"))
+
+    # Se toca el fondo visible, a la derecha del cajón: el centro de la
+    # pantalla en un teléfono cae dentro del propio cajón.
+    await pm.mouse.click(350, 400)
+    await pm.wait_for_timeout(500)
+    if not await pm.locator("#nav-cajon").is_hidden():
+        raise Falla("El cajón no se cierra al tocar fuera.")
+    paso.ok("y se cierra al tocar fuera")
+    return paso
+
+
 RECORRIDOS = {
     "acceso": (recorrido_acceso, "Entrar con cédula y código; el saldo sin decimales"),
     "chat": (recorrido_chat, "Consulta a Talento Humano, su bandeja y la respuesta"),
     "ficha": (recorrido_ficha, "Ficha personal, quién decide cada dato, confirmación de RR.HH."),
     "garita": (recorrido_garita, "Salida, regreso y exceso sobre la hora autorizada"),
+    "menu": (recorrido_menu, "La navegación vertical: barra en escritorio, cajón en teléfono"),
 }
 
 
