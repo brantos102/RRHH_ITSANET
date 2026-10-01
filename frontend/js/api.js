@@ -318,6 +318,31 @@ export const api = {
 };
 
 /* ------------------------------------------------------------- utilidades */
+
+/* Un identificador único, también fuera de un «contexto seguro».
+
+   `crypto.randomUUID()` SOLO existe en HTTPS y en localhost. Sirviendo el
+   sistema en la red de la oficina —http://192.168.x.x:5500, que es como lo
+   prueban los colaboradores— no existe, y la pantalla moría con
+
+       TypeError: crypto.randomUUID is not a function
+
+   justo al pulsar «Enviar solicitud»: en el equipo de quien instala todo
+   funcionaba, y en el de los demás no se podía enviar nada.
+
+   `crypto.getRandomValues` sí está disponible en contexto inseguro, así que
+   el UUID v4 se arma con él: mismos bits de azar, misma forma. */
+export function uuid() {
+  if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
+
+  const b = new Uint8Array(16);
+  crypto.getRandomValues(b);
+  b[6] = (b[6] & 0x0f) | 0x40;   // versión 4
+  b[8] = (b[8] & 0x3f) | 0x80;   // variante RFC 4122
+  const h = [...b].map((n) => n.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
 export function validarCedula(cedula) {
   if (!/^\d{10}$/.test(cedula)) return false;
   const provincia = +cedula.slice(0, 2);

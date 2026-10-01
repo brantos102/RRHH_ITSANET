@@ -1,5 +1,5 @@
 /* Panel del empleado: perfil, saldo, alertas y solicitudes. */
-import { api, sesion, fecha, fechaHora, esc, ESTADOS, ErrorApi } from "./api.js";
+import { api, sesion, fecha, fechaHora, esc, ESTADOS, ErrorApi, uuid } from "./api.js";
 import { montarNavegacion } from "./navegacion.js";
 
 const $ = (id) => document.getElementById(id);
@@ -1470,7 +1470,7 @@ $("form-excepcion").addEventListener("submit", async (e) => {
 
   boton.disabled = true;
   boton.textContent = "Enviando…";
-  const solicitudId = crypto.randomUUID();
+  const solicitudId = uuid();
   try {
     const adjuntosSubidos = [];
     for (const archivo of excepcion.adjuntos) {
@@ -1513,7 +1513,7 @@ $("form-solicitud").addEventListener("submit", async (e) => {
   error.classList.add("hidden");
 
   const tipo = $("form-solicitud").dataset.tipo;
-  const solicitudId = crypto.randomUUID();
+  const solicitudId = uuid();
 
   boton.disabled = true;
   boton.textContent = "Enviando…";

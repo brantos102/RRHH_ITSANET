@@ -143,6 +143,16 @@ $("btn-camara").addEventListener("click", async () => {
     detenerCamara();
     return;
   }
+  /* La cámara SOLO existe en «contexto seguro»: HTTPS o localhost. Sirviendo
+     el sistema en la red de la oficina —http://192.168.x.x:5500— el navegador
+     ni siquiera la ofrece, y entonces el mensaje de abajo, «revise los
+     permisos», manda al guardia a buscar donde no hay nada que encontrar:
+     no es un permiso denegado, es que la cámara no está disponible. */
+  if (!window.isSecureContext) {
+    avisar("La cámara solo funciona con HTTPS o desde este mismo equipo. " +
+           "Use el escáner de mano o escriba el código.", true);
+    return;
+  }
   if (!("BarcodeDetector" in window)) {
     avisar("Este navegador no lee códigos con la cámara. Use el escáner de mano.", true);
     return;
