@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from app.correo import parametros_smtp
+from app.correo import parametros_smtp, por_que_no_sale
 
 RAIZ = Path(__file__).resolve().parents[2]
 GUION = RAIZ / "scripts" / "probar_correo.py"
@@ -49,14 +49,14 @@ class Config:
 def test_contrasena_normal_en_vez_de_contrasena_de_aplicacion():
     """Es el fallo número uno con Google Workspace."""
     error = Exception("(535, b'5.7.8 Username and Password not accepted')")
-    texto = " ".join(probar.diagnostico(error, Config()))
+    texto = " ".join(por_que_no_sale(error, Config()))
     assert "aplicación" in texto.lower()
     assert "apppasswords" in texto
 
 
 def test_puerto_bloqueado_por_la_red_de_la_oficina():
     error = TimeoutError("Connection timed out")
-    lineas = probar.diagnostico(error, Config())
+    lineas = por_que_no_sale(error, Config())
     texto = " ".join(lineas)
     assert "Test-NetConnection" in texto, "debe decir cómo comprobar el puerto"
     assert "EMAIL_BACKEND=console" in texto, "y cómo seguir probando mientras tanto"
@@ -64,24 +64,24 @@ def test_puerto_bloqueado_por_la_red_de_la_oficina():
 
 def test_cifrado_que_no_cuadra_con_el_puerto():
     error = Exception("[SSL: WRONG_VERSION_NUMBER] wrong version number")
-    texto = " ".join(probar.diagnostico(error, Config(smtp_port=465, smtp_starttls=True)))
+    texto = " ".join(por_que_no_sale(error, Config(smtp_port=465, smtp_starttls=True)))
     assert "587" in texto and "465" in texto
 
 
 def test_nombre_de_servidor_mal_escrito():
     error = Exception("[Errno -2] Name or service not known")
-    texto = " ".join(probar.diagnostico(error, Config(smtp_host="smpt.gmail.com")))
+    texto = " ".join(por_que_no_sale(error, Config(smtp_host="smpt.gmail.com")))
     assert "SMTP_HOST" in texto
 
 
 def test_remitente_distinto_de_la_cuenta():
     error = Exception("(553, b'5.7.1 Relaying denied')")
-    texto = " ".join(probar.diagnostico(error, Config()))
+    texto = " ".join(por_que_no_sale(error, Config()))
     assert "SMTP_REMITENTE" in texto
 
 
 def test_un_fallo_desconocido_no_deja_sin_respuesta():
-    texto = " ".join(probar.diagnostico(Exception("algo rarísimo"), Config()))
+    texto = " ".join(por_que_no_sale(Exception("algo rarísimo"), Config()))
     assert "backend/.env" in texto
     assert "EMAIL_BACKEND=console" in texto
 
@@ -154,3 +154,55 @@ def test_los_puertos_de_correo_conocidos_no_levantan_aviso():
     for puerto, starttls in ((25, True), (587, True), (465, False), (2525, True)):
         avisos = probar.revisar(Config(smtp_port=puerto, smtp_starttls=starttls))
         assert avisos == [], f"puerto {puerto}: {avisos}"
+
+
+# ------------------------------- el motivo queda bajo la misma referencia
+async def test_el_registro_dice_el_motivo_bajo_la_referencia_de_la_pantalla(
+    cliente, codigos, empleado, monkeypatch, caplog
+):
+    """La pantalla da una referencia; el registro, bajo ESA referencia, tiene
+    que decir qué corregir. Antes dejaba una traza de treinta líneas, y con
+    ella no se llega a ninguna parte."""
+    import logging
+
+    from app import correo as modulo_correo
+
+    async def falla(*args, **kwargs):
+        raise TimeoutError("Connection timed out")
+
+    monkeypatch.setattr(modulo_correo, "enviar_otp", falla)
+
+    with caplog.at_level(logging.ERROR, logger="rrhh.auth"):
+        r = await cliente.post("/auth/solicitar-token",
+                               json={"cedula": empleado["cedula"]})
+    assert r.status_code == 503
+
+    escrito = "\n".join(m.getMessage() for m in caplog.records)
+    assert "no respondió a tiempo" in escrito, "no tradujo el fallo"
+    assert "Test-NetConnection" in escrito, "no dice cómo comprobarlo"
+    assert "EMAIL_BACKEND=console" in escrito, "no dice cómo seguir probando"
+
+
+async def test_al_colaborador_se_le_sigue_diciendo_lo_justo(
+    cliente, codigos, empleado, monkeypatch
+):
+    """Quien está entrando no puede abrir un puerto ni cambiar una clave."""
+    from app import correo as modulo_correo
+
+    async def falla(*args, **kwargs):
+        raise TimeoutError("Connection timed out")
+
+    monkeypatch.setattr(modulo_correo, "enviar_otp", falla)
+    r = await cliente.post("/auth/solicitar-token", json={"cedula": empleado["cedula"]})
+
+    cuerpo = r.text.lower()
+    for filtracion in ("smtp", "contraseña de aplicación", "cortafuegos",
+                       "test-netconnection", "gmail"):
+        assert filtracion not in cuerpo, f"la pantalla filtra «{filtracion}»"
+
+
+def test_el_guion_y_el_servidor_usan_la_misma_traduccion():
+    """Dos copias de esto se desincronizan y una de las dos miente."""
+    fuente = GUION.read_text(encoding="utf-8")
+    assert "from app.correo import por_que_no_sale" in fuente
+    assert "def diagnostico(" not in fuente, "el guion volvió a tener su propia copia"
