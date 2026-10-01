@@ -58,21 +58,25 @@ async def solicitar_token(datos: SolicitudToken, request: Request) -> RespuestaE
     ip = ip_del_cliente(request)
 
     # --- Límite de envíos: por cédula y por IP ---
+    #
+    # Se cuenta lo pedido DESDE EL ÚLTIMO INGRESO, no desde hace una hora:
+    # entrar deja la cuenta en cero. Un código que se pidió y se usó es un
+    # ingreso normal, no un intento, y contarlo castiga justo a quien usa
+    # bien el sistema: alguien que entra, cierra sesión y vuelve a entrar
+    # —al probar, al cambiar de pantalla en el teléfono, al compartir el
+    # equipo de garita— llegaba al tope en minutos y quedaba una hora fuera.
+    #
+    # Lo que la regla sigue frenando es lo que debe frenar: pedir códigos una
+    # y otra vez sin usar ninguno, que es exactamente la forma del abuso.
     conteo = await obtener_uno(
-        """
-        select
-          count(*) filter (where cedula = %(cedula)s) as por_cedula,
-          count(*) filter (where ip = %(ip)s)         as por_ip
-        from public.auth_otp
-        where created_at > now() - interval '1 hour'
-        """,
-        {"cedula": datos.cedula, "ip": ip},
-    )
+        "select * from public.codigos_sin_usar(%s, %s)", (datos.cedula, ip))
     if conteo and conteo["por_cedula"] >= settings.otp_max_envios_hora:
         await registrar(request, "otp_limite_cedula", cedula=datos.cedula)
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Demasiados intentos. Espere una hora o comuníquese con Talento Humano.",
+            detail="Pidió varios códigos y no usó ninguno. Revise su correo —puede "
+                   "haber llegado a la carpeta de no deseado— o comuníquese con "
+                   "Talento Humano.",
         )
     if conteo and conteo["por_ip"] >= settings.otp_max_envios_hora * 4:
         await registrar(request, "otp_limite_ip", cedula=datos.cedula)
@@ -106,11 +110,14 @@ async def solicitar_token(datos: SolicitudToken, request: Request) -> RespuestaE
 
     codigo = generar_otp(settings.otp_longitud)
 
-    # Un solo código vigente a la vez: se anulan los anteriores.
+    # Un solo código vigente a la vez: se anulan los anteriores. ANULADO, no
+    # consumido: nadie entró con ellos, y confundir las dos cosas es lo que
+    # hacía que pedir un código de nuevo contara como haber entrado.
     await obtener_uno(
         """
-        update public.auth_otp set consumido_en = now()
-         where cedula = %s and consumido_en is null and expira_en > now()
+        update public.auth_otp set anulado_en = now()
+         where cedula = %s and consumido_en is null and anulado_en is null
+           and expira_en > now()
         returning id
         """,
         (datos.cedula,),
@@ -173,7 +180,7 @@ async def validar_token(datos: ValidacionToken, request: Request) -> Sesion:
         """
         select id, user_id, code_hash, intentos, max_intentos, expira_en
         from public.auth_otp
-        where cedula = %s and consumido_en is null
+        where cedula = %s and consumido_en is null and anulado_en is null
         order by created_at desc limit 1
         """,
         (datos.cedula,),
@@ -184,8 +191,9 @@ async def validar_token(datos: ValidacionToken, request: Request) -> Sesion:
         raise error_credenciales
 
     if registro["intentos"] >= registro["max_intentos"]:
+        # Anulado: se agotaron los intentos de teclearlo, nadie entró con él.
         await obtener_uno(
-            "update public.auth_otp set consumido_en = now() where id = %s returning id",
+            "update public.auth_otp set anulado_en = now() where id = %s returning id",
             (registro["id"],),
         )
         await registrar(request, "otp_intentos_agotados", cedula=datos.cedula,

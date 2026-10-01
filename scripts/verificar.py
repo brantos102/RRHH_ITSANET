@@ -224,6 +224,9 @@ async def revisar_base() -> int:
         ("0035 pantalla de depuración", "public.v_cuentas_de_prueba"),
         ("0036 alta y baja de jefaturas", "public.v_jefaturas_admin"),
         ("0037 departamento de Talento Humano", "public.v_talento_humano"),
+        # Esta no crea ninguna tabla ni vista: se comprueba por su función,
+        # que es lo que la migración aporta (ver `funciones`, más abajo).
+        ("0038 códigos anulados y usados, separados", None),
     ]
 
     # Las migraciones que solo cambian funciones se comprueban por la función.
@@ -232,6 +235,7 @@ async def revisar_base() -> int:
         "0011 carga masiva": "caducar_periodos_de",
         "0015 sin ausencias solapadas": "ausencia_solapada",
         "0016 saldo comprensible": "saldo_desglosado",
+        "0038 códigos anulados y usados, separados": "codigos_sin_usar",
     }
 
     # Hay migraciones que no crean nada: solo cambian el cuerpo de una función
