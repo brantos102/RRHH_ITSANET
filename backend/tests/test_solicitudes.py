@@ -170,7 +170,14 @@ async def test_permiso_sin_categoria_se_rechaza(cliente, auth):
     assert r.status_code == 422
 
 
-async def test_permiso_medico_sin_respaldo_se_rechaza(cliente, auth):
+async def test_un_permiso_medico_se_envia_aunque_el_respaldo_llegue_despues(cliente, auth):
+    """El certificado de una cita se emite DESPUÉS de la cita.
+
+    Exigirlo para poder enviar es pedir un documento que todavía no existe,
+    y el resultado era que la ausencia se arreglaba por teléfono y no quedaba
+    registrada en ninguna parte. Se sugiere, quien aprueba ve si vino o no, y
+    decide: eso es su trabajo (migración 0039).
+    """
     tipos = (await cliente.get("/catalogos/tipos-permiso", headers=auth)).json()
     medica = next(t for t in tipos if t["codigo"] == "cita_medica")
     lunes = await lunes_futuro()
@@ -183,8 +190,52 @@ async def test_permiso_medico_sin_respaldo_se_rechaza(cliente, auth):
               "descripcion": "Control médico",
               "justificacion": "Cita programada en el hospital del IESS."},
     )
-    assert r.status_code == 422
-    assert "respaldo" in r.json()["detail"]["mensaje"]
+    assert r.status_code == 201, r.text
+
+    # Y quien aprueba tiene que poder ver que vino sin respaldo.
+    fila = await obtener_uno(
+        """select (select count(*) from public.request_attachments a
+                    where a.request_id = r.id) as adjuntos
+             from public.requests r where r.id = %s""", (r.json()["id"],))
+    assert fila["adjuntos"] == 0
+
+
+async def test_un_permiso_sin_justificacion_no_se_registra(cliente, auth):
+    """Es lo único con lo que el jefe y Talento Humano pueden decidir."""
+    tipos = (await cliente.get("/catalogos/tipos-permiso", headers=auth)).json()
+    medica = next(t for t in tipos if t["codigo"] == "cita_medica")
+    lunes = await lunes_futuro()
+    r = await cliente.post(
+        "/solicitudes",
+        headers=auth,
+        json={"tipo": "permiso", "permission_type_id": medica["id"],
+              "fecha_inicio": str(lunes), "fecha_fin": str(lunes),
+              "hora_inicio": "08:00", "hora_fin": "12:00",
+              "descripcion": "Control médico"},
+    )
+    assert r.status_code >= 400
+
+
+async def test_un_permiso_puede_ser_para_hoy_mismo(cliente, auth):
+    """La cita que dieron esta mañana, el trámite que no espera.
+
+    Es el caso más frecuente de todos: si no se puede registrar, la ausencia
+    se arregla por teléfono y el sistema no se entera.
+    """
+    from datetime import date
+
+    tipos = (await cliente.get("/catalogos/tipos-permiso", headers=auth)).json()
+    personal = next(t for t in tipos if not t["requiere_adjunto"])
+    hoy = date.today()
+    r = await cliente.post(
+        "/solicitudes",
+        headers=auth,
+        json={"tipo": "permiso", "permission_type_id": personal["id"],
+              "fecha_inicio": str(hoy), "fecha_fin": str(hoy),
+              "descripcion": "Trámite que no admite espera",
+              "justificacion": "Me dieron el turno esta misma mañana."},
+    )
+    assert r.status_code == 201, r.text
 
 
 # La firma dibujada se retiró del sistema (migración 0037). El acceso con

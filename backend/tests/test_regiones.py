@@ -143,7 +143,7 @@ async def test_ningun_permiso_exige_ya_la_firma_dibujada():
     assert filas == [], f"siguen exigiendo firma: {[f['codigo'] for f in filas]}"
 
 
-async def test_se_puede_pedir_un_permiso_sin_firmar(cliente, codigos, empleado, equipo_regional):
+async def test_se_puede_pedir_un_permiso_sin_respaldo(cliente, codigos, empleado, equipo_regional):
     auth = await _sesion(cliente, codigos, CEDULA_PRUEBA)
     tipo = await obtener_uno(
         "select id from public.permission_types where codigo = 'sufragio'")
@@ -151,6 +151,7 @@ async def test_se_puede_pedir_un_permiso_sin_firmar(cliente, codigos, empleado, 
         "tipo": "permiso", "permission_type_id": tipo["id"],
         "fecha_inicio": str(await lunes_sin_feriados()),
         "fecha_fin": str(await lunes_sin_feriados()),
-        "descripcion": "Soy miembro de junta receptora del voto", "firmar": False,
+        "descripcion": "Soy miembro de junta receptora del voto",
+        "justificacion": "Designado miembro de junta receptora del voto.",
     })
     assert r.status_code == 201, r.text

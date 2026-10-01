@@ -1050,9 +1050,14 @@ function abrirFormulario(tipo) {
   $("contador-desc").textContent = "0/200";
 
   /* La anticipación mínima no es una molestia administrativa: es el tiempo
-     que la jefatura necesita para organizar quién cubre el puesto. Se
-     impide elegir antes en vez de dejar que la solicitud se rechace. */
-  const aviso = tipo === "vacacion" ? Number(estado.reglas?.anticipacion || 10) : 1;
+     que la jefatura necesita para organizar quién cubre el puesto.
+
+     Pero solo vale para VACACIONES. Un permiso es casi siempre de hoy: la
+     cita que dieron esta mañana, el trámite que no espera, la calamidad.
+     Exigir un día de anticipación convertía justo esos casos —los más— en
+     imposibles de registrar, y la ausencia terminaba arreglándose por
+     teléfono, sin quedar en ninguna parte. */
+  const aviso = tipo === "vacacion" ? Number(estado.reglas?.anticipacion || 10) : 0;
   const primera = new Date(Date.now() + aviso * 86400000).toISOString().slice(0, 10);
   $("fecha-inicio").min = primera;
   $("fecha-fin").min = primera;
@@ -1117,9 +1122,20 @@ $("tipo-permiso").addEventListener("change", (e) => {
     ejemplo.classList.add("hidden");
   }
 
+  /* El respaldo se ofrece SIEMPRE y se sugiere donde corresponde, pero no
+     bloquea: el certificado de una cita médica se emite después de la cita,
+     así que exigirlo antes es pedir un documento que todavía no existe. */
   $("guia-adjuntos").textContent = tipo.guia_adjuntos || "";
-  $("campo-adjuntos").classList.toggle("hidden", !tipo.requiere_adjunto);
-  $("campo-justificacion").classList.toggle("hidden", !tipo.requiere_justificacion);
+  $("campo-adjuntos").classList.remove("hidden");
+  $("etiqueta-adjuntos").innerHTML = tipo.requiere_adjunto
+    ? 'Respaldo <span class="font-normal text-slate-500">(se sugiere adjuntarlo)</span>'
+    : 'Respaldo <span class="font-normal text-slate-500">(opcional)</span>';
+
+  /* La justificación sí: es lo único con lo que el jefe y Talento Humano
+     pueden decidir. Sin ella la solicitud se devuelve y se pierde el tiempo
+     que se quería ganar. */
+  $("campo-justificacion").classList.remove("hidden");
+  $("justificacion").required = true;
 
   /* Una cita a las 13:00 no es «un día de permiso», son tres horas. Los
      subtipos que admiten esa modalidad la ofrecen; los que por naturaleza
@@ -1270,8 +1286,12 @@ async function previsualizar() {
       permission_type_id: estado.tipoActual?.id ?? null,
     });
 
-    const necesitaJustificar = p.requiere_justificacion;
-    $("campo-justificacion").classList.toggle("hidden", !necesitaJustificar);
+    // En permisos la justificación va siempre; en vacaciones, cuando la
+    // previsualización dice que hace falta (adelanto, bloque menor).
+    if ($("form-solicitud").dataset.tipo === "vacacion") {
+      $("campo-justificacion").classList.toggle("hidden", !p.requiere_justificacion);
+      $("justificacion").required = !!p.requiere_justificacion;
+    }
 
     const tono = p.valido ? "bg-slate-50 text-slate-700" : "bg-amber-50 text-amber-900 ring-1 ring-amber-200";
     const d = p.desglose || {};
@@ -1489,11 +1509,21 @@ $("form-solicitud").addEventListener("submit", async (e) => {
   boton.disabled = true;
   boton.textContent = "Enviando…";
   try {
-    // Los adjuntos se suben primero: la solicitud viaja con sus rutas y la
-    // base valida el conjunto completo al confirmar.
+    /* Los adjuntos se suben primero: la solicitud viaja con sus rutas.
+
+       Si alguno falla, la solicitud SE ENVÍA IGUAL. Antes se abortaba todo:
+       el colaborador escribía su justificación, elegía su archivo, pulsaba
+       enviar y se quedaba sin permiso por un problema del almacenamiento
+       que no es suyo ni puede arreglar. Perder la solicitud es peor que
+       quedarse sin el documento, que además puede entregarse después. */
     const adjuntosSubidos = [];
+    const noSubieron = [];
     for (const archivo of estado.adjuntos) {
-      adjuntosSubidos.push(await api.subirAdjunto(solicitudId, archivo));
+      try {
+        adjuntosSubidos.push(await api.subirAdjunto(solicitudId, archivo));
+      } catch {
+        noSubieron.push(archivo.name);
+      }
     }
 
     const respuesta = await api.crearSolicitud({
@@ -1511,7 +1541,10 @@ $("form-solicitud").addEventListener("submit", async (e) => {
     });
 
     $("modal-solicitud").close();
-    avisar(respuesta.mensaje);
+    avisar(noSubieron.length
+      ? `${respuesta.mensaje} No se pudo guardar ${noSubieron.length === 1
+          ? "el archivo" : "los archivos"}: entregue el respaldo a Talento Humano.`
+      : respuesta.mensaje);
     await cargar();
   } catch (err) {
     error.innerHTML = esc(err.message);

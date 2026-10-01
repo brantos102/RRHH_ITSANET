@@ -224,9 +224,10 @@ async def revisar_base() -> int:
         ("0035 pantalla de depuración", "public.v_cuentas_de_prueba"),
         ("0036 alta y baja de jefaturas", "public.v_jefaturas_admin"),
         ("0037 departamento de Talento Humano", "public.v_talento_humano"),
-        # Esta no crea ninguna tabla ni vista: se comprueba por su función,
-        # que es lo que la migración aporta (ver `funciones`, más abajo).
+        # Estas dos no crean ninguna tabla ni vista: se comprueban por lo
+        # que de verdad aportan (ver `funciones` y `dentro_de`, más abajo).
         ("0038 códigos anulados y usados, separados", None),
+        ("0039 respaldo sugerido, justificación obligatoria", None),
     ]
 
     # Las migraciones que solo cambian funciones se comprueban por la función.
@@ -254,6 +255,10 @@ async def revisar_base() -> int:
         # sobre lo que afirma.
         "0031 ningún día se pierde":
             ("generar_alertas_vacaciones", "Ningún día se pierde"),
+        # El respaldo dejó de bloquear el envío: se comprueba por el
+        # comentario que explica por qué, dentro de la propia función.
+        "0039 respaldo sugerido, justificación obligatoria":
+            ("tg_requests_validar_requisitos", "el respaldo se sugiere"),
     }
 
     # Y una que solo quita una línea de una vista: se comprueba que la vista

@@ -1030,6 +1030,112 @@ async def recorrido_talento_humano(nav, capturas) -> Paso:
     return paso
 
 
+async def recorrido_permiso_hoy(nav, capturas) -> Paso:
+    """Un permiso para hoy, y que un adjunto que no sube no tumbe la solicitud.
+
+    Las dos cosas vienen del uso real. El permiso es casi siempre de hoy —la
+    cita que dieron esta mañana, el trámite que no espera—, y exigir un día
+    de anticipación convertía justo esos casos en imposibles de registrar:
+    la ausencia se arreglaba por teléfono y el sistema no se enteraba.
+
+    Y el adjunto: el colaborador escribía su justificación, elegía su
+    archivo, pulsaba enviar, y si el almacenamiento fallaba se quedaba sin
+    permiso por un problema que no es suyo ni puede arreglar.
+    """
+    from datetime import date
+
+    from app.db import ejecutar, obtener_uno
+
+    paso = Paso("permiso-hoy")
+    hoy = date.today().isoformat()
+
+    pg = await (await nav.new_context(viewport={"width": 1280, "height": 1000})).new_page()
+    await _entrar(pg, EMPLEADA)
+    await pg.wait_for_selector("#saldo-dias", timeout=15000)
+
+    # --- Se abre el pilar de cita médica, que es el que sugiere respaldo ---
+    await pg.click("[data-nueva='permiso']")
+    await pg.wait_for_selector("#modal-solicitud[open]", timeout=8000)
+    await pg.wait_for_timeout(900)
+    await pg.click("[data-pilar='cita_medica']")
+    await pg.wait_for_timeout(600)
+    opciones = await pg.locator("#tipo-permiso option").count()
+    if opciones < 2:
+        raise Falla("El pilar de cita médica no ofrece ningún subtipo.")
+    valor = await pg.locator("#tipo-permiso option").nth(1).get_attribute("value")
+    await pg.select_option("#tipo-permiso", valor)
+    await pg.wait_for_timeout(800)
+
+    minimo = await pg.locator("#fecha-inicio").get_attribute("min")
+    if minimo and minimo > hoy:
+        raise Falla(f"La fecha más temprana que ofrece es {minimo}: hoy no se puede pedir.")
+    paso.ok(f"un permiso se puede pedir para hoy mismo ({hoy})")
+
+    etiqueta = await pg.inner_text("#etiqueta-adjuntos")
+    if "sugiere" not in etiqueta.lower() and "opcional" not in etiqueta.lower():
+        raise Falla(f"El respaldo se presenta como «{etiqueta.strip()}», no como sugerido.")
+    paso.ok(f"el respaldo se presenta como sugerido: «{' '.join(etiqueta.split())}»")
+
+    if await pg.locator("#campo-justificacion").is_hidden():
+        raise Falla("La justificación no se pide, y es lo único con lo que se decide.")
+    paso.ok("y la justificación se pide siempre")
+
+    # --- Se envía con un adjunto que el servidor va a rechazar -------------
+    await pg.fill("#fecha-inicio", hoy)
+    # En un permiso por horas la fecha de fin la copia el propio formulario y
+    # queda inactiva: empieza y termina el mismo día.
+    if not await pg.locator("#fecha-fin").is_disabled():
+        await pg.fill("#fecha-fin", hoy)
+    if await pg.locator("#hora-inicio").is_visible():
+        await pg.fill("#hora-inicio", "10:00")
+        await pg.fill("#hora-fin", "12:00")
+    await pg.fill("#descripcion", "Cita de control a las diez de la manana")
+    await pg.fill("#justificacion", "Me dieron el turno esta misma manana en el IESS.")
+
+    # Se simula el almacenamiento caído: la ruta de subida devuelve 503,
+    # exactamente como cuando el bucket de Supabase no existe.
+    await pg.route("**/solicitudes/adjuntos*", lambda ruta: ruta.fulfill(
+        status=503, content_type="application/json",
+        body='{"detail": {"mensaje": "No se pudo guardar el archivo. Intente de nuevo."}}'))
+    await pg.set_input_files("#adjuntos", {
+        "name": "certificado.pdf", "mimeType": "application/pdf",
+        "buffer": b"%PDF-1.4 respaldo de prueba"})
+    await pg.wait_for_timeout(600)
+
+    await pg.click("#btn-enviar-solicitud")
+    await pg.wait_for_selector("#aviso:not(.hidden)", timeout=15000)
+    mensaje = " ".join((await pg.inner_text("#aviso")).split())
+
+    if await pg.locator("#modal-solicitud").is_visible():
+        raise Falla(f"La solicitud no se envió: el formulario sigue abierto. Aviso: «{mensaje}»")
+    paso.ok(f"se envía aunque el adjunto no suba: {mensaje[:95]}")
+
+    if "Talento Humano" not in mensaje:
+        raise Falla(f"No se le dice qué hacer con el respaldo: «{mensaje}»")
+    paso.ok("y se le dice que entregue el respaldo a Talento Humano")
+
+    fila = await obtener_uno(
+        """select r.id, r.folio, r.justificacion,
+                  (select count(*) from public.request_attachments a
+                    where a.request_id = r.id) as adjuntos
+             from public.requests r
+             join public.users u on u.id = r.user_id
+            where u.cedula = %s and r.fecha_inicio = current_date
+            order by r.created_at desc limit 1""", (EMPLEADA,))
+    if not fila:
+        raise Falla("La solicitud de hoy no quedó registrada.")
+    if fila["adjuntos"]:
+        raise Falla("Se registró un adjunto que nunca llegó a subirse.")
+    paso.ok(f"queda registrada con folio {fila['folio']}, sin adjunto fantasma")
+
+    if capturas:
+        await pg.screenshot(path=str(capturas / "permiso-hoy.png"), full_page=True)
+
+    await ejecutar("delete from public.requests where id = %s", (fila["id"],))
+    paso.ok("y se deja la base como estaba")
+    return paso
+
+
 async def recorrido_menu(nav, capturas) -> Paso:
     """La navegación, que ahora es vertical y tiene dos formas."""
     paso = Paso("menu")
@@ -1312,6 +1418,8 @@ RECORRIDOS = {
                   "Nombrar y quitar jefaturas trasladando a la gente"),
     "talento-humano": (recorrido_talento_humano,
                        "El departamento, su buzón, y la firma dibujada retirada"),
+    "permiso-hoy": (recorrido_permiso_hoy,
+                    "Un permiso para hoy, y el adjunto que no tumba la solicitud"),
     "menu": (recorrido_menu, "La navegación vertical: barra en escritorio, cajón en teléfono"),
     "temporal": (recorrido_temporal, "Personal temporal: jornada, cierre manual y semana"),
 }

@@ -21,6 +21,9 @@ POR_RESTRICCION = {
         "La descripción no puede superar los 200 caracteres.",
     "requests_descripcion_obligatoria":
         "Debe describir el motivo de su solicitud (mínimo 5 caracteres).",
+    "requests_permiso_justificado":
+        "Escriba la justificación del permiso (mínimo 10 caracteres): es lo único "
+        "con lo que su jefe y Talento Humano pueden decidir.",
     "requests_permiso_categorizado":
         "Debe seleccionar el tipo de permiso.",
     "requests_rango_fechas":

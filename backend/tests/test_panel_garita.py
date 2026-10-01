@@ -130,9 +130,9 @@ async def test_una_solicitud_no_aprobada_no_entra_al_panel(
         "fecha_fin": str(__import__("datetime").date.today()),
         "hora_inicio": "09:00", "hora_fin": "10:00",
         "descripcion": "Permiso que se queda en trámite",
+        "justificacion": "Trámite personal que no admite espera.",
     })
-    if r.status_code != 201:
-        pytest.skip(f"no se pudo crear la solicitud de prueba: {r.text[:120]}")
+    assert r.status_code == 201, r.text
     filas = await obtener_todos(
         "select request_id from public.v_garita_hoy where request_id = %s",
         (r.json()["id"],))

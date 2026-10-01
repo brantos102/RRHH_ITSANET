@@ -390,9 +390,9 @@
       <!-- Justificación (condicional) -->
       <div id="campo-justificacion" class="hidden">
         <label for="justificacion" class="block text-sm font-medium text-slate-700">
-          Justificación <span class="font-normal text-slate-500">(obligatoria)</span>
+          Justificación <span class="font-normal text-rose-600">(obligatoria)</span>
         </label>
-        <textarea id="justificacion" rows="3"
+        <textarea id="justificacion" rows="3" minlength="10"
                   placeholder="Explique el motivo con al menos 10 caracteres"
                   class="mt-1.5 w-full resize-none rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
                          focus:bg-white focus:ring-2 focus:ring-slate-900"></textarea>
@@ -400,7 +400,7 @@
 
       <!-- Adjuntos -->
       <div id="campo-adjuntos" class="hidden">
-        <label class="block text-sm font-medium text-slate-700">Respaldo</label>
+        <label id="etiqueta-adjuntos" class="block text-sm font-medium text-slate-700">Respaldo</label>
         <p id="guia-adjuntos" class="mt-0.5 text-xs leading-relaxed text-slate-600"></p>
         <p class="mt-0.5 text-xs text-slate-500">Foto, escaneo o PDF. Máximo 10 MB por archivo.</p>
         <input type="file" id="adjuntos" multiple accept="image/jpeg,image/png,image/webp,image/heic,application/pdf"

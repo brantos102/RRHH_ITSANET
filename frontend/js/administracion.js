@@ -288,7 +288,7 @@ async function cargarTipos() {
     <table class="w-full text-left text-sm">
       <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
         <tr>
-          <th class="px-3 py-2.5">Tipo</th><th class="px-3 py-2.5 text-center">Adjunto</th>
+          <th class="px-3 py-2.5">Tipo</th><th class="px-3 py-2.5 text-center">Sugiere respaldo</th>
           <th class="px-3 py-2.5 text-center">Justificación</th>
           <th class="px-3 py-2.5 text-center">Descuenta</th><th class="px-3 py-2.5 text-right">Máx. días</th>
           <th class="px-3 py-2.5 text-right">Máx. horas</th><th class="px-3 py-2.5 text-center">Activo</th>
