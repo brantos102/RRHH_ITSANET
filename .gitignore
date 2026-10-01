@@ -21,3 +21,6 @@ supabase/carga_inicial.sql
 informe_devengo.pdf
 estructura_base_datos.pdf
 depuracion_base_datos.pdf
+
+# Ajustes de cada máquina (puerto del backend, URL). Ver config.local.js.ejemplo
+frontend/config.local.js

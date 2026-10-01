@@ -52,6 +52,37 @@ compilado ya está en el repositorio y el sistema funciona igual.
 
 ## Lo que sí hace falta: que los demás lleguen a su equipo
 
+### 0. Si su backend no está en el puerto 8000
+
+**No toque `frontend/js/api.js`.** Es código del repositorio: cambiar el
+puerto ahí hace que cada `git pull` aborte con
+
+```
+error: Your local changes to the following files would be overwritten by merge:
+        frontend/js/api.js
+```
+
+El puerto de SU máquina va en un archivo que no se versiona:
+
+```powershell
+copy frontend\config.local.js.ejemplo frontend\config.local.js
+notepad frontend\config.local.js
+```
+
+Y dentro, descomente la línea y ponga su puerto:
+
+```js
+Object.assign(window.RRHH_CONFIG, {
+  PUERTO_API: 3000,
+});
+```
+
+Ese archivo sobrevive a cada actualización y no se le cruza con el de nadie.
+`scripts\compartir.py` lo lee, así que la dirección que imprime y la regla
+de cortafuegos salen con el puerto correcto sin que haya que decírselo.
+
+---
+
 ### 1. Un comando
 
 ```powershell

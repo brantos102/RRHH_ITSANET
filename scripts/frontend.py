@@ -68,6 +68,25 @@ class Manejador(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(CARPETA), **kwargs)
 
+    def do_GET(self):  # noqa: N802 - lo nombra http.server
+        """`config.local.js` es opcional: si no existe, se sirve vacío.
+
+        Lo cargan las catorce páginas para que cada máquina pueda fijar su
+        puerto sin tocar un archivo del repositorio. Sin esto, quien no lo
+        haya creado vería un 404 rojo en la consola de cada pantalla, que
+        parece un error y no lo es.
+        """
+        if self.path.split("?")[0].endswith("/config.local.js") \
+                and not (CARPETA / "config.local.js").exists():
+            cuerpo = b"/* Sin ajustes locales. Vea config.local.js.ejemplo. */\n"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/javascript; charset=utf-8")
+            self.send_header("Content-Length", str(len(cuerpo)))
+            self.end_headers()
+            self.wfile.write(cuerpo)
+            return
+        super().do_GET()
+
     def log_message(self, formato: str, *args) -> None:
         # El registro por omisión imprime cada archivo estático. Solo interesa
         # lo que falla: un 404 aquí suele ser un enlace roto o una ruta mal

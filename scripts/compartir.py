@@ -66,6 +66,29 @@ def es_privada(ip: str) -> bool:
     return a == 10 or (a == 192 and b == 168) or (a == 172 and 16 <= b <= 31)
 
 
+def puerto_de_la_interfaz() -> int:
+    """El puerto del backend que la interfaz va a llamar, según su configuración.
+
+    Vale la pena leerlo y no suponerlo: si la interfaz llama al 8000 y el
+    backend atiende en otro, la pantalla de acceso dice «No se pudo conectar
+    con el servidor» sin que el backend registre nada, porque la petición
+    nunca llegó. `config.local.js` pisa a `config.js`, como en el navegador.
+    """
+    import re
+    puerto = 8000
+    for nombre in ("config.js", "config.local.js"):
+        archivo = RAIZ / "frontend" / nombre
+        if not archivo.exists():
+            continue
+        texto = archivo.read_text(encoding="utf-8", errors="replace")
+        # Sin las líneas comentadas: el archivo de ejemplo las trae todas.
+        util = "\n".join(l for l in texto.splitlines() if not l.strip().startswith("//"))
+        encontrado = re.search(r"PUERTO_API\s*:\s*(\d{2,5})", util)
+        if encontrado:
+            puerto = int(encontrado.group(1))
+    return puerto
+
+
 def comprobar_entorno() -> list[str]:
     """Lo que impediría que esto sirva de algo, dicho antes de arrancar."""
     problemas = []
@@ -91,11 +114,14 @@ def comprobar_entorno() -> list[str]:
 def main() -> int:
     p = argparse.ArgumentParser(
         description="Levanta el sistema en la red interna para probarlo entre varios.")
-    p.add_argument("--puerto-api", type=int, default=8000)
+    p.add_argument("--puerto-api", type=int, default=None,
+                   help="Por omisión, el que la interfaz tiene configurado.")
     p.add_argument("--puerto-web", type=int, default=5500)
     p.add_argument("--solo-datos", action="store_true",
                    help="Solo imprime la dirección a repartir; no arranca nada.")
     args = _cli.analizar(p)
+    if args.puerto_api is None:
+        args.puerto_api = puerto_de_la_interfaz()
 
     problemas = comprobar_entorno()
     for problema in problemas:
