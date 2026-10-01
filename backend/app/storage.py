@@ -55,6 +55,16 @@ def por_que_fallo(codigo: int, cuerpo: str) -> str:
     if "bucket not found" in texto or "bucket_not_found" in texto:
         return ("El bucket no existe en este proyecto de Supabase. Créelo con:  "
                 "python scripts/probar_adjuntos.py --crear")
+    # «Invalid Compact JWS» es muy concreto: Storage intentó leer la clave como
+    # un JWT y lo que recibió no tiene esa forma. No es la clave equivocada:
+    # es que NO ES una clave de las que Storage acepta, o llegó cortada.
+    if "compact jws" in texto or "malformed" in texto or "jwt malformed" in texto:
+        return ("La clave no tiene forma de clave de Supabase: Storage intentó leerla y "
+                "no pudo. Las de este servicio empiezan por «eyJ» y son largas (unos "
+                "200 caracteres o más). Si la suya empieza por «sb_secret_» es del "
+                "formato nuevo y Storage todavía no la acepta: use la «service_role» "
+                "clásica (JWT) de Supabase › Project Settings › API Keys › Legacy API "
+                "keys. Y revise que no quedara cortada al pegarla en backend/.env.")
     if codigo in (401, 403) or "invalid" in texto and "jwt" in texto \
             or "unauthorized" in texto or "signature" in texto:
         return ("Supabase rechazó la clave. SUPABASE_SERVICE_ROLE_KEY tiene que ser la "

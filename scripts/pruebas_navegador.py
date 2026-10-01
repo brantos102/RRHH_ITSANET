@@ -1080,6 +1080,47 @@ async def recorrido_permiso_hoy(nav, capturas) -> Paso:
         raise Falla("La justificación no se pide, y es lo único con lo que se decide.")
     paso.ok("y la justificación se pide siempre")
 
+    # Ningún campo obligatorio puede estar oculto. El navegador se niega a
+    # enviar un formulario así —no puede poner el foco en algo que no se ve—
+    # y NO MUESTRA NINGÚN ERROR: se pulsa enviar y no pasa nada. Es el peor
+    # fallo posible, porque no deja ni dónde mirar. Pasó de verdad.
+    ocultos = await pg.evaluate("""() => {
+        const f = document.getElementById('form-solicitud');
+        return [...f.querySelectorAll('[required]')]
+          .filter((c) => !c.disabled && c.offsetParent === null)
+          .map((c) => c.id || c.name || c.tagName);
+    }""")
+    if ocultos:
+        raise Falla(f"Campos obligatorios ocultos: {ocultos}. El formulario no se "
+                    "podrá enviar y no dirá por qué.")
+    paso.ok("y ningún campo obligatorio quedó escondido")
+
+    # Y lo mismo en vacaciones, que es donde la justificación SÍ se oculta.
+    await pg.keyboard.press("Escape")
+    await pg.wait_for_timeout(500)
+    await pg.click("[data-nueva='vacacion']")
+    await pg.wait_for_selector("#modal-solicitud[open]", timeout=8000)
+    await pg.wait_for_timeout(1500)
+    ocultos = await pg.evaluate("""() => {
+        const f = document.getElementById('form-solicitud');
+        return [...f.querySelectorAll('[required]')]
+          .filter((c) => !c.disabled && c.offsetParent === null)
+          .map((c) => c.id || c.name || c.tagName);
+    }""")
+    if ocultos:
+        raise Falla(f"En vacaciones quedan obligatorios y ocultos: {ocultos}.")
+    paso.ok("tampoco al pedir vacaciones, donde la justificación sí se esconde")
+
+    await pg.keyboard.press("Escape")
+    await pg.wait_for_timeout(500)
+    await pg.click("[data-nueva='permiso']")
+    await pg.wait_for_selector("#modal-solicitud[open]", timeout=8000)
+    await pg.wait_for_timeout(700)
+    await pg.click("[data-pilar='cita_medica']")
+    await pg.wait_for_timeout(600)
+    await pg.select_option("#tipo-permiso", valor)
+    await pg.wait_for_timeout(800)
+
     # --- Se envía con un adjunto que el servidor va a rechazar -------------
     await pg.fill("#fecha-inicio", hoy)
     # En un permiso por horas la fecha de fin la copia el propio formulario y

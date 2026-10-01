@@ -81,6 +81,53 @@ def test_los_buckets_se_crean_privados():
     assert "public.*True" not in fuente
 
 
+# Tres causas, un solo síntoma en pantalla. Decir «es la anon» cuando la
+# clave ni siquiera es un JWT manda a buscar donde no es: fue exactamente lo
+# que pasó la primera vez que esto se usó contra el proyecto real.
+def test_una_clave_cortada_no_se_confunde_con_la_anon():
+    """41 caracteres y ningún punto: eso no es ninguna clave de Supabase."""
+    avisos = " ".join(probar.revisar_clave("x" * 35 + "fa8RLb"))
+    assert "no tiene forma de JWT" in avisos
+    assert "41 caracteres" in avisos
+    assert "cortada" in avisos
+    assert "anon" not in avisos, "no debe culpar a la clave anon"
+
+
+def test_el_formato_nuevo_de_supabase_se_reconoce():
+    """`sb_secret_…` es una clave legítima; Storage todavía espera la clásica."""
+    avisos = " ".join(probar.revisar_clave("sb_secret_" + "a" * 31))
+    assert "formato nuevo" in avisos
+    assert "Legacy API keys" in avisos
+
+
+def test_la_clave_anon_si_se_señala_como_tal():
+    import base64
+    import json
+
+    cuerpo = base64.urlsafe_b64encode(json.dumps({"role": "anon"}).encode()).decode().rstrip("=")
+    avisos = " ".join(probar.revisar_clave(f"eyJhbGciOiJIUzI1NiJ9.{cuerpo}.{'f' * 43}"))
+    assert "anon" in avisos
+    assert "service_role" in avisos
+
+
+def test_la_clave_correcta_no_levanta_ningun_aviso():
+    import base64
+    import json
+
+    cuerpo = base64.urlsafe_b64encode(
+        json.dumps({"role": "service_role"}).encode()).decode().rstrip("=")
+    assert probar.revisar_clave(f"eyJhbGciOiJIUzI1NiJ9.{cuerpo}.{'f' * 43}") == []
+
+
+def test_invalid_compact_jws_no_culpa_a_la_clave_anon():
+    """Es el error exacto que devolvió Supabase: la clave no es un JWT."""
+    texto = por_que_fallo(400, '{"statusCode":"403","error":"Unauthorized",'
+                               '"message":"Invalid Compact JWS","code":"AccessDenied"}')
+    assert "no tiene forma de clave" in texto
+    assert "sb_secret_" in texto
+    assert "cortada" in texto
+
+
 def test_distingue_la_clave_anon_de_la_service_role():
     """El cuerpo del JWT va en claro: basta mirarlo, sin descifrar nada."""
     import base64

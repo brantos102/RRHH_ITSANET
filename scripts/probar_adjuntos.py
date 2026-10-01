@@ -92,12 +92,10 @@ async def principal(crear_faltantes: bool) -> int:
         print("      Supabase › Project Settings › API Keys\n")
         return 1
 
-    # Una clave «anon» lleva role:anon dentro del JWT; la service_role, el suyo.
-    # No se descifra nada: solo se mira el cuerpo, que va en claro.
-    if "service_role" not in _cuerpo_del_jwt(clave):
-        print(f"{AMARILLO}!{FIN} La clave no parece ser la «service_role».")
-        print("  La clave «anon» no puede escribir en un bucket privado, y el síntoma")
-        print("  es exactamente este. Cópiela de Supabase › Project Settings › API Keys.\n")
+    # Tres casos distintos y un solo síntoma en pantalla. Decir «es la anon»
+    # cuando la clave ni siquiera es un JWT manda a buscar donde no es.
+    for aviso in revisar_clave(clave):
+        print(f"{AMARILLO}!{FIN} {aviso}\n")
 
     async with httpx.AsyncClient(timeout=30) as cliente:
         codigo, cuerpo = await listar(cliente, settings)
@@ -179,6 +177,51 @@ async def principal(crear_faltantes: bool) -> int:
 
     print(f"\n{VERDE}Listo.{FIN} Los adjuntos de las solicitudes ya se guardan.")
     return 0
+
+
+def revisar_clave(clave: str) -> list[str]:
+    """Qué tiene de malo la clave, mirándola sin conectarse a nada.
+
+    Storage acepta las claves clásicas de Supabase, que son JWT: tres partes
+    separadas por puntos, empiezan por «eyJ» y pasan de doscientos
+    caracteres. Con eso se distinguen tres cosas que en pantalla dan el mismo
+    error:
+
+      · No es un JWT —o llegó cortada al pegarla—.
+      · Es del formato nuevo (`sb_secret_…`), que Storage todavía no acepta.
+      · Es un JWT, pero el de la clave «anon», que no escribe en un bucket
+        privado.
+    """
+    if not clave:
+        return ["SUPABASE_SERVICE_ROLE_KEY está vacía."]
+
+    if clave.startswith(("sb_secret_", "sb_publishable_")):
+        return [
+            f"La clave es del formato nuevo de Supabase («{clave[:10]}…»), y el servicio "
+            "de Storage todavía espera la clásica.\n"
+            "  Busque la «service_role» en Supabase › Project Settings › API Keys ›\n"
+            "  Legacy API keys. Empieza por «eyJ» y es larga.",
+        ]
+
+    partes = clave.split(".")
+    if len(partes) != 3 or not clave.startswith("eyJ"):
+        return [
+            f"La clave no tiene forma de JWT ({len(clave)} caracteres, "
+            f"{len(partes) - 1} punto(s)).\n"
+            "  Las de Supabase empiezan por «eyJ», llevan dos puntos y pasan de\n"
+            "  doscientos caracteres. Revise que no quedara cortada al pegarla en\n"
+            "  backend/.env —sin comillas, sin espacios y en una sola línea—.",
+        ]
+
+    cuerpo = _cuerpo_del_jwt(clave)
+    if "service_role" not in cuerpo:
+        cual = "anon" if '"anon"' in cuerpo or "'anon'" in cuerpo else "de otro rol"
+        return [
+            f"Es un JWT válido pero {cual}, no la «service_role».\n"
+            "  La anon no puede escribir en un bucket privado, y el síntoma es\n"
+            "  exactamente este. Cópiela de Supabase › Project Settings › API Keys.",
+        ]
+    return []
 
 
 def _cuerpo_del_jwt(clave: str) -> str:

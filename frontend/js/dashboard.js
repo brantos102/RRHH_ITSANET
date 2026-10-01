@@ -1011,12 +1011,23 @@ function elegirPilar(codigo) {
   $("info-permiso").classList.add("hidden");
   $("ejemplo-descripcion").classList.add("hidden");
   $("campo-adjuntos").classList.add("hidden");
-  $("campo-justificacion").classList.add("hidden");
+  pedirJustificacion(false);
 }
 
 document.querySelectorAll("[data-nueva]").forEach((boton) =>
   boton.addEventListener("click", () => abrirFormulario(boton.dataset.nueva))
 );
+
+/* Mostrar u ocultar la justificación SIEMPRE por aquí.
+
+   Un campo oculto y a la vez `required` deja el formulario mudo: el
+   navegador se niega a enviarlo —no puede poner el foco en algo que no se
+   ve— y no muestra ningún error. El botón se pulsa y no pasa nada, que es
+   el peor de los fallos posibles porque no deja ni dónde mirar. */
+function pedirJustificacion(hace_falta) {
+  $("campo-justificacion").classList.toggle("hidden", !hace_falta);
+  $("justificacion").required = !!hace_falta;
+}
 
 function abrirFormulario(tipo) {
   const f = $("form-solicitud");
@@ -1030,7 +1041,7 @@ function abrirFormulario(tipo) {
   $("campo-horas").classList.add("hidden");
   $("campo-horas").classList.remove("grid");
   $("campo-adjuntos").classList.add("hidden");
-  $("campo-justificacion").classList.add("hidden");
+  pedirJustificacion(false);
   $("info-permiso").classList.add("hidden");
   $("ejemplo-descripcion").classList.add("hidden");
   $("campo-subtipo").classList.add("hidden");
@@ -1134,8 +1145,7 @@ $("tipo-permiso").addEventListener("change", (e) => {
   /* La justificación sí: es lo único con lo que el jefe y Talento Humano
      pueden decidir. Sin ella la solicitud se devuelve y se pierde el tiempo
      que se quería ganar. */
-  $("campo-justificacion").classList.remove("hidden");
-  $("justificacion").required = true;
+  pedirJustificacion(true);
 
   /* Una cita a las 13:00 no es «un día de permiso», son tres horas. Los
      subtipos que admiten esa modalidad la ofrecen; los que por naturaleza
@@ -1289,8 +1299,7 @@ async function previsualizar() {
     // En permisos la justificación va siempre; en vacaciones, cuando la
     // previsualización dice que hace falta (adelanto, bloque menor).
     if ($("form-solicitud").dataset.tipo === "vacacion") {
-      $("campo-justificacion").classList.toggle("hidden", !p.requiere_justificacion);
-      $("justificacion").required = !!p.requiere_justificacion;
+      pedirJustificacion(p.requiere_justificacion);
     }
 
     const tono = p.valido ? "bg-slate-50 text-slate-700" : "bg-amber-50 text-amber-900 ring-1 ring-amber-200";
@@ -1558,7 +1567,7 @@ $("form-solicitud").addEventListener("submit", async (e) => {
         `Menos de ${estado.bloqueMinimo} días exige explicar el motivo y adjuntar el ` +
         `respaldo. La autoriza Talento Humano y después su jefe, así que demora más.`;
       $("campo-excepcion").classList.remove("hidden");
-      $("campo-justificacion").classList.remove("hidden");
+      pedirJustificacion(true);
       $("campo-adjuntos").classList.remove("hidden");
       const inicio = $("fecha-inicio").value;
       if (inicio) {
