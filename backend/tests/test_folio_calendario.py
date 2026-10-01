@@ -84,7 +84,7 @@ async def _crear(cliente, auth, **extra) -> dict:
     lunes = await lunes_limpio()
     cuerpo = {"tipo": "vacacion", "fecha_inicio": str(lunes),
               "fecha_fin": str(lunes + timedelta(days=6)),
-              "descripcion": "Solicitud de prueba", "firmar": False} | extra
+              "descripcion": "Solicitud de prueba"} | extra
     r = await cliente.post("/solicitudes", headers=auth, json=cuerpo)
     assert r.status_code == 201, r.text
     return r.json()
@@ -104,7 +104,7 @@ async def test_el_numero_es_correlativo(cliente, auth):
         "/solicitudes", headers=auth,
         json={"tipo": "vacacion", "fecha_inicio": str(lunes),
               "fecha_fin": str(lunes + timedelta(days=6)),
-              "descripcion": "Segunda solicitud", "firmar": False},
+              "descripcion": "Segunda solicitud"},
     )
     assert segunda.json()["folio"] == primera["folio"] + 1
 
@@ -210,13 +210,7 @@ async def test_el_calendario_no_revela_el_motivo(cliente, auth, companero):
     medica = next(t for t in tipos if t["codigo"] == "cita_medica")
     lunes = await lunes_limpio(8)
 
-    # Este permiso exige respaldo y firma: sin ambos, la base rechaza el conjunto
-    import base64
-    firma = "data:image/png;base64," + base64.b64encode(
-        b"\x89PNG\r\n\x1a\n" + b"trazo " * 60).decode()
-    assert (await cliente.post("/firmas/dibujada", headers=auth,
-                               json={"contenido": firma})).status_code == 201
-
+    # Este permiso exige respaldo: sin él, la base rechaza el conjunto.
     solicitud_id = str(uuid.uuid4())
     adjunto = await cliente.post(
         f"/solicitudes/adjuntos?solicitud_id={solicitud_id}", headers=auth,
@@ -230,7 +224,7 @@ async def test_el_calendario_no_revela_el_motivo(cliente, auth, companero):
               "hora_inicio": "08:00", "hora_fin": "12:00",
               "descripcion": "Control con el especialista",
               "justificacion": "Cita programada en el hospital del IESS.",
-              "adjuntos": [adjunto.json()], "firmar": True},
+              "adjuntos": [adjunto.json()]},
     )
     assert creada.status_code == 201, creada.text
 

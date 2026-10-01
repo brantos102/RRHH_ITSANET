@@ -40,8 +40,7 @@ SQL_SOLICITUD = """
            u.dias_vacaciones as saldo_actual,
            pt.nombre as categoria, pt.requiere_adjunto,
            j.nombre as jefe_nombre,
-           (select count(*) from public.request_attachments a where a.request_id = r.id) as adjuntos,
-           (select count(*) from public.request_signatures s where s.request_id = r.id) as firmas
+           (select count(*) from public.request_attachments a where a.request_id = r.id) as adjuntos
     from public.requests r
     join public.users u on u.id = r.user_id
     left join public.users j on j.id = r.jefe_id
@@ -104,7 +103,6 @@ def _publico(solicitud: dict) -> dict:
         "saldo_actual": float(solicitud["saldo_actual"]),
         "fines_semana": solicitud["fines_semana"],
         "adjuntos": solicitud["adjuntos"],
-        "firmas": solicitud["firmas"],
         "jefe_nombre": solicitud["jefe_nombre"],
         "created_at": solicitud["created_at"],
         "motivo_rechazo": solicitud["motivo_rechazo"],
@@ -251,8 +249,7 @@ async def pendientes(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[
                u.nombre as empleado, u.cedula, u.departamento, u.cargo, rp.nombre as reemplazo,
                u.dias_vacaciones as saldo_actual,
                pt.nombre as categoria, j.nombre as jefe_nombre,
-               (select count(*) from public.request_attachments a where a.request_id = r.id) as adjuntos,
-               (select count(*) from public.request_signatures s where s.request_id = r.id) as firmas
+               (select count(*) from public.request_attachments a where a.request_id = r.id) as adjuntos
         from public.requests r
         join public.users u on u.id = r.user_id
         left join public.users j on j.id = r.jefe_id

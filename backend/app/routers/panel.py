@@ -2,7 +2,7 @@
 
 El panel del colaborador se fue llenando de bloques y todos se mostraban
 siempre a todo el mundo. No todas las empresas quieren lo mismo en la primera
-pantalla: hay quien no usa firma electrónica, quien prefiere que el calendario
+pantalla: hay quien no mira sus logros, quien prefiere que el calendario
 del equipo lo vea solo jefatura, y quien necesita poner un aviso arriba
 durante una semana.
 

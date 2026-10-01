@@ -78,10 +78,10 @@ function mostrarVeredicto(r) {
       filas.push(["Se pasó", `${r.retorno.exceso_dias} día(s)`]);
     }
   } else if (ok) {
-    // Las firmas que respaldan la salida: es lo que el guardia debe poder mostrar
+    // Quién autorizó: es lo que el guardia debe poder mostrar si alguien
+    // pregunta por qué dejó salir a esta persona.
     filas.push(["Autorizó el jefe", r.autorizo_jefe || "—"]);
     filas.push(["Autorizó Talento Humano", r.autorizo_rrhh || "—"]);
-    if (r.firmas) filas.push(["Firmas registradas", String(r.firmas)]);
     if (r.ya_usado_antes) filas.push(["Atención", "Este código ya se usó antes"]);
   }
 

@@ -59,7 +59,6 @@ class NuevaSolicitud(BaseModel):
     # que es quien conoce la carga del equipo.
     bloque_menor_justificado: bool = False
     adjuntos: list[AdjuntoEntrada] = []
-    firmar: bool = True
 
     @field_validator("descripcion", "justificacion")
     @classmethod
@@ -79,7 +78,7 @@ async def tipos_permiso(_: Annotated[dict, Depends(usuario_actual)]) -> list[dic
     return await obtener_todos(
         """
         select pt.id, pt.codigo, pt.nombre, pt.descripcion,
-               pt.requiere_adjunto, pt.requiere_justificacion, pt.requiere_firma,
+               pt.requiere_adjunto, pt.requiere_justificacion,
                pt.remunerado, pt.descuenta_vacaciones, pt.max_dias, pt.max_horas,
                pt.guia_ejemplo, pt.guia_adjuntos,
                c.codigo as categoria_codigo, c.nombre as categoria_nombre,
@@ -392,18 +391,11 @@ async def crear_solicitud(
     datos: NuevaSolicitud, request: Request, tareas: BackgroundTasks,
     usuario: Annotated[dict, Depends(usuario_actual)]
 ) -> dict:
-    """Crea la solicitud con sus adjuntos y su firma en una sola transacción.
+    """Crea la solicitud con sus adjuntos en una sola transacción.
 
     La base valida en conjunto al confirmar: si el tipo de permiso exige
-    respaldo o firma y no llegaron, se rechaza todo, no queda a medias.
+    respaldo y no llegó, se rechaza todo, no queda a medias.
     """
-    firma = None
-    if datos.firmar:
-        firma = await obtener_uno(
-            "select id, hash_sha256 from public.signatures where user_id = %s and activa",
-            (usuario["id"],),
-        )
-
     try:
         async with conexion() as conn:
             async with conn.cursor() as cur:
@@ -440,18 +432,6 @@ async def crear_solicitud(
                         (datos.id, adjunto.storage_path, adjunto.nombre_archivo,
                          adjunto.mime_type, adjunto.tamano_bytes, adjunto.hash_sha256,
                          usuario["id"]),
-                    )
-
-                if firma:
-                    await cur.execute(
-                        """
-                        insert into public.request_signatures
-                            (request_id, user_id, rol_firma, signature_id, hash_sha256, ip, user_agent)
-                        values (%s, %s, 'solicitante', %s, %s, %s, %s)
-                        """,
-                        (datos.id, usuario["id"], firma["id"], firma["hash_sha256"],
-                         request.headers.get("x-forwarded-for", "").split(",")[0].strip() or None,
-                         (request.headers.get("user-agent") or "")[:500]),
                     )
     except (pg.Error, Exception) as exc:  # noqa: BLE001
         raise traducir(exc) from exc
@@ -532,8 +512,7 @@ async def mis_solicitudes(usuario: Annotated[dict, Depends(usuario_actual)]) -> 
                r.qr_hash, r.qr_emitido_en, r.qr_usado_en,
                j.nombre as jefe, rp.nombre as reemplazo,
                r.jefe_aprobado_en, r.rrhh_aprobado_en,
-               (select count(*) from public.request_attachments a where a.request_id = r.id) as adjuntos,
-               (select count(*) from public.request_signatures s where s.request_id = r.id) as firmas
+               (select count(*) from public.request_attachments a where a.request_id = r.id) as adjuntos
         from public.requests r
         left join public.users j on j.id = r.jefe_id
         left join public.users rp on rp.id = r.reemplazo_id

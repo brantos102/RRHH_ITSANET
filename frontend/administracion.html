@@ -26,8 +26,102 @@
     <button data-seccion="cambios-ficha" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Cambios de ficha</button>
     <button data-seccion="lineamientos" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Lineamientos</button>
     <button data-seccion="jefaturas" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Jefaturas</button>
+    <button data-seccion="talento-humano" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Talento Humano</button>
     <button data-seccion="depuracion" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Depuración</button>
   </nav>
+
+  <!-- ===== Talento Humano =====
+       Quiénes integran el departamento y a qué buzón llegan sus avisos. El
+       buzón del departamento existe porque los personales fallan en
+       silencio: quien tiene el rol sale de vacaciones o deja la empresa, y
+       las solicitudes siguen llegando a una dirección que nadie abre. -->
+  <section data-panel="talento-humano" class="hidden space-y-4">
+    <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <h2 class="font-medium">Correo del departamento</h2>
+      <p class="mt-0.5 text-sm text-slate-600">
+        Recibe copia de todo lo que se dirige a Talento Humano. No reemplaza a
+        los correos personales: los suma. Un buzón compartido sobrevive a que
+        alguien salga de vacaciones o deje la empresa.
+      </p>
+      <form id="form-correos-rrhh" class="mt-3 grid gap-3 sm:grid-cols-2">
+        <label>
+          <span class="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Sierra · Quito</span>
+          <input id="correo-rrhh-sierra" type="email" autocomplete="off"
+                 placeholder="talentohumano.uio@itsanet.com.ec"
+                 class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1
+                        ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </label>
+        <label>
+          <span class="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Costa · Guayaquil</span>
+          <input id="correo-rrhh-costa" type="email" autocomplete="off"
+                 placeholder="talentohumano.gye@itsanet.com.ec"
+                 class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1
+                        ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </label>
+        <div class="sm:col-span-2 flex items-center gap-3">
+          <button type="submit"
+                  class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white
+                         hover:bg-slate-800">Guardar</button>
+          <p class="text-xs text-slate-500">
+            Déjelo en blanco para que los avisos vayan solo a los correos personales.
+          </p>
+        </div>
+      </form>
+    </div>
+
+    <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <h2 class="font-medium">Integrar a alguien al departamento</h2>
+      <p class="mt-0.5 text-sm text-slate-600">
+        Pasa a ver las fichas y las solicitudes de la región que se le asigne.
+      </p>
+      <div class="mt-3 flex flex-wrap items-end gap-3">
+        <label class="min-w-0 flex-1">
+          <span class="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Persona</span>
+          <input id="th-buscar" type="search" autocomplete="off" placeholder="Nombre o cédula"
+                 class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1
+                        ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </label>
+        <label>
+          <span class="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Región</span>
+          <select id="th-region"
+                  class="mt-1 rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                         focus:bg-white focus:ring-2 focus:ring-slate-900">
+            <option value="sierra">Sierra · Quito</option>
+            <option value="costa">Costa · Guayaquil</option>
+          </select>
+        </label>
+        <button id="th-integrar" type="button" disabled
+                class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white
+                       hover:bg-slate-800 disabled:bg-slate-300">Integrar</button>
+      </div>
+      <ul id="th-candidatos" class="mt-2 space-y-1 empty:hidden"></ul>
+    </div>
+
+    <div class="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+      <header class="border-b border-slate-200 px-5 py-3.5">
+        <h2 class="font-medium">Quiénes lo integran</h2>
+        <p id="th-cuantos" class="mt-0.5 text-sm text-slate-600"></p>
+      </header>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th class="px-5 py-2.5 font-medium">Integrante</th>
+              <th class="px-3 py-2.5 font-medium">Región</th>
+              <th class="px-3 py-2.5 font-medium">Rol</th>
+              <th class="px-3 py-2.5 text-right font-medium">Por resolver</th>
+              <th class="px-3 py-2.5 font-medium"></th>
+            </tr>
+          </thead>
+          <tbody id="th-tabla"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
 
   <!-- ===== Jefaturas =====
        Quién tiene gente a cargo. Nombrar una jefatura es un cambio de rol y
@@ -75,7 +169,7 @@
               <th class="px-3 py-2.5 font-medium">Área</th>
               <th class="px-3 py-2.5 font-medium">Rol</th>
               <th class="px-3 py-2.5 text-right font-medium">A cargo</th>
-              <th class="px-3 py-2.5 text-right font-medium">Esperando firma</th>
+              <th class="px-3 py-2.5 text-right font-medium">Por autorizar</th>
               <th class="px-3 py-2.5 font-medium"></th>
             </tr>
           </thead>
@@ -444,7 +538,7 @@
                 class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm ring-1
                        ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></select>
         <p class="mt-1 text-xs text-slate-500">
-          Pasan también las solicitudes que estaban esperando su firma.
+          Pasan también las solicitudes que estaban esperando su autorización.
         </p>
       </div>
 

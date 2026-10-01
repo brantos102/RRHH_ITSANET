@@ -1,4 +1,4 @@
-"""Solicitudes del empleado: catálogo, previsualización, envío, firma y adjuntos."""
+"""Solicitudes del empleado: catálogo, previsualización, envío y adjuntos."""
 from __future__ import annotations
 
 import base64
@@ -10,13 +10,6 @@ import pytest
 from app.db import ejecutar, obtener_todos, obtener_uno
 from tests.conftest import CEDULA_PRUEBA
 
-def _firma(trazo: bytes = b"trazo de prueba ") -> str:
-    """Data URI con cabecera PNG real y tamaño suficiente."""
-    crudo = b"\x89PNG\r\n\x1a\n" + trazo * 40
-    return "data:image/png;base64," + base64.b64encode(crudo).decode()
-
-
-FIRMA_PNG = _firma()
 
 
 @pytest.fixture
@@ -114,7 +107,6 @@ async def test_enviar_vacacion(cliente, auth):
             "fecha_inicio": str(lunes),
             "fecha_fin": str(lunes + timedelta(days=6)),
             "descripcion": "Viaje familiar programado",
-            "firmar": False,
         },
     )
     assert r.status_code == 201
@@ -141,7 +133,7 @@ async def test_exceder_saldo_sin_justificar_da_mensaje_util(cliente, auth):
         headers=auth,
         json={"tipo": "vacacion", "fecha_inicio": str(lunes),
               "fecha_fin": str(lunes + timedelta(days=60)),
-              "descripcion": "Vacaciones largas", "firmar": False},
+              "descripcion": "Vacaciones largas"},
     )
     assert r.status_code == 422
     assert "justificación" in r.json()["detail"]["mensaje"]
@@ -159,7 +151,7 @@ async def test_regla_de_fin_de_semana_devuelve_rango_sugerido(cliente, auth, emp
         headers=auth,
         json={"tipo": "vacacion", "fecha_inicio": str(lunes),
               "fecha_fin": str(lunes + timedelta(days=4)),   # termina viernes
-              "descripcion": "Semana de descanso", "firmar": False},
+              "descripcion": "Semana de descanso"},
     )
     assert r.status_code == 422
     detalle = r.json()["detail"]
@@ -173,8 +165,7 @@ async def test_permiso_sin_categoria_se_rechaza(cliente, auth):
         "/solicitudes",
         headers=auth,
         json={"tipo": "permiso", "fecha_inicio": str(lunes), "fecha_fin": str(lunes),
-              "descripcion": "Permiso sin tipo", "justificacion": "Motivo suficientemente largo.",
-              "firmar": False},
+              "descripcion": "Permiso sin tipo", "justificacion": "Motivo suficientemente largo."},
     )
     assert r.status_code == 422
 
@@ -190,70 +181,35 @@ async def test_permiso_medico_sin_respaldo_se_rechaza(cliente, auth):
               "fecha_inicio": str(lunes), "fecha_fin": str(lunes),
               "hora_inicio": "08:00", "hora_fin": "12:00",
               "descripcion": "Control médico",
-              "justificacion": "Cita programada en el hospital del IESS.",
-              "firmar": False},
+              "justificacion": "Cita programada en el hospital del IESS."},
     )
     assert r.status_code == 422
     assert "respaldo" in r.json()["detail"]["mensaje"]
 
 
-# -------------------------------------------------------------------- firma
-async def test_sin_firma_registrada(cliente, auth):
-    assert (await cliente.get("/firmas/mia", headers=auth)).json()["registrada"] is False
+# La firma dibujada se retiró del sistema (migración 0037). El acceso con
+# cédula y código de un solo uso al correo institucional identifica mejor a
+# quien solicita, y la casilla frenaba al operario en el último paso.
+async def test_ya_no_se_puede_registrar_una_firma(cliente, auth):
+    for ruta in ("/firmas/mia", "/firmas/dibujada", "/firmas/archivo"):
+        r = await cliente.post(ruta, headers=auth, json={"contenido": "x"})
+        assert r.status_code == 404, f"{ruta} sigue respondiendo"
 
 
-async def test_firma_dibujada_invalida(cliente, auth):
-    r = await cliente.post("/firmas/dibujada", headers=auth, json={"contenido": "no-es-una-firma"})
-    assert r.status_code == 422
-
-
-async def test_firma_que_no_es_imagen_se_rechaza(cliente, auth):
-    """Aunque el base64 sea válido, si no empieza con la cabecera PNG/JPEG se rechaza."""
-    falsa = "data:image/png;base64," + base64.b64encode(b"<svg onload=alert(1)>" * 20).decode()
-    r = await cliente.post("/firmas/dibujada", headers=auth, json={"contenido": falsa})
-    assert r.status_code == 422
-    assert "no es una imagen" in r.json()["detail"]["mensaje"]
-
-
-async def test_trazo_vacio_se_rechaza(cliente, auth):
-    r = await cliente.post(
-        "/firmas/dibujada", headers=auth,
-        json={"contenido": "data:image/png;base64,iVBORw0KGgo="},
-    )
-    assert r.status_code == 422
-    assert "vacío" in r.json()["detail"]["mensaje"]
-
-
-async def test_registrar_firma_y_reemplazarla(cliente, auth):
-    r = await cliente.post("/firmas/dibujada", headers=auth, json={"contenido": FIRMA_PNG})
-    assert r.status_code == 201
-    primera = r.json()["hash_sha256"]
-
-    consulta = (await cliente.get("/firmas/mia", headers=auth)).json()
-    assert consulta["registrada"] is True and consulta["tipo"] == "dibujada"
-
-    # Registrar otra desactiva la anterior: siempre hay una sola activa
-    r2 = await cliente.post("/firmas/dibujada", headers=auth,
-                            json={"contenido": _firma(b"otro trazo real ")})
-    assert r2.status_code == 201
-    assert r2.json()["hash_sha256"] != primera
-
-
-async def test_solicitud_firmada_guarda_la_firma(cliente, auth, empleado):
-    await cliente.post("/firmas/dibujada", headers=auth, json={"contenido": FIRMA_PNG})
+async def test_la_solicitud_no_acepta_que_le_pidan_firmar(cliente, auth):
+    """Un cliente viejo que mande `firmar` no debe revivir el circuito."""
     lunes = await lunes_futuro()
     r = await cliente.post(
         "/solicitudes", headers=auth,
         json={"tipo": "vacacion", "fecha_inicio": str(lunes),
               "fecha_fin": str(lunes + timedelta(days=6)),
-              "descripcion": "Vacaciones firmadas", "firmar": True},
+              "descripcion": "Vacaciones sin firma"},
     )
-    assert r.status_code == 201
+    assert r.status_code == 201, r.text
     fila = await obtener_uno(
         "select count(*) as n from public.request_signatures where request_id = %s",
-        (r.json()["id"],),
-    )
-    assert fila["n"] == 1
+        (r.json()["id"],))
+    assert fila["n"] == 0
 
 
 # ----------------------------------------------------------------- consultas
@@ -263,7 +219,7 @@ async def test_listar_y_cancelar(cliente, auth):
         "/solicitudes", headers=auth,
         json={"tipo": "vacacion", "fecha_inicio": str(lunes),
               "fecha_fin": str(lunes + timedelta(days=6)),
-              "descripcion": "Para cancelar", "firmar": False},
+              "descripcion": "Para cancelar"},
     )
     listado = (await cliente.get("/solicitudes/mias", headers=auth)).json()
     assert any(s["id"] == creada.json()["id"] for s in listado)

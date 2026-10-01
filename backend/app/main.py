@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from . import registro
 from .config import get_settings
 from .db import abrir_pool, cerrar_pool, obtener_uno
-from .routers import (administracion, aprobaciones, auth, chat, ficha, firmas,
+from .routers import (administracion, aprobaciones, auth, chat, ficha,
                       garita, informes, panel, personas, solicitudes,
                       temporal)
 
@@ -212,7 +212,6 @@ async def error_no_controlado(request: Request, exc: Exception):
 
 app.include_router(auth.router)
 app.include_router(solicitudes.router)
-app.include_router(firmas.router)
 app.include_router(aprobaciones.router)
 app.include_router(garita.router)
 app.include_router(informes.router)

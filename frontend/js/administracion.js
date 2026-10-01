@@ -12,7 +12,8 @@ montarNavegacion($("barra"), { activo: "admin" });
 const esAdmin = sesion.perfil.rol === "admin";
 // `jefes` arranca en nulo y no en lista vacía: una lista vacía es un valor
 // verdadero, y con ella el catálogo no se pedía la primera vez.
-const estado = { usuarios: [], jefes: null, jefaturas: [], candidato: null };
+const estado = { usuarios: [], jefes: null, jefaturas: [], candidato: null,
+                 talento: [], candidatoTH: null };
 
 let temporizador;
 const avisar = (texto, error = false) => {
@@ -30,7 +31,8 @@ const CARGADORES = {
   antiguedades: cargarAntiguedades, configuracion: cargarConfiguracion,
   bitacora: cargarBitacora, cotejo: cargarCotejo,
   "cambios-ficha": cargarCambiosFicha, lineamientos: cargarLineamientos,
-  jefaturas: cargarJefaturasAdmin, depuracion: cargarDepuracion,
+  jefaturas: cargarJefaturasAdmin, "talento-humano": cargarTalentoHumano,
+  depuracion: cargarDepuracion,
 };
 
 function mostrar(seccion) {
@@ -287,7 +289,7 @@ async function cargarTipos() {
       <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
         <tr>
           <th class="px-3 py-2.5">Tipo</th><th class="px-3 py-2.5 text-center">Adjunto</th>
-          <th class="px-3 py-2.5 text-center">Justificación</th><th class="px-3 py-2.5 text-center">Firma</th>
+          <th class="px-3 py-2.5 text-center">Justificación</th>
           <th class="px-3 py-2.5 text-center">Descuenta</th><th class="px-3 py-2.5 text-right">Máx. días</th>
           <th class="px-3 py-2.5 text-right">Máx. horas</th><th class="px-3 py-2.5 text-center">Activo</th>
         </tr>
@@ -301,7 +303,6 @@ async function cargarTipos() {
             </td>
             <td class="px-3 py-2.5 text-center">${casilla(t, "requiere_adjunto")}</td>
             <td class="px-3 py-2.5 text-center">${casilla(t, "requiere_justificacion")}</td>
-            <td class="px-3 py-2.5 text-center">${casilla(t, "requiere_firma")}</td>
             <td class="px-3 py-2.5 text-center">${casilla(t, "descuenta_vacaciones")}</td>
             <td class="px-3 py-2.5 text-right">${tope(t, "max_dias", "días")}</td>
             <td class="px-3 py-2.5 text-right">${tope(t, "max_horas", "horas")}</td>
@@ -1151,7 +1152,7 @@ function abrirBajaJefatura(id) {
 
   const hayGente = j.a_cargo > 0 || j.esperando > 0;
   $("jef-aviso").textContent = hayGente
-    ? `Tiene ${j.a_cargo} persona(s) a cargo y ${j.esperando} solicitud(es) esperando su firma. ` +
+    ? `Tiene ${j.a_cargo} persona(s) a cargo y ${j.esperando} solicitud(es) esperando su autorización. ` +
       "Todo eso pasa a la jefatura que elija, en un solo movimiento."
     : "No tiene gente a cargo ni solicitudes esperando. Se le quita el mando y nada más se mueve.";
   $("jef-aviso").className = hayGente
@@ -1189,3 +1190,125 @@ $("form-jefatura").addEventListener("submit", async (e) => {
 
 $("modal-jefatura").querySelectorAll("[data-cerrar]").forEach((b) =>
   b.addEventListener("click", () => $("modal-jefatura").close()));
+
+
+/* ------------------------------------------------------- Talento Humano
+   El rol dice qué puede hacer alguien; esto dice a quién le llega el
+   trabajo. La baja importa tanto como el alta: quien deja el departamento
+   y conserva el rol sigue viendo los expedientes de toda su región, y ese
+   es el permiso que nadie revisa hasta que hay un problema. */
+
+const REGION_TEXTO = { sierra: "Sierra · Quito", costa: "Costa · Guayaquil" };
+
+function filaTalento(p) {
+  const propio = String(p.id) === String(sesion.perfil.id);
+  const alerta = !p.puede_recibir
+    ? `<span class="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700
+                    ring-1 ring-amber-200">no recibe avisos</span>` : "";
+  return `<tr class="border-t border-slate-100 hover:bg-slate-50">
+    <td class="px-5 py-2.5">
+      <a href="persona.html?id=${esc(p.id)}" class="font-medium hover:underline">${esc(p.nombre)}</a>${alerta}
+      ${p.cargo ? `<div class="text-xs text-slate-500">${esc(p.cargo)}</div>` : ""}
+    </td>
+    <td class="px-3 py-2.5 text-slate-600">${esc(REGION_TEXTO[p.region] || p.region)}</td>
+    <td class="px-3 py-2.5 text-slate-600">${esc(ROL_TEXTO[p.rol] || p.rol)}</td>
+    <td class="px-3 py-2.5 text-right ${p.esperando_en_su_region ? "font-medium text-amber-700" : "text-slate-500"}">
+      ${p.esperando_en_su_region}</td>
+    <td class="px-3 py-2.5 text-right">
+      ${propio
+        ? `<span class="text-xs text-slate-400">es usted</span>`
+        : `<button type="button" data-retirar-th="${esc(p.id)}" data-nombre="${esc(p.nombre)}"
+                   class="rounded-lg px-2.5 py-1.5 text-sm text-rose-700 hover:bg-rose-50">
+             Retirar</button>`}
+    </td>
+  </tr>`;
+}
+
+async function cargarTalentoHumano() {
+  const datos = await api.talentoHumano();
+  estado.talento = datos.integrantes;
+  $("correo-rrhh-sierra").value = datos.correos.sierra || "";
+  $("correo-rrhh-costa").value = datos.correos.costa || "";
+
+  const porRegion = (r) => estado.talento.filter((p) => p.region === r).length;
+  const sinCorreo = estado.talento.filter((p) => !p.puede_recibir).length;
+  $("th-cuantos").textContent =
+    `${estado.talento.length} persona(s) · ${porRegion("sierra")} en la Sierra, ` +
+    `${porRegion("costa")} en la Costa` +
+    (sinCorreo ? ` · ${sinCorreo} sin correo que reciba avisos` : "");
+
+  $("th-tabla").innerHTML = estado.talento.length
+    ? estado.talento.map(filaTalento).join("")
+    : `<tr><td colspan="5" class="px-5 py-10 text-center text-sm text-slate-500">
+         Nadie integra el departamento todavía.</td></tr>`;
+
+  $("th-tabla").querySelectorAll("[data-retirar-th]").forEach((b) =>
+    b.addEventListener("click", () => retirarDeTalento(b.dataset.retirarTh, b.dataset.nombre)));
+}
+
+$("form-correos-rrhh").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    const r = await api.correosTalentoHumano({
+      sierra: $("correo-rrhh-sierra").value.trim(),
+      costa: $("correo-rrhh-costa").value.trim(),
+    });
+    avisar(r.mensaje);
+  } catch (err) { avisar(err.message, true); }
+});
+
+let temporizadorTH;
+$("th-buscar").addEventListener("input", () => {
+  clearTimeout(temporizadorTH);
+  estado.candidatoTH = null;
+  $("th-integrar").disabled = true;
+  const texto = $("th-buscar").value.trim();
+  if (texto.length < 3) { $("th-candidatos").innerHTML = ""; return; }
+  temporizadorTH = setTimeout(async () => {
+    try {
+      const gente = await api.adminUsuarios(texto, false);
+      const dentro = new Set(estado.talento.map((p) => String(p.id)));
+      const fuera = gente.filter((u) => !dentro.has(String(u.id))).slice(0, 8);
+      $("th-candidatos").innerHTML = fuera.length
+        ? fuera.map((u) => `
+            <li><button type="button" data-candidato-th="${esc(u.id)}" data-nombre="${esc(u.nombre)}"
+                        class="w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-slate-100">
+              <span class="font-medium">${esc(u.nombre)}</span>
+              <span class="text-slate-500"> · ${esc(u.cargo || "sin cargo")}
+                · ${esc(u.departamento || "sin área")}</span>
+            </button></li>`).join("")
+        : `<li class="px-3 py-2 text-sm text-slate-500">
+             Nadie más coincide; quien ya lo integra no aparece aquí.</li>`;
+      $("th-candidatos").querySelectorAll("[data-candidato-th]").forEach((b) =>
+        b.addEventListener("click", () => {
+          estado.candidatoTH = { id: b.dataset.candidatoTh, nombre: b.dataset.nombre };
+          $("th-buscar").value = b.dataset.nombre;
+          $("th-candidatos").innerHTML = "";
+          $("th-integrar").disabled = false;
+        }));
+    } catch (err) { avisar(err.message, true); }
+  }, 300);
+});
+
+$("th-integrar").addEventListener("click", async () => {
+  if (!estado.candidatoTH) return;
+  try {
+    const r = await api.integrarTalentoHumano(estado.candidatoTH.id, $("th-region").value);
+    avisar(r.mensaje);
+    $("th-buscar").value = "";
+    $("th-integrar").disabled = true;
+    estado.candidatoTH = null;
+    await cargarTalentoHumano();
+  } catch (err) { avisar(err.message, true); }
+});
+
+async function retirarDeTalento(id, nombre) {
+  if (!confirm(`¿Retirar a ${nombre} de Talento Humano?\n\n` +
+               "Dejará de ver las fichas y las solicitudes de su región. " +
+               "Su cuenta y sus datos no se tocan.")) return;
+  try {
+    const r = await api.retirarTalentoHumano(id, "empleado");
+    avisar(r.mensaje);
+    await cargarTalentoHumano();
+  } catch (err) { avisar(err.message, true); }
+}

@@ -54,7 +54,7 @@ Este sistema opera en Quito, Ecuador. Lo que sigue documenta qué exige cada nor
 
 | Cláusula | Implementación |
 |---|---|
-| 8.5.2 Identificación y trazabilidad | Cada solicitud tiene UUID, historial de estados en `audit_logs`, firmas con hash congelado y bitácora de uso del QR |
+| 8.5.2 Identificación y trazabilidad | Cada solicitud tiene UUID, historial de estados en `audit_logs`, folio correlativo y bitácora de uso del QR |
 | 9.1 Seguimiento y medición | `v_trazabilidad_empleado` y `v_resumen_general` (aprobadas/rechazadas, % de aprobación, días por departamento y mes) |
 
 ## Pendiente de decisión de la empresa

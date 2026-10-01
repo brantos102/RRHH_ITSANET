@@ -1,11 +1,10 @@
-/* Panel del empleado: perfil, saldo, alertas, solicitudes y firma. */
+/* Panel del empleado: perfil, saldo, alertas y solicitudes. */
 import { api, sesion, fecha, fechaHora, esc, ESTADOS, ErrorApi } from "./api.js";
-import { PanelFirma } from "./firma.js";
 import { montarNavegacion } from "./navegacion.js";
 
 const $ = (id) => document.getElementById(id);
 const estado = {
-  tipos: [], catalogo: null, pilarActual: null, firma: null, adjuntos: [],
+  tipos: [], catalogo: null, pilarActual: null, adjuntos: [],
   tipoActual: null, saldo: null, bloqueMinimo: null, modalidad: null,
   reglas: null,
   solicitudes: [], pendientes: [], anulaciones: [], calendario: [],
@@ -59,7 +58,7 @@ async function cargar() {
   $("pestanas").classList.toggle("hidden", !aprueba);
   $("pestana-anulaciones").classList.toggle("hidden", !resuelveAnulaciones);
 
-  const [saldo, notificaciones, solicitudes, catalogo, reglas, firma, calendario,
+  const [saldo, notificaciones, solicitudes, catalogo, reglas, calendario,
          pendientes, anulaciones, bloques] =
     await Promise.all([
       api.saldo().catch(() => null),
@@ -67,7 +66,6 @@ async function cargar() {
       api.misSolicitudes().catch(() => []),
       api.catalogoPermisos().catch(() => ({ mandato: "", pilares: [] })),
       api.tablaAntiguedad().catch(() => null),
-      api.miFirma().catch(() => ({ registrada: false })),
       api.calendario().catch(() => []),
       aprueba ? api.pendientes().catch(() => []) : Promise.resolve([]),
       resuelveAnulaciones ? api.anulacionesPendientes().catch(() => []) : Promise.resolve([]),
@@ -83,7 +81,7 @@ async function cargar() {
     tabla: reglas.tabla, lineamientos: reglas.lineamientos,
     avisos: reglas.avisos || [],
   } : null;
-  Object.assign(estado, { firma, saldo, solicitudes, calendario, pendientes, anulaciones });
+  Object.assign(estado, { saldo, solicitudes, calendario, pendientes, anulaciones });
   montarNavegacion($("barra"), {
     activo: "panel",
     contadores: { pendientes: pendientes.length, anulaciones: anulaciones.length },
@@ -93,7 +91,6 @@ async function cargar() {
   pintarAlertas(notificaciones);
   pintarLogros(perfil.logros);
   pintarSolicitudes();
-  pintarFirma(firma);
   montarPilares(catalogo);
   pintarCalendario();
   pintarPendientes();
@@ -395,7 +392,6 @@ function pintarSolicitudes() {
           <span>Enviada ${fechaHora(s.created_at)}</span>
           ${s.reemplazo ? `<span>🔁 Lo cubre ${esc(s.reemplazo)}</span>` : ""}
           ${s.adjuntos ? `<span>📎 ${s.adjuntos} adjunto(s)</span>` : ""}
-          ${s.firmas ? `<span>✍️ firmada</span>` : ""}
           ${s.qr_hash && s.estado === "aprobado"
             ? `<button data-qr="${s.id}" data-hasta="${s.fecha_fin}"
                        class="font-medium text-emerald-700 hover:underline">Ver código QR</button>`
@@ -586,7 +582,6 @@ function pintarPendientes() {
     const banderas = [];
     if (s.es_adelanto) banderas.push(["amber", "Supera su saldo: días adelantados"]);
     if (s.tipo === "permiso" && !s.adjuntos) banderas.push(["rose", "Sin respaldo adjunto"]);
-    if (s.tipo === "permiso" && !s.firmas) banderas.push(["rose", "Sin firma del solicitante"]);
     if (!s.reemplazo) banderas.push(["slate", "Sin reemplazo asignado"]);
 
     return `
@@ -921,75 +916,6 @@ $("btn-detalle-saldo").addEventListener("click", async () => {
 $("buscar-historial").addEventListener("input", (e) => pintarHistorial(e.target.value));
 
 
-/* ------------------------------------------------------------------- firma */
-let panel = null;
-
-function pintarFirma(firma) {
-  if (firma?.registrada) {
-    $("estado-firma").textContent = `Registrada el ${fecha(firma.created_at)}`;
-    $("btn-firma").textContent = "Cambiar firma";
-    if (firma.contenido) {
-      $("vista-firma").src = firma.contenido;
-      $("vista-firma").classList.remove("hidden");
-    }
-  } else {
-    $("estado-firma").textContent = "Aún no ha registrado su firma";
-    $("btn-firma").textContent = "Registrar firma";
-    $("vista-firma").classList.add("hidden");
-  }
-}
-
-$("btn-firma").addEventListener("click", () => {
-  abrir("modal-firma");
-  if (!panel) {
-    panel = new PanelFirma($("lienzo-firma"), (hayTrazo) =>
-      $("guia-firma").classList.toggle("hidden", hayTrazo)
-    );
-  }
-  panel.ajustar();
-  $("error-firma").classList.add("hidden");
-});
-
-$("btn-limpiar-firma").addEventListener("click", () => panel?.limpiar());
-
-$("btn-guardar-firma").addEventListener("click", async () => {
-  if (!panel?.tieneTrazo) {
-    $("error-firma").textContent = "Dibuje su firma antes de guardar.";
-    $("error-firma").classList.remove("hidden");
-    return;
-  }
-  $("btn-guardar-firma").disabled = true;
-  try {
-    await api.guardarFirma(panel.aDataURI());
-    estado.firma = await api.miFirma();
-    pintarFirma(estado.firma);
-    $("modal-firma").close();
-    avisar("Firma registrada.");
-  } catch (err) {
-    $("error-firma").textContent = err.message;
-    $("error-firma").classList.remove("hidden");
-  } finally {
-    $("btn-guardar-firma").disabled = false;
-  }
-});
-
-$("archivo-firma").addEventListener("change", async (e) => {
-  const archivo = e.target.files[0];
-  if (!archivo) return;
-  try {
-    await api.subirFirma(archivo);
-    estado.firma = await api.miFirma();
-    pintarFirma(estado.firma);
-    $("modal-firma").close();
-    avisar("Firma registrada.");
-  } catch (err) {
-    $("error-firma").textContent = err.message;
-    $("error-firma").classList.remove("hidden");
-  } finally {
-    e.target.value = "";
-  }
-});
-
 /* -------------------------------------------------------- nueva solicitud */
 /* Pilares y subtipos.
 
@@ -1101,8 +1027,6 @@ function abrirFormulario(tipo) {
 
   $("titulo-solicitud").textContent = tipo === "vacacion" ? "Solicitar vacaciones" : "Solicitar permiso";
   $("campo-tipo-permiso").classList.toggle("hidden", tipo !== "permiso");
-  $("campo-firma").classList.toggle("hidden", tipo !== "permiso");
-  $("campo-firma").classList.toggle("flex", tipo === "permiso");
   $("campo-horas").classList.add("hidden");
   $("campo-horas").classList.remove("grid");
   $("campo-adjuntos").classList.add("hidden");
@@ -1146,8 +1070,6 @@ function abrirFormulario(tipo) {
     pintarLineamientos("permiso");
   }
 
-  $("aviso-sin-firma").classList.toggle("hidden", !!estado.firma?.registrada);
-  $("firmar").checked = !!estado.firma?.registrada;
 
   abrir("modal-solicitud");
 }
@@ -1539,7 +1461,6 @@ $("form-excepcion").addEventListener("submit", async (e) => {
       justificacion: motivo,
       bloque_menor_justificado: true,
       adjuntos: adjuntosSubidos,
-      firmar: false,
     });
 
     $("modal-excepcion").close();
@@ -1587,7 +1508,6 @@ $("form-solicitud").addEventListener("submit", async (e) => {
       justificacion: $("justificacion").value.trim() || null,
       bloque_menor_justificado: $("excepcion-bloque").checked,
       adjuntos: adjuntosSubidos,
-      firmar: $("firmar").checked,
     });
 
     $("modal-solicitud").close();

@@ -250,6 +250,11 @@ async def test_el_correo_de_excepcion_lleva_copia_y_direccion_de_respuesta(monke
         enviados.append({"para": destinatario, "asunto": asunto, **extra})
 
     monkeypatch.setattr(correo, "enviar", falso_envio)
+    # Sin buzón del departamento, para contar solo a las personas. Se fija
+    # aquí y no se da por supuesto: dependía de lo que hubiera en la tabla,
+    # y una prueba anterior que lo configuraba hacía fallar a esta.
+    monkeypatch.setattr(notificaciones, "_buzon_del_departamento",
+                        lambda region: _sin_buzon())
 
     solicitud = {
         "folio": 123, "empleado": "Ana Prueba", "tipo": "vacacion",
@@ -270,3 +275,91 @@ async def test_el_correo_de_excepcion_lleva_copia_y_direccion_de_respuesta(monke
     # La copia solo con el primero: el empleado no necesita el mismo aviso
     # tantas veces como personas haya en Talento Humano.
     assert enviados[1]["copia"] is None
+
+
+async def _sin_buzon():
+    return None
+
+
+async def test_el_buzon_del_departamento_recibe_el_aviso(monkeypatch):
+    """Los buzones personales fallan en silencio: la persona sale de
+    vacaciones o deja la empresa y la solicitud sigue llegando a una
+    dirección que nadie abre. El buzón del área suma, no reemplaza."""
+    from app import correo, notificaciones
+
+    enviados: list[dict] = []
+
+    async def falso_envio(destinatario, asunto, texto, html=None, **extra):
+        enviados.append({"para": destinatario, **extra})
+
+    async def buzon(region):
+        return "talentohumano@itsanet.com.ec"
+
+    monkeypatch.setattr(correo, "enviar", falso_envio)
+    monkeypatch.setattr(notificaciones, "_buzon_del_departamento", buzon)
+
+    solicitud = {
+        "folio": 124, "empleado": "Ana Prueba", "tipo": "vacacion",
+        "fecha_inicio": date.today(), "fecha_fin": date.today() + timedelta(days=1),
+        "dias_solicitados": 2, "descripcion": "Dos dias",
+        "rrhh_token": "11111111-1111-1111-1111-111111111111",
+        "jefe_nombre": "Jefe Prueba", "region": "sierra",
+    }
+    await notificaciones.avisar_a_rrhh(
+        [{"email": "rrhh1@itsanet.com.ec", "nombre": "Uno"}], solicitud, "Jefe Prueba")
+
+    destinatarios = [e["para"] for e in enviados]
+    assert "talentohumano@itsanet.com.ec" in destinatarios, "el buzón del área no recibió"
+    assert "rrhh1@itsanet.com.ec" in destinatarios, "el buzón personal dejó de recibir"
+
+
+async def test_el_buzon_del_area_recibe_aunque_no_haya_nadie_en_la_region(monkeypatch):
+    """Es justo cuando más falta hace: sin él, nadie se entera de nada."""
+    from app import correo, notificaciones
+
+    enviados: list[str] = []
+
+    async def falso_envio(destinatario, asunto, texto, html=None, **extra):
+        enviados.append(destinatario)
+
+    async def buzon(region):
+        return "talentohumano@itsanet.com.ec"
+
+    monkeypatch.setattr(correo, "enviar", falso_envio)
+    monkeypatch.setattr(notificaciones, "_buzon_del_departamento", buzon)
+
+    solicitud = {
+        "folio": 125, "empleado": "Ana Prueba", "tipo": "vacacion",
+        "fecha_inicio": date.today(), "fecha_fin": date.today() + timedelta(days=1),
+        "dias_solicitados": 2, "descripcion": "Dos dias",
+        "rrhh_token": "11111111-1111-1111-1111-111111111111", "region": "costa",
+    }
+    await notificaciones.avisar_a_rrhh([], solicitud, "Jefe Prueba")
+    assert enviados == ["talentohumano@itsanet.com.ec"]
+
+
+async def test_no_se_duplica_cuando_el_buzon_es_el_de_una_persona(monkeypatch):
+    """Si alguien puso su propio correo como buzón del área, no debe
+    recibir el mismo aviso dos veces."""
+    from app import correo, notificaciones
+
+    enviados: list[str] = []
+
+    async def falso_envio(destinatario, asunto, texto, html=None, **extra):
+        enviados.append(destinatario)
+
+    async def buzon(region):
+        return "rrhh1@itsanet.com.ec"
+
+    monkeypatch.setattr(correo, "enviar", falso_envio)
+    monkeypatch.setattr(notificaciones, "_buzon_del_departamento", buzon)
+
+    solicitud = {
+        "folio": 126, "empleado": "Ana Prueba", "tipo": "vacacion",
+        "fecha_inicio": date.today(), "fecha_fin": date.today() + timedelta(days=1),
+        "dias_solicitados": 2, "descripcion": "Dos dias",
+        "rrhh_token": "11111111-1111-1111-1111-111111111111", "region": "sierra",
+    }
+    await notificaciones.avisar_a_rrhh(
+        [{"email": "rrhh1@itsanet.com.ec", "nombre": "Uno"}], solicitud, "Jefe Prueba")
+    assert enviados == ["rrhh1@itsanet.com.ec"]

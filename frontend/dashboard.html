@@ -12,7 +12,6 @@
   dialog::backdrop { background: rgb(15 23 42 / .5); }
   dialog[open] { animation: aparecer .15s ease-out; }
   @keyframes aparecer { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
-  #lienzo-firma { touch-action: none; }
 </style>
 </head>
 
@@ -201,22 +200,6 @@
       </div>
     </div>
     <div id="calendario" class="mt-4 overflow-x-auto"></div>
-  </section>
-
-  <!-- ================= Firma ================= -->
-  <section id="tarjeta-firma" data-bloque="firma" class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h2 class="font-medium">Mi firma electrónica</h2>
-        <p id="estado-firma" class="mt-0.5 text-sm text-slate-500">Consultando…</p>
-      </div>
-      <div class="flex items-center gap-3">
-        <img id="vista-firma" alt="Firma registrada" class="hidden h-12 rounded-lg bg-slate-50 px-2 ring-1 ring-slate-200">
-        <button id="btn-firma" class="rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium hover:bg-slate-200">
-          Registrar firma
-        </button>
-      </div>
-    </div>
   </section>
 
   <!-- ================= Logros ================= -->
@@ -422,17 +405,6 @@
         <ul id="lista-adjuntos" class="mt-2 space-y-1"></ul>
       </div>
 
-      <!-- Firma -->
-      <label id="campo-firma" class="hidden items-start gap-2.5 rounded-xl bg-slate-50 p-3">
-        <input type="checkbox" id="firmar" checked class="mt-0.5 h-4 w-4 rounded border-slate-300">
-        <span class="text-sm text-slate-700">
-          Firmar esta solicitud con mi firma registrada
-          <span id="aviso-sin-firma" class="mt-1 hidden text-rose-600">
-            — aún no registra su firma. Regístrela antes de enviar.
-          </span>
-        </span>
-      </label>
-
       <p id="error-solicitud" class="hidden rounded-xl bg-rose-50 p-3 text-sm text-rose-800 ring-1 ring-rose-200" role="alert"></p>
     </div>
 
@@ -456,47 +428,6 @@
       <button type="button" data-cerrar class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100" aria-label="Cerrar">✕</button>
     </header>
     <div id="contenido-saldo" class="space-y-5 px-5 py-4"></div>
-  </div>
-</dialog>
-
-<!-- ================= Modal: firma ================= -->
-<dialog id="modal-firma" class="w-[min(100vw-1.5rem,32rem)] rounded-2xl p-0">
-  <div>
-    <header class="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-      <h2 class="font-semibold">Su firma electrónica</h2>
-      <button type="button" data-cerrar class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100" aria-label="Cerrar">✕</button>
-    </header>
-
-    <div class="space-y-4 px-5 py-4">
-      <p class="text-sm text-slate-600">
-        Dibuje su firma con el mouse o con el dedo. Quedará guardada para sus próximas solicitudes.
-      </p>
-
-      <div class="relative overflow-hidden rounded-xl bg-slate-50 ring-1 ring-slate-300">
-        <canvas id="lienzo-firma" class="block h-44 w-full cursor-crosshair"></canvas>
-        <span id="guia-firma" class="pointer-events-none absolute inset-x-0 bottom-6 text-center text-sm text-slate-400">
-          Firme aquí
-        </span>
-      </div>
-
-      <div class="flex gap-3">
-        <button type="button" id="btn-limpiar-firma"
-                class="rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium hover:bg-slate-200">Limpiar</button>
-        <button type="button" id="btn-guardar-firma"
-                class="flex-1 rounded-xl bg-slate-900 px-4 py-2 font-medium text-white hover:bg-slate-800 disabled:opacity-50">
-          Guardar firma
-        </button>
-      </div>
-
-      <div class="border-t border-slate-200 pt-4">
-        <p class="text-sm text-slate-600">¿Prefiere subir su firma escaneada o su certificado oficial?</p>
-        <input type="file" id="archivo-firma" accept="image/png,image/jpeg,application/pdf"
-               class="mt-2 block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0
-                      file:bg-slate-100 file:px-3 file:py-2 file:text-sm hover:file:bg-slate-200">
-      </div>
-
-      <p id="error-firma" class="hidden rounded-xl bg-rose-50 p-3 text-sm text-rose-800" role="alert"></p>
-    </div>
   </div>
 </dialog>
 

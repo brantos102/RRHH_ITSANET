@@ -44,7 +44,7 @@ async def _panel_como_de_fabrica():
         """update public.panel_bloques b set orden = d.orden
              from (values ('anuncio',5),('alertas',10),('saldo',20),('antiguedad',30),
                           ('fines_semana',40),('acciones',50),('calendario',60),
-                          ('firma',70),('logros',80),('solicitudes',90))
+                          ('logros',80),('solicitudes',90))
                   as d(clave, orden)
             where b.clave = d.clave""")
 
@@ -83,14 +83,14 @@ async def test_lo_esencial_no_se_puede_apagar(cliente, admin_auth):
 
 async def test_apagar_un_bloque_lo_quita_de_la_pantalla(cliente, auth, admin_auth):
     antes = [b["clave"] for b in (await cliente.get("/panel/bloques", headers=auth)).json()["bloques"]]
-    assert "firma" in antes
+    assert "logros" in antes
 
-    r = await cliente.patch("/panel/configuracion/firma",
+    r = await cliente.patch("/panel/configuracion/logros",
                           headers=admin_auth, json={"visible": False})
     assert r.status_code == 200, r.text
 
     despues = [b["clave"] for b in (await cliente.get("/panel/bloques", headers=auth)).json()["bloques"]]
-    assert "firma" not in despues
+    assert "logros" not in despues
     assert "saldo" in despues
 
 
@@ -147,7 +147,7 @@ async def test_el_aviso_se_escribe_y_se_borra(cliente, auth, admin_auth):
 
 async def test_reordenar_respeta_el_orden_pedido(cliente, auth, admin_auth):
     orden = ["solicitudes", "saldo", "acciones", "alertas", "anuncio",
-             "antiguedad", "fines_semana", "calendario", "firma", "logros"]
+             "antiguedad", "fines_semana", "calendario", "logros"]
     r = await cliente.post("/panel/configuracion/orden",
                            headers=admin_auth, json={"claves": orden})
     assert r.status_code == 200, r.text
@@ -163,7 +163,7 @@ async def test_reordenar_respeta_el_orden_pedido(cliente, auth, admin_auth):
 async def test_solo_el_administrador_configura(cliente, auth, rrhh_auth, jefe_auth):
     """Talento Humano administra personas; la cara del sistema, no."""
     for cabeceras in (auth, rrhh_auth, jefe_auth):
-        r = await cliente.patch("/panel/configuracion/firma",
+        r = await cliente.patch("/panel/configuracion/logros",
                               headers=cabeceras, json={"visible": False})
         assert r.status_code == 403, r.text
         r = await cliente.get("/panel/configuracion", headers=cabeceras)

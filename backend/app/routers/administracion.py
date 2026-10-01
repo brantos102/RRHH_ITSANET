@@ -64,7 +64,6 @@ class CambioTipoPermiso(BaseModel):
     nombre: str | None = None
     requiere_adjunto: bool | None = None
     requiere_justificacion: bool | None = None
-    requiere_firma: bool | None = None
     remunerado: bool | None = None
     descuenta_vacaciones: bool | None = None
     max_dias: float | None = None
@@ -200,6 +199,113 @@ async def editar_usuario(user_id: uuid.UUID, cambios: CambioUsuario,
                     cedula=usuario["cedula"], entidad="users", entidad_id=str(user_id),
                     detalle={"cambios": list(campos)})
     return {"id": str(actualizado["id"]), "mensaje": f"Datos de {actualizado['nombre']} actualizados."}
+
+
+class NuevoIntegranteRRHH(BaseModel):
+    persona_id: uuid.UUID
+    region: Literal["sierra", "costa"] = "sierra"
+
+
+class BajaRRHH(BaseModel):
+    rol_destino: Literal["empleado", "guardia", "jefe"] = "empleado"
+
+
+class CorreoDepartamento(BaseModel):
+    """El buzón del departamento, o vacío para no usar ninguno."""
+
+    sierra: str = Field("", max_length=120)
+    costa: str = Field("", max_length=120)
+
+    @field_validator("sierra", "costa")
+    @classmethod
+    def validar(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            return ""
+        # Sin EmailStr para poder admitir la cadena vacía, que es «ninguno».
+        if v.count("@") != 1 or v.startswith("@") or v.endswith("@") or "." not in v.split("@")[1]:
+            raise ValueError("Escriba una dirección de correo válida, o déjelo en blanco.")
+        return v
+
+
+@router.get("/admin/talento-humano")
+async def listar_talento_humano(usuario: RRHH) -> dict:
+    """Quiénes integran el departamento y a qué buzón llegan sus avisos."""
+    gente = await obtener_todos("select * from public.v_talento_humano")
+    correos = await obtener_todos(
+        """select clave, valor from public.app_config
+            where clave in ('rrhh_correo_sierra', 'rrhh_correo_costa')""")
+    por_clave = {c["clave"]: (c["valor"] or "") for c in correos}
+    return {
+        "integrantes": [{**f, "id": str(f["id"]),
+                         "esperando_en_su_region": int(f["esperando_en_su_region"])}
+                        for f in gente],
+        "correos": {"sierra": por_clave.get("rrhh_correo_sierra", ""),
+                    "costa": por_clave.get("rrhh_correo_costa", "")},
+    }
+
+
+@router.post("/admin/talento-humano", status_code=status.HTTP_201_CREATED)
+async def integrar_a_talento_humano(datos: NuevoIntegranteRRHH, request: Request,
+                                    usuario: RRHH) -> dict:
+    try:
+        fila = await obtener_uno("select public.rrhh_integrar(%s, %s, %s) as r",
+                                 (datos.persona_id, datos.region, usuario["id"]))
+    except Exception as exc:  # noqa: BLE001
+        raise traducir(exc) from exc
+
+    await registrar(request, "rrhh_integrante_agregado", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="users",
+                    entidad_id=str(datos.persona_id), detalle={"region": datos.region})
+    return fila["r"]
+
+
+@router.post("/admin/talento-humano/{user_id}/retirar")
+async def retirar_de_talento_humano(user_id: uuid.UUID, datos: BajaRRHH,
+                                    request: Request, usuario: RRHH) -> dict:
+    """Le quita el acceso a los expedientes de su región.
+
+    Quien deja Talento Humano y conserva el rol sigue viendo las fichas y las
+    solicitudes de toda su región. Es el permiso que nadie revisa hasta que
+    hay un problema, así que la baja tiene que ser tan fácil como el alta.
+    """
+    try:
+        fila = await obtener_uno("select public.rrhh_retirar(%s, %s, %s) as r",
+                                 (user_id, datos.rol_destino, usuario["id"]))
+    except Exception as exc:  # noqa: BLE001
+        raise traducir(exc) from exc
+
+    await registrar(request, "rrhh_integrante_retirado", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="users", entidad_id=str(user_id),
+                    detalle={"rol_destino": datos.rol_destino})
+    return fila["r"]
+
+
+@router.patch("/admin/talento-humano/correos")
+async def cambiar_correos_departamento(datos: CorreoDepartamento, request: Request,
+                                       usuario: RRHH) -> dict:
+    """El buzón del departamento, que recibe copia de todo lo que se le dirige.
+
+    No reemplaza a los buzones personales: los suma. Un buzón compartido
+    sobrevive a que alguien salga de vacaciones o deje la empresa, que es
+    cuando los avisos se pierden sin que nadie se entere.
+    """
+    for region, valor in (("sierra", datos.sierra), ("costa", datos.costa)):
+        await obtener_uno(
+            """update public.app_config set valor = %s
+                where clave = %s returning clave""",
+            (valor, f"rrhh_correo_{region}"))
+
+    await registrar(request, "rrhh_correo_departamento", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="app_config",
+                    detalle={"sierra": datos.sierra, "costa": datos.costa})
+    return {
+        "correos": {"sierra": datos.sierra, "costa": datos.costa},
+        "mensaje": ("Buzones del departamento actualizados."
+                    if (datos.sierra or datos.costa)
+                    else "Sin buzón del departamento: los avisos irán solo a los "
+                         "correos personales de quienes lo integran."),
+    }
 
 
 class NuevaJefatura(BaseModel):

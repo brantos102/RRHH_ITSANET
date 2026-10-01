@@ -78,8 +78,7 @@ async def validar_qr(lectura: LecturaQR, request: Request, guardia: Guardia) -> 
                r.qr_expira_en, r.qr_usado_en, r.tipo, r.retorno_en,
                u.id as user_id, u.cedula, u.nombre, u.cargo, u.departamento, u.telefono,
                pt.nombre as categoria,
-               j.nombre as autorizo_jefe, h.nombre as autorizo_rrhh,
-               (select count(*) from public.request_signatures s where s.request_id = r.id) as firmas
+               j.nombre as autorizo_jefe, h.nombre as autorizo_rrhh
         from public.requests r
         join public.users u on u.id = r.user_id
         left join public.users j on j.id = r.jefe_aprobado_por
@@ -108,7 +107,6 @@ async def validar_qr(lectura: LecturaQR, request: Request, guardia: Guardia) -> 
         "hora_fin": str(solicitud["hora_fin"])[:5] if solicitud["hora_fin"] else None,
         "autorizo_jefe": solicitud["autorizo_jefe"],
         "autorizo_rrhh": solicitud["autorizo_rrhh"],
-        "firmas": solicitud["firmas"],
     }
 
     # Motivos de denegación, del más grave al más leve

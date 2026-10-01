@@ -603,7 +603,7 @@ async def recorrido_pantalla_principal(nav, capturas) -> Paso:
     pg = await (await nav.new_context(viewport={"width": 1280, "height": 1000})).new_page()
     await _entrar(pg, ADMIN)
     await pg.goto(f"{FRONTEND}/pantalla-principal.html")
-    await pg.wait_for_selector("[data-clave='firma']", timeout=15000)
+    await pg.wait_for_selector("[data-clave='logros']", timeout=15000)
     paso.ok(f"{await pg.locator('#lista [data-clave]').count()} bloques listados")
 
     # Lo imprescindible ni siquiera se ofrece: el interruptor está inactivo.
@@ -615,12 +615,12 @@ async def recorrido_pantalla_principal(nav, capturas) -> Paso:
     # Se pulsa la etiqueta y no la casilla: la casilla está oculta a la vista
     # —el interruptor que se ve es el recuadro de al lado— y solo se deja
     # pulsar a través de ella, igual que le pasa a una persona.
-    await pg.locator("[data-clave='firma'] [data-interruptor]").click()
+    await pg.locator("[data-clave='logros'] [data-interruptor]").click()
     await pg.wait_for_timeout(900)
     await pg.fill("#anuncio", "Prueba automatica: el viernes se cierra a la una.")
     await pg.click("#btn-anuncio")
     await pg.wait_for_timeout(900)
-    paso.ok("firma apagada y aviso escrito")
+    paso.ok("logros apagado y aviso escrito")
 
     # Y ahora lo que importa: cómo lo ve otra persona.
     otra = await (await nav.new_context(viewport={"width": 1280, "height": 1000})).new_page()
@@ -628,8 +628,8 @@ async def recorrido_pantalla_principal(nav, capturas) -> Paso:
     await otra.wait_for_selector("#saldo-dias", timeout=15000)
     await otra.wait_for_timeout(1200)
 
-    if await otra.locator("[data-bloque='firma']").is_visible():
-        raise Falla("El administrador apagó «Mi firma electrónica» y el colaborador la sigue viendo.")
+    if await otra.locator("[data-bloque='logros']").is_visible():
+        raise Falla("El administrador apagó «Mis logros» y el colaborador los sigue viendo.")
     paso.ok("el bloque apagado desapareció del panel del colaborador")
 
     if not await otra.locator("[data-bloque='saldo']").is_visible():
@@ -949,6 +949,87 @@ async def recorrido_jefaturas(nav, capturas) -> Paso:
     return paso
 
 
+async def recorrido_talento_humano(nav, capturas) -> Paso:
+    """El departamento: quiénes lo integran y a qué buzón le llega el trabajo.
+
+    Y de paso, que la firma dibujada ya no aparezca por ninguna parte. Se
+    comprueba en la pantalla del colaborador, que es donde estorbaba: la
+    casilla «aún no registra su firma» lo frenaba en el último paso, justo
+    cuando ya había escrito todo.
+    """
+    from app.db import ejecutar, obtener_uno
+
+    paso = Paso("talento-humano")
+
+    pg = await (await nav.new_context(viewport={"width": 1440, "height": 1000})).new_page()
+    await _entrar(pg, ADMIN)
+    await pg.goto(f"{FRONTEND}/administracion.html#talento-humano")
+    await pg.wait_for_selector("#th-tabla tr", timeout=15000)
+    await pg.wait_for_timeout(800)
+
+    cuantos = " ".join((await pg.inner_text("#th-cuantos")).split())
+    if "persona" not in cuantos:
+        raise Falla(f"No dice quiénes integran el departamento: «{cuantos}».")
+    paso.ok(f"el departamento se lista con su reparto: {cuantos}")
+
+    # El buzón del área, que es lo que sobrevive a que alguien se vaya.
+    await pg.fill("#correo-rrhh-sierra", "talentohumano.uio@itsanet.com.ec")
+    await pg.fill("#correo-rrhh-costa", "talentohumano.gye@itsanet.com.ec")
+    await pg.click("#form-correos-rrhh button[type=submit]")
+    await pg.wait_for_selector("#aviso:not(.hidden)", timeout=10000)
+    guardado = await obtener_uno(
+        "select public.rrhh_correo_de_region('costa') as buzon")
+    if guardado["buzon"] != "talentohumano.gye@itsanet.com.ec":
+        raise Falla(f"El buzón de la Costa quedó en «{guardado['buzon']}».")
+    paso.ok("el buzón del departamento se guarda por región")
+
+    # Una dirección mal escrita es tan silenciosa como no tener ninguna.
+    await pg.fill("#correo-rrhh-sierra", "talentohumano.itsanet.com.ec")
+    await pg.click("#form-correos-rrhh button[type=submit]")
+    await pg.wait_for_timeout(1200)
+    sigue = await obtener_uno("select public.rrhh_correo_de_region('sierra') as buzon")
+    if sigue["buzon"] != "talentohumano.uio@itsanet.com.ec":
+        raise Falla("Aceptó una dirección sin arroba y pisó la que estaba bien.")
+    paso.ok("y una dirección con errata no reemplaza a la que funcionaba")
+
+    if capturas:
+        await pg.screenshot(path=str(capturas / "talento-humano.png"), full_page=True)
+
+    # Se deja como estaba: el resto de los recorridos no espera buzón.
+    await ejecutar("update public.app_config set valor = '' where clave like 'rrhh_correo%%'")
+
+    # --- Y la firma, que ya no existe ------------------------------------
+    emp = await (await nav.new_context(viewport={"width": 1280, "height": 1000})).new_page()
+    await _entrar(emp, EMPLEADA)
+    await emp.wait_for_selector("#saldo-dias", timeout=15000)
+    await emp.wait_for_timeout(1200)
+
+    for selector in ("#tarjeta-firma", "#modal-firma", "#campo-firma", "#btn-firma"):
+        if await emp.locator(selector).count():
+            raise Falla(f"La firma sigue en la pantalla del colaborador: {selector}")
+    paso.ok("en el panel del colaborador no queda nada de la firma")
+
+    pantalla = await emp.inner_text("body")
+    for frase in ("firma electrónica", "Registrar firma", "registra su firma"):
+        if frase.lower() in pantalla.lower():
+            raise Falla(f"La pantalla todavía dice «{frase}».")
+    paso.ok("ni el texto que frenaba al operario en el último paso")
+
+    # Y el circuito del servidor, cerrado: no basta con esconder el botón.
+    respuesta = await emp.evaluate(
+        """async () => {
+             const r = await fetch(window.RRHH_CONFIG.API || ('http://' + location.hostname + ':8000')
+                                   , { method: 'GET' }).catch(() => null);
+             const f = await fetch((window.RRHH_CONFIG.API || ('http://' + location.hostname + ':8000'))
+                                   + '/firmas/mia').catch(() => null);
+             return f ? f.status : 0;
+           }""")
+    if respuesta not in (401, 403, 404):
+        raise Falla(f"La ruta /firmas/mia sigue respondiendo {respuesta}.")
+    paso.ok(f"y la ruta del servidor tampoco existe (responde {respuesta})")
+    return paso
+
+
 async def recorrido_menu(nav, capturas) -> Paso:
     """La navegación, que ahora es vertical y tiene dos formas."""
     paso = Paso("menu")
@@ -1229,6 +1310,8 @@ RECORRIDOS = {
                    "Depuración de la carga y el desplegable de jefes"),
     "jefaturas": (recorrido_jefaturas,
                   "Nombrar y quitar jefaturas trasladando a la gente"),
+    "talento-humano": (recorrido_talento_humano,
+                       "El departamento, su buzón, y la firma dibujada retirada"),
     "menu": (recorrido_menu, "La navegación vertical: barra en escritorio, cajón en teléfono"),
     "temporal": (recorrido_temporal, "Personal temporal: jornada, cierre manual y semana"),
 }

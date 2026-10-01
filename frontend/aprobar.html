@@ -122,7 +122,7 @@ async function cargar() {
     fila("Saldo del empleado", `${s.saldo_actual} días`) +
     fila("Descripción", s.descripcion) +
     (s.justificacion ? fila("Justificación", s.justificacion) : "") +
-    fila("Respaldos", `${s.adjuntos} adjunto(s) · ${s.firmas} firma(s)`);
+    fila("Respaldos", `${s.adjuntos} adjunto(s)`);
 
   const alertas = [];
   if (s.es_adelanto)

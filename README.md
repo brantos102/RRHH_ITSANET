@@ -6,7 +6,7 @@ Stack: **Supabase (PostgreSQL + Auth + Realtime + Storage)** · **Python / FastA
 |---|---|---|
 | Tarea 1 | Esquema de base de datos y reglas de negocio Ecuador | ✅ |
 | Tarea 2 | API Backend — Autenticación OTP por cédula (FastAPI) | ✅ |
-| Tarea 3 | Interfaz del empleado (login + dashboard + firma) | ✅ |
+| Tarea 3 | Interfaz del empleado (login + dashboard) | ✅ |
 | Tarea 4 | Flujo de aprobaciones + generación de QR | ✅ |
 | Tarea 5 | Garita: escáner QR, panel del día y registro de visitas | ✅ |
 | Extra | Informes con filtros, administración y menús por rol | ✅ |
@@ -96,14 +96,15 @@ Una vez consumidos los 2 fines de semana del período, la restricción se levant
 
 `permission_types` es un catálogo configurable por RRHH (16 tipos precargados según normativa ecuatoriana: cita médica, enfermedad, calamidad doméstica, fallecimiento de familiar, maternidad, paternidad, lactancia, matrimonio, estudios, trámite gubernamental, citación judicial, sufragio, donación de sangre, cuidado de persona con discapacidad, caso fortuito, asunto personal).
 
-Cada tipo define por sí mismo: si exige **adjunto de respaldo**, si exige **justificación**, si exige **firma**, si es **remunerado**, si **descuenta de vacaciones**, y sus topes de días y horas. Agregar o ajustar un tipo es un `UPDATE`, no una migración.
+Cada tipo define por sí mismo: si exige **adjunto de respaldo**, si exige **justificación**, si es **remunerado**, si **descuenta de vacaciones**, y sus topes de días y horas. Agregar o ajustar un tipo es un `UPDATE`, no una migración.
 
-### Adjuntos y firma electrónica
+### Adjuntos
 
 - `request_attachments` + bucket privado `solicitudes/<user_id>/<request_id>/`. Solo JPEG, PNG, WebP, HEIC o PDF, máximo 10 MB.
-- `signatures`: firma registrada del usuario — **dibujada con el mouse**, imagen subida o certificado oficial. Una sola activa por usuario.
-- `request_signatures`: **instantánea** de la firma al momento de firmar. Si el usuario cambia su firma después, las solicitudes ya firmadas conservan la original.
-- La exigencia de adjunto y firma se valida con un **trigger diferido**: el backend inserta solicitud + archivos + firma en una sola transacción y la base rechaza el conjunto incompleto al confirmar.
+- La exigencia de adjunto se valida con un **trigger diferido**: el backend inserta solicitud + archivos en una sola transacción y la base rechaza el conjunto incompleto al confirmar.
+- Si el respaldo no se guarda, `python scripts/probar_adjuntos.py` dice por qué: en una instalación nueva el bucket de Storage no existe, porque las migraciones crean tablas y no buckets.
+
+> La **firma dibujada se retiró** en la migración 0037. El acceso con cédula y código de un solo uso al correo institucional identifica mejor a quien solicita —exige poseer el correo—, y la casilla frenaba al operario en el último paso. Las tablas `signatures` y `request_signatures` se conservan con lo ya registrado; nada las escribe.
 
 ### Nadie está ausente dos veces los mismos días
 

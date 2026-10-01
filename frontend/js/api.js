@@ -237,6 +237,16 @@ export const api = {
     peticion(`/admin/usuarios/${id}/saldo?saldo=${saldo}`, { method: "POST" }),
   antiguedades: () => peticion("/admin/antiguedades"),
   adminJefaturas: () => peticion("/admin/jefaturas"),
+  talentoHumano: () => peticion("/admin/talento-humano"),
+  integrarTalentoHumano: (persona_id, region) =>
+    peticion("/admin/talento-humano",
+             { method: "POST", body: JSON.stringify({ persona_id, region }) }),
+  retirarTalentoHumano: (id, rol_destino) =>
+    peticion(`/admin/talento-humano/${id}/retirar`,
+             { method: "POST", body: JSON.stringify({ rol_destino }) }),
+  correosTalentoHumano: (correos) =>
+    peticion("/admin/talento-humano/correos",
+             { method: "PATCH", body: JSON.stringify(correos) }),
   crearJefatura: (persona_id) =>
     peticion("/admin/jefaturas", { method: "POST", body: JSON.stringify({ persona_id }) }),
   quitarJefatura: (id, datos) =>
@@ -305,15 +315,6 @@ export const api = {
     peticion("/panel/configuracion/orden",
              { method: "POST", body: JSON.stringify({ claves }) }),
   colaboradores: () => peticion("/rrhh/colaboradores"),
-
-  miFirma: () => peticion("/firmas/mia"),
-  guardarFirma: (contenido) =>
-    peticion("/firmas/dibujada", { method: "POST", body: JSON.stringify({ contenido }) }),
-  subirFirma: (archivo) => {
-    const fd = new FormData();
-    fd.append("archivo", archivo);
-    return peticion("/firmas/archivo", { method: "POST", body: fd });
-  },
 };
 
 /* ------------------------------------------------------------- utilidades */

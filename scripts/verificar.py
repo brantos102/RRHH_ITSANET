@@ -223,6 +223,7 @@ async def revisar_base() -> int:
         ("0034 personal temporal sin dinero", "public.v_jornadas_detalle"),
         ("0035 pantalla de depuración", "public.v_cuentas_de_prueba"),
         ("0036 alta y baja de jefaturas", "public.v_jefaturas_admin"),
+        ("0037 departamento de Talento Humano", "public.v_talento_humano"),
     ]
 
     # Las migraciones que solo cambian funciones se comprueban por la función.

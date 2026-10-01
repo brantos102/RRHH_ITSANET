@@ -14,6 +14,27 @@ from .config import get_settings
 
 log = logging.getLogger("rrhh.notificaciones")
 
+
+async def _buzon_del_departamento(region: str | None) -> str | None:
+    """El correo del departamento de Talento Humano en esa región.
+
+    Existe porque los buzones personales fallan de una forma silenciosa:
+    quien tiene el rol sale de vacaciones, cambia de puesto o deja la
+    empresa, y las solicitudes siguen llegando a una dirección que nadie
+    abre. No da error, no avisa nadie, y la solicitud se queda esperando.
+
+    Esto suma un destinatario; no reemplaza a ninguno. En blanco —que es
+    como viene— todo sigue exactamente igual que antes.
+    """
+    from .db import obtener_uno
+    try:
+        fila = await obtener_uno(
+            "select public.rrhh_correo_de_region(%s) as buzon", (region or "sierra",))
+    except Exception:  # noqa: BLE001
+        log.exception("No se pudo leer el buzón del departamento")
+        return None
+    return (fila or {}).get("buzon")
+
 MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
          "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
 
@@ -124,11 +145,28 @@ async def avisar_a_rrhh(destinatarios: list[dict], solicitud: dict, jefe: str) -
     texto = f"{titulo}\n\n" + "\n".join(f"{e}: {v}" for e, v in filas) + f"\n\nDecida aquí:\n{url}\n"
     html = _marco(titulo, cuerpo, ("Revisar solicitud", url))
 
+    # El buzón del departamento recibe el aviso aunque no haya nadie
+    # registrado en la región, que es justo cuando más falta hace.
+    buzon = await _buzon_del_departamento(solicitud.get("region"))
+    if buzon:
+        try:
+            await correo.enviar(buzon, titulo, texto, html)
+        except Exception:  # noqa: BLE001
+            log.exception("No se pudo avisar al buzón del departamento %s", buzon)
+
     for persona in destinatarios:
+        if buzon and persona["email"] == buzon:
+            continue              # ya lo recibió como departamento
         try:
             await correo.enviar(persona["email"], titulo, texto, html)
         except Exception:  # noqa: BLE001
             log.exception("No se pudo avisar a %s", persona["email"])
+
+    if not destinatarios and not buzon:
+        log.warning(
+            "La solicitud %s espera a Talento Humano y nadie recibió el aviso: no hay "
+            "personal registrado en su región ni buzón del departamento configurado "
+            "(Configuración › Talento Humano)", solicitud.get("folio"))
 
 
 async def avisar_excepcion_a_rrhh(
@@ -183,8 +221,19 @@ async def avisar_excepcion_a_rrhh(
     )
     html = _marco(titulo, cuerpo, ("Revisar solicitud", url))
 
+    buzon = await _buzon_del_departamento(solicitud.get("region"))
     copia = [empleado_email] if empleado_email else None
+    if buzon:
+        try:
+            await correo.enviar(buzon, titulo, texto, html,
+                                responder_a=empleado_email, copia=copia)
+            copia = None
+        except Exception:  # noqa: BLE001
+            log.exception("No se pudo avisar al buzón del departamento %s", buzon)
+
     for persona in destinatarios:
+        if buzon and persona["email"] == buzon:
+            continue
         try:
             await correo.enviar(persona["email"], titulo, texto, html,
                                 responder_a=empleado_email, copia=copia)
@@ -195,10 +244,11 @@ async def avisar_excepcion_a_rrhh(
         except Exception:  # noqa: BLE001
             log.exception("No se pudo avisar a %s", persona["email"])
 
-    if not destinatarios:
+    if not destinatarios and not buzon:
         log.warning(
-            "La solicitud %s necesita a Talento Humano y no hay nadie registrado "
-            "en su región: nadie recibió el aviso", solicitud.get("folio"))
+            "La solicitud %s necesita a Talento Humano y nadie recibió el aviso: no hay "
+            "nadie registrado en su región ni buzón del departamento configurado "
+            "(Configuración › Talento Humano)", solicitud.get("folio"))
 
 
 async def avisar_aprobacion(empleado: dict, solicitud: dict) -> None:
