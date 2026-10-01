@@ -95,19 +95,34 @@ async def enviar(
         principal, _, secundario = mime.partition("/")
         mensaje.add_attachment(contenido, maintype=principal, subtype=secundario, filename=nombre)
 
-    await aiosmtplib.send(
-        mensaje,
-        # `recipients` explícito: aiosmtplib toma los destinatarios de las
-        # cabeceras, pero conviene no depender de que interprete Cc igual que
-        # To. Sin esto, una copia podía quedarse sin entregar en silencio.
-        recipients=[destinatario, *(copia or [])],
-        hostname=settings.smtp_host,
-        port=settings.smtp_port,
-        username=settings.smtp_user or None,
-        password=settings.smtp_password or None,
-        start_tls=settings.smtp_starttls,
-        timeout=20,
-    )
+    await aiosmtplib.send(mensaje, recipients=[destinatario, *(copia or [])],
+                          **parametros_smtp(settings))
+
+
+def parametros_smtp(settings) -> dict:
+    """Cómo se conecta al servidor de correo, según el puerto.
+
+    Hay dos formas de cifrar SMTP y confundirlas deja el envío colgado hasta
+    que vence el plazo, sin decir por qué:
+
+      · Puerto 587 (STARTTLS): se abre la conexión en claro y se sube a TLS
+        con un comando. Es lo que usan Google Workspace y Microsoft 365.
+      · Puerto 465 (TLS implícito): la conexión nace cifrada. Aquí NO va
+        STARTTLS; pedirlo sobre una conexión ya cifrada es un error.
+
+    El puerto manda sobre lo que diga SMTP_STARTTLS, porque el puerto es el
+    dato que no se puede equivocar: 465 solo existe para TLS implícito.
+    """
+    comun = {
+        "hostname": settings.smtp_host,
+        "port": settings.smtp_port,
+        "username": settings.smtp_user or None,
+        "password": settings.smtp_password or None,
+        "timeout": 20,
+    }
+    if settings.smtp_port == 465:
+        return {**comun, "use_tls": True, "start_tls": False}
+    return {**comun, "start_tls": settings.smtp_starttls}
 
 
 async def enviar_otp(destinatario: str, nombre: str, codigo: str) -> None:

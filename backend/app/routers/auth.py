@@ -140,6 +140,11 @@ async def solicitar_token(datos: SolicitudToken, request: Request) -> RespuestaE
         await correo.enviar_otp(usuario["email"], usuario["nombre"], codigo)
     except Exception:  # noqa: BLE001 - el detalle va al log, no al cliente
         log.exception("No se pudo enviar el código a %s", enmascarar(usuario["email"]))
+        # Quien está entrando no puede arreglar el servidor de correo, así
+        # que recibe un mensaje genérico. Pero quien lee el registro sí, y
+        # antes se quedaba con una traza de treinta líneas sin saber qué
+        # hacer con ella: aquí queda dicho dónde está la respuesta.
+        log.error("Para saber por qué:  python scripts/probar_correo.py")
         await registrar(request, "otp_error_envio", user_id=usuario["id"], cedula=datos.cedula)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

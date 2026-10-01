@@ -8,6 +8,8 @@ convertiría un dato que falta en uno falso, que es peor que no tenerlo.
 """
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 import pytest
 
 from app.db import ejecutar, obtener_todos, obtener_uno
@@ -16,6 +18,18 @@ from tests.conftest import CEDULA_PRUEBA
 CED_GUARDIA_T = "1713175071"
 CED_RRHH_T = "1700000068"
 CED_OPERARIO = "1300000054"
+
+
+def salida_de_ayer(hora: int = 17) -> str:
+    """La hora de salida de la jornada de ayer, calculada y no escrita a mano.
+
+    Estaba fija —«2026-09-29T17:00:00Z»— y las jornadas se insertan con
+    `current_date - 1`: al día siguiente la salida caía un día ANTES de la
+    entrada, la base la rechazaba con razón y la prueba fallaba sin que nada
+    estuviera roto en el sistema.
+    """
+    ayer = date.today() - timedelta(days=1)
+    return f"{ayer.isoformat()}T{hora:02d}:00:00Z"
 
 
 @pytest.fixture
@@ -176,7 +190,7 @@ async def test_talento_humano_cierra_a_mano_y_queda_constancia(
            returning id""", (operario["id"],))
 
     r = await cliente.post(f"/temporal/jornadas/{fila['id']}/cerrar", headers=rrhh_auth,
-                           json={"salida": "2026-09-29T17:00:00Z",
+                           json={"salida": salida_de_ayer(),
                                  "motivo": "Se retiró sin timbrar; lo confirma el supervisor"})
     assert r.status_code == 200, r.text
 
@@ -192,20 +206,22 @@ async def test_talento_humano_cierra_a_mano_y_queda_constancia(
 async def test_cerrar_a_mano_exige_explicacion(cliente, rrhh_auth, operario):
     fila = await obtener_uno(
         """insert into public.jornadas_temporales (temporal_id, fecha, entrada_en)
-           values (%s, current_date - 1, now() - interval '1 day') returning id""",
+           values (%s, current_date - 1,
+                   (current_date - 1)::timestamptz + interval '8 hours') returning id""",
         (operario["id"],))
     r = await cliente.post(f"/temporal/jornadas/{fila['id']}/cerrar", headers=rrhh_auth,
-                           json={"salida": "2026-09-29T17:00:00Z", "motivo": "ok"})
+                           json={"salida": salida_de_ayer(), "motivo": "ok"})
     assert r.status_code == 422
 
 
 async def test_la_garita_no_cierra_jornadas_a_mano(cliente, guardia_auth, operario):
     fila = await obtener_uno(
         """insert into public.jornadas_temporales (temporal_id, fecha, entrada_en)
-           values (%s, current_date - 1, now() - interval '1 day') returning id""",
+           values (%s, current_date - 1,
+                   (current_date - 1)::timestamptz + interval '8 hours') returning id""",
         (operario["id"],))
     r = await cliente.post(f"/temporal/jornadas/{fila['id']}/cerrar", headers=guardia_auth,
-                           json={"salida": "2026-09-29T17:00:00Z",
+                           json={"salida": salida_de_ayer(),
                                  "motivo": "Intento de cerrar sin ser Talento Humano"})
     assert r.status_code == 403
 

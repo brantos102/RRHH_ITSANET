@@ -67,3 +67,46 @@ def test_un_dominio_que_solo_empieza_igual_no_pasa():
     cfg = _config(entorno="produccion", cors_origins="https://itsanet.com.ec")
     assert not cfg.origen_aceptado("https://itsanet.com.ec.atacante.net")
     assert not cfg.origen_aceptado("http://localhost.atacante.net:5500")
+
+
+# ------------------------------------------------- probar entre varios
+# Para que un colaborador pruebe desde su propia máquina, el navegador suyo
+# manda `Origin: http://192.168.x.x:5500`. Eso no es «localhost» para él, y
+# sin esto el preflight se respondía con un 400 seco: la pantalla decía «No
+# se pudo conectar con el servidor» y el backend no registraba nada, porque
+# la petición nunca llegó a una ruta.
+
+@pytest.mark.parametrize(
+    "origen",
+    [
+        "http://192.168.1.50:5500",      # la red de oficina más común
+        "http://192.168.100.7:5501",
+        "http://10.3.4.5:5500",          # redes grandes
+        "http://172.16.0.9:5500",        # el borde bajo del rango privado
+        "http://172.31.255.254:5500",    # el borde alto
+        "http://pc-talento.local:5500",  # por nombre, cuando hay mDNS
+    ],
+)
+def test_la_red_interna_entra_mientras_se_prueba(origen):
+    assert _config().origen_aceptado(origen), origen
+
+
+@pytest.mark.parametrize(
+    "origen",
+    [
+        "http://172.32.0.9:5500",            # ya fuera del rango privado
+        "http://172.15.0.9:5500",            # por debajo del rango
+        "http://8.8.8.8:5500",               # una dirección pública cualquiera
+        "http://192.168.1.50.atacante.net:5500",  # parece interna y no lo es
+        "https://192.168.1.50:5500",         # otro esquema, no es el mismo origen
+    ],
+)
+def test_lo_que_no_es_la_red_interna_sigue_fuera(origen):
+    assert not _config().origen_aceptado(origen), origen
+
+
+def test_en_produccion_la_red_interna_tampoco_entra():
+    """Publicado, manda la lista explícita: esto es solo para probar."""
+    cfg = _config(entorno="produccion", cors_origins="https://permisos.itsanet.com.ec")
+    assert not cfg.origen_aceptado("http://192.168.1.50:5500")
+    assert not cfg.origen_aceptado("http://10.0.0.5:5500")

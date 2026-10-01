@@ -63,18 +63,35 @@ class Settings(BaseSettings):
 
     @property
     def origen_regex(self) -> str | None:
-        """Fuera de producción, cualquier puerto local vale.
+        """Fuera de producción, cualquier puerto local o de la red interna.
 
         `localhost:5500` y `127.0.0.1:5500` son orígenes distintos para el
         navegador, y cada servidor de estáticos elige su propio puerto (Live
         Server usa 5500 o 5501, `python -m http.server` el que se le indique).
         Exigir que el puerto exacto esté en CORS_ORIGINS solo produce
-        preflights rechazados con 400 durante el desarrollo. En producción
-        devuelve None: ahí manda la lista explícita y nada más.
+        preflights rechazados con 400 durante el desarrollo.
+
+        Y además las direcciones privadas de la red de la oficina. Para
+        probar con colaboradores, el equipo de quien ejecuta el sistema
+        atiende en `192.168.x.x` y los demás entran desde sus máquinas: ese
+        origen no es `localhost` para sus navegadores, así que el preflight
+        se rechazaba con un 400 y la pantalla solo decía «No se pudo
+        conectar con el servidor». Son rangos que no existen en internet
+        —RFC 1918—, así que esto no abre nada hacia afuera.
+
+        En producción devuelve None: ahí manda la lista explícita y nada más.
         """
         if self.es_produccion:
             return None
-        return r"http://(localhost|127\.0\.0\.1|\[::1\]):\d+"
+        return (
+            r"http://("
+            r"localhost|127\.0\.0\.1|\[::1\]"
+            r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"              # 10.0.0.0/8
+            r"|192\.168\.\d{1,3}\.\d{1,3}"                  # 192.168.0.0/16
+            r"|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"   # 172.16.0.0/12
+            r"|[A-Za-z0-9-]+\.local"                           # nombres mDNS
+            r"):\d+"
+        )
 
     def origen_aceptado(self, origen: str) -> bool:
         """¿El navegador que envía este Origin recibirá respuesta?"""
