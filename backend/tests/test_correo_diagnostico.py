@@ -135,3 +135,22 @@ def test_la_contrasena_vacia_se_manda_como_nula():
 
 def test_el_guion_fija_la_politica_de_bucle_de_windows():
     assert "import _windows" in GUION.read_text(encoding="utf-8")
+
+
+def test_avisa_de_un_servidor_de_correo_en_la_propia_maquina():
+    """Los cazadores de correo de desarrollo retienen los mensajes: usted ve
+    su código y los colaboradores nunca reciben el suyo."""
+    avisos = " ".join(probar.revisar(Config(smtp_host="localhost", smtp_port=1025)))
+    assert "nadie los recibe" in avisos
+
+
+def test_avisa_de_un_puerto_que_no_es_de_correo():
+    avisos = " ".join(probar.revisar(Config(smtp_port=3000)))
+    assert "3000" in avisos
+    assert "dirección externa" in avisos
+
+
+def test_los_puertos_de_correo_conocidos_no_levantan_aviso():
+    for puerto, starttls in ((25, True), (587, True), (465, False), (2525, True)):
+        avisos = probar.revisar(Config(smtp_port=puerto, smtp_starttls=starttls))
+        assert avisos == [], f"puerto {puerto}: {avisos}"

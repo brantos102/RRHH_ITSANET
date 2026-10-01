@@ -150,6 +150,24 @@ def revisar(settings) -> list[str]:
             "corregirla para que el archivo diga la verdad.")
     if settings.smtp_port == 587 and not settings.smtp_starttls:
         avisos.append("SMTP_PORT=587 con SMTP_STARTTLS=false: el 587 exige STARTTLS.")
+    # Un servidor de correo en esta misma máquina es casi siempre un
+    # «cazador» de correos para desarrollo (MailHog, Mailpit, MailDev): no
+    # entrega nada, los retiene en una bandeja local. Sirve para que usted
+    # vea el código, pero si convoca a colaboradores a probar, ellos no
+    # recibirán el suyo y no sabrán por qué.
+    if settings.smtp_host.lower() in ("localhost", "127.0.0.1", "::1", "[::1]"):
+        avisos.append(
+            f"SMTP_HOST es «{settings.smtp_host}»: el correo sale a un servidor de ESTA "
+            "máquina. Si es un cazador de correos de desarrollo, los mensajes se quedan "
+            "ahí y nadie los recibe en su bandeja real. Compruébelo enviando una prueba "
+            "a una dirección suya de verdad antes de convocar a nadie.")
+    elif settings.smtp_port not in (25, 465, 587, 2525):
+        avisos.append(
+            f"SMTP_PORT={settings.smtp_port} no es un puerto de correo habitual "
+            "(25, 465, 587 o 2525). Si es el relé de la empresa, está bien; si apunta "
+            "a otro programa suyo, el envío puede «funcionar» sin que el mensaje salga "
+            "de aquí. Envíe una prueba a una dirección externa para confirmarlo.")
+
     if settings.smtp_user and settings.smtp_user not in settings.smtp_remitente:
         avisos.append(
             f"SMTP_REMITENTE no contiene a {settings.smtp_user}. Muchos servidores "
