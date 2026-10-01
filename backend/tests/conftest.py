@@ -100,6 +100,13 @@ async def _limpiar() -> None:
         "(select id from public.users where email like %s)", ("%@api.test",))
     await ejecutar("delete from public.audit_logs where cedula = any(%s)",
                    ([CEDULA_PRUEBA, CEDULA_SIN_REGISTRO, "0900000001", "1100000007", "1200000006"],))
+    # Y los intentos fallidos de identificarse, que NO se borran por cédula:
+    # se registran justamente con una que no corresponde a nadie, así que la
+    # limpieza de arriba no los alcanzaba. El alta se cierra tras diez
+    # intentos por hora desde la misma red, de modo que se iban acumulando
+    # entre ejecuciones hasta que todas las pruebas del alta empezaban a
+    # recibir 429 sin que nada estuviera roto.
+    await ejecutar("delete from public.audit_logs where accion = 'alta_identidad_fallida'")
     # Los ajustes apuntan a quien los hizo y la clave foránea es restrictiva a
     # propósito: en producción las personas se desactivan, no se borran, y la
     # constancia del ajuste debe sobrevivirlas. Aquí sí hay que quitarlos.

@@ -32,6 +32,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _windows  # noqa: F401,E402
 import _cli  # noqa: E402
+import _puerto  # noqa: E402
 
 RAIZ = Path(__file__).resolve().parents[1]
 VERDE, AMARILLO, GRIS, FIN = "\033[92m", "\033[93m", "\033[90m", "\033[0m"
@@ -66,29 +67,6 @@ def es_privada(ip: str) -> bool:
     return a == 10 or (a == 192 and b == 168) or (a == 172 and 16 <= b <= 31)
 
 
-def puerto_de_la_interfaz() -> int:
-    """El puerto del backend que la interfaz va a llamar, según su configuración.
-
-    Vale la pena leerlo y no suponerlo: si la interfaz llama al 8000 y el
-    backend atiende en otro, la pantalla de acceso dice «No se pudo conectar
-    con el servidor» sin que el backend registre nada, porque la petición
-    nunca llegó. `config.local.js` pisa a `config.js`, como en el navegador.
-    """
-    import re
-    puerto = 8000
-    for nombre in ("config.js", "config.local.js"):
-        archivo = RAIZ / "frontend" / nombre
-        if not archivo.exists():
-            continue
-        texto = archivo.read_text(encoding="utf-8", errors="replace")
-        # Sin las líneas comentadas: el archivo de ejemplo las trae todas.
-        util = "\n".join(l for l in texto.splitlines() if not l.strip().startswith("//"))
-        encontrado = re.search(r"PUERTO_API\s*:\s*(\d{2,5})", util)
-        if encontrado:
-            puerto = int(encontrado.group(1))
-    return puerto
-
-
 def comprobar_entorno() -> list[str]:
     """Lo que impediría que esto sirva de algo, dicho antes de arrancar."""
     problemas = []
@@ -121,7 +99,7 @@ def main() -> int:
                    help="Solo imprime la dirección a repartir; no arranca nada.")
     args = _cli.analizar(p)
     if args.puerto_api is None:
-        args.puerto_api = puerto_de_la_interfaz()
+        args.puerto_api = _puerto.de_la_interfaz()
 
     problemas = comprobar_entorno()
     for problema in problemas:

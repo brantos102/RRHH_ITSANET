@@ -14,7 +14,10 @@ igual cómo se arranque. En Linux y macOS no cambia nada.
 
     python scripts/servidor.py                    # desarrollo, con recarga
     python scripts/servidor.py --sin-recarga      # como en producción
-    python scripts/servidor.py --puerto 8080
+    python scripts/servidor.py --puerto 8080      # un puerto distinto, esta vez
+
+Sin `--puerto` arranca donde la interfaz va a buscarlo —`frontend/config.js`,
+o `frontend/config.local.js` si existe—, para que los dos no puedan discrepar.
 """
 from __future__ import annotations
 
@@ -28,6 +31,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _windows  # noqa: F401,E402
 import _cli  # noqa: E402
+import _puerto  # noqa: E402
 
 RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ / "backend"))
@@ -37,10 +41,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Arranca el backend del sistema.")
     parser.add_argument("--host", default="",
                         help="Dirección concreta. Por omisión atiende 127.0.0.1 y ::1")
-    parser.add_argument("--puerto", type=int, default=8000)
+    # Sin --puerto se arranca donde la interfaz va a buscarlo. No es un
+    # detalle: si los dos puertos no coinciden, la pantalla de acceso dice
+    # «No se pudo conectar con el servidor» y el registro del backend queda
+    # vacío —la petición nunca llegó a una ruta—, así que el síntoma apunta
+    # al correo, al cortafuegos o a la base, que no tienen nada que ver.
+    parser.add_argument("--puerto", type=int, default=None,
+                        help="Por omisión, el que la interfaz tiene configurado.")
     parser.add_argument("--sin-recarga", action="store_true",
                         help="No vigilar cambios en el código (como en producción)")
     args = _cli.analizar(parser)
+    if args.puerto is None:
+        args.puerto = _puerto.de_la_interfaz()
+        print(_puerto.donde_lo_busca_el_navegador(args.puerto))
 
     try:
         import uvicorn

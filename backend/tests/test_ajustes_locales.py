@@ -22,18 +22,18 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parents[2]
 FRONTEND = RAIZ / "frontend"
-GUION = RAIZ / "scripts" / "compartir.py"
+GUION = RAIZ / "scripts" / "_puerto.py"
 
 
 def _cargar():
     sys.path.insert(0, str(RAIZ / "scripts"))
-    especificacion = importlib.util.spec_from_file_location("compartir_local", GUION)
+    especificacion = importlib.util.spec_from_file_location("puerto_local", GUION)
     modulo = importlib.util.module_from_spec(especificacion)
     especificacion.loader.exec_module(modulo)
     return modulo
 
 
-compartir = _cargar()
+puertos = _cargar()
 
 
 # ------------------------------------------------- lo que carga el navegador
@@ -84,43 +84,55 @@ def test_el_archivo_real_no_esta_en_el_repositorio():
 
 
 # --------------------------------------------- lo que leen los guiones
-def test_el_guion_lee_el_puerto_de_la_configuracion(tmp_path, monkeypatch):
-    falso = tmp_path
-    (falso / "frontend").mkdir()
-    (falso / "frontend" / "config.js").write_text(
-        "window.RRHH_CONFIG = { API: '', PUERTO_API: 8000 };", encoding="utf-8")
-    monkeypatch.setattr(compartir, "RAIZ", falso)
-    assert compartir.puerto_de_la_interfaz() == 8000
+def _con(tmp_path, base: str, local: str | None = None):
+    (tmp_path / "frontend").mkdir(exist_ok=True)
+    (tmp_path / "frontend" / "config.js").write_text(base, encoding="utf-8")
+    if local is not None:
+        (tmp_path / "frontend" / "config.local.js").write_text(local, encoding="utf-8")
+    return tmp_path
 
 
-def test_los_ajustes_locales_ganan(tmp_path, monkeypatch):
-    falso = tmp_path
-    (falso / "frontend").mkdir()
-    (falso / "frontend" / "config.js").write_text(
-        "window.RRHH_CONFIG = { PUERTO_API: 8000 };", encoding="utf-8")
-    (falso / "frontend" / "config.local.js").write_text(
-        "Object.assign(window.RRHH_CONFIG, { PUERTO_API: 3000 });", encoding="utf-8")
-    monkeypatch.setattr(compartir, "RAIZ", falso)
-    assert compartir.puerto_de_la_interfaz() == 3000
+def test_se_lee_el_puerto_de_la_configuracion(tmp_path):
+    raiz = _con(tmp_path, "window.RRHH_CONFIG = { API: '', PUERTO_API: 8000 };")
+    assert puertos.de_la_interfaz(raiz) == 8000
 
 
-def test_una_linea_comentada_no_cuenta(tmp_path, monkeypatch):
+def test_los_ajustes_locales_ganan(tmp_path):
+    raiz = _con(tmp_path, "window.RRHH_CONFIG = { PUERTO_API: 8000 };",
+                "Object.assign(window.RRHH_CONFIG, { PUERTO_API: 3000 });")
+    assert puertos.de_la_interfaz(raiz) == 3000
+
+
+def test_una_linea_comentada_no_cuenta(tmp_path):
     """El archivo de ejemplo trae todo comentado: copiarlo no debe fijar nada."""
-    falso = tmp_path
-    (falso / "frontend").mkdir()
-    (falso / "frontend" / "config.js").write_text(
-        "window.RRHH_CONFIG = { PUERTO_API: 8000 };", encoding="utf-8")
-    (falso / "frontend" / "config.local.js").write_text(
-        "Object.assign(window.RRHH_CONFIG, {\n  // PUERTO_API: 3000,\n});", encoding="utf-8")
-    monkeypatch.setattr(compartir, "RAIZ", falso)
-    assert compartir.puerto_de_la_interfaz() == 8000
+    raiz = _con(tmp_path, "window.RRHH_CONFIG = { PUERTO_API: 8000 };",
+                "Object.assign(window.RRHH_CONFIG, {\n  // PUERTO_API: 3000,\n});")
+    assert puertos.de_la_interfaz(raiz) == 8000
 
 
-def test_sin_configuracion_se_supone_el_8000(tmp_path, monkeypatch):
-    falso = tmp_path
-    (falso / "frontend").mkdir()
-    monkeypatch.setattr(compartir, "RAIZ", falso)
-    assert compartir.puerto_de_la_interfaz() == 8000
+def test_sin_configuracion_se_supone_el_8000(tmp_path):
+    (tmp_path / "frontend").mkdir()
+    assert puertos.de_la_interfaz(tmp_path) == 8000
+
+
+# ------------------------- los dos puertos no pueden discrepar
+def test_el_backend_arranca_donde_la_interfaz_lo_busca():
+    """Es la discrepancia que cuesta una tarde: la pantalla dice «No se pudo
+    conectar con el servidor» y el registro del backend está vacío, porque
+    la petición nunca llegó a una ruta. El síntoma apunta al correo, al
+    cortafuegos o a la base, que no tienen nada que ver."""
+    fuente = (RAIZ / "scripts" / "servidor.py").read_text(encoding="utf-8")
+    assert "_puerto.de_la_interfaz()" in fuente, "servidor.py debe leer el puerto de la interfaz"
+    assert 'default=8000' not in fuente, "ya no debe suponer el 8000"
+
+
+def test_los_guiones_leen_el_puerto_del_mismo_sitio():
+    """Un segundo lugar donde esté el puerto es un segundo lugar donde se
+    puede quedar desactualizado."""
+    for guion in ("servidor.py", "compartir.py"):
+        fuente = (RAIZ / "scripts" / guion).read_text(encoding="utf-8")
+        assert "import _puerto" in fuente, guion
+        assert "_puerto.de_la_interfaz()" in fuente, guion
 
 
 def test_el_servidor_de_la_interfaz_no_devuelve_404_sin_ajustes_locales():
