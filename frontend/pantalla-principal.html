@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>Pantalla principal</title>
+<link rel="icon" type="image/png" href="img/icono.png">
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="vendor/tailwind.css">
+<script src="config.js"></script>
+<!-- Ajustes de ESTA máquina, fuera del repositorio: el puerto del backend si
+     no es el 8000, una URL distinta. Si el archivo no existe no pasa nada
+     —el servidor de la interfaz devuelve vacío—. Vea config.local.js.ejemplo. -->
+<script src="config.local.js"></script>
+</head>
+
+<body class="min-h-dvh bg-slate-100 text-slate-900 antialiased">
+<div id="barra"></div>
+
+<main class="mx-auto max-w-4xl px-4 py-5 pb-24">
+
+  <header class="mb-5">
+    <h1 class="text-xl font-semibold">Pantalla principal</h1>
+    <p class="mt-1 text-sm text-slate-600">
+      Qué ve el colaborador al entrar, en qué orden y quién lo ve. Apagar un
+      bloque no borra ningún dato: lo esconde de esta pantalla, y se sigue
+      consultando desde su propio menú.
+    </p>
+  </header>
+
+  <!-- ===== El aviso de la empresa ===== -->
+  <section class="mb-5 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <h2 class="font-medium">Aviso de la empresa</h2>
+    <p class="mt-1 text-sm text-slate-600">
+      Aparece arriba de todo, en el panel de las 350 personas. Para comunicados
+      cortos: cierre por feriado, plazo para pedir vacaciones, cambio de
+      horario. Déjelo vacío y no se muestra.
+    </p>
+    <textarea id="anuncio" rows="3" maxlength="600"
+              placeholder="Escriba aquí el aviso, o bórrelo para quitarlo."
+              class="mt-3 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                     focus:ring-2 focus:ring-slate-900"></textarea>
+    <div class="mt-2 flex flex-wrap items-center justify-between gap-3">
+      <p id="anuncio-estado" class="text-xs text-slate-500"></p>
+      <button id="btn-anuncio"
+              class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
+        Guardar aviso
+      </button>
+    </div>
+  </section>
+
+  <!-- ===== Los bloques ===== -->
+  <section class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h2 class="font-medium">Bloques del panel</h2>
+        <p class="mt-0.5 text-sm text-slate-500">
+          De arriba abajo, en el orden en que se verán.
+        </p>
+      </div>
+      <a href="dashboard.html" target="_blank" rel="noopener"
+         class="rounded-xl bg-slate-100 px-3 py-2 text-sm font-medium hover:bg-slate-200">
+        Ver el panel ↗
+      </a>
+    </div>
+    <div id="lista" class="mt-4 space-y-2">
+      <p class="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Cargando…</p>
+    </div>
+  </section>
+
+  <p class="mt-4 px-1 text-xs leading-relaxed text-slate-500">
+    Los bloques marcados como imprescindibles no se pueden apagar: son la razón
+    por la que la gente entra al sistema. Sí se pueden mover de sitio.
+  </p>
+</main>
+
+<div id="aviso" class="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center px-4"></div>
+
+<script type="module" src="js/pantalla-principal.js"></script>
+</body>
+</html>

@@ -1,0 +1,640 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>Administración del sistema</title>
+<link rel="icon" type="image/png" href="img/icono.png">
+<link rel="stylesheet" href="vendor/tailwind.css">
+<script src="config.js"></script>
+<!-- Ajustes de ESTA máquina, fuera del repositorio: el puerto del backend si
+     no es el 8000, una URL distinta. Si el archivo no existe no pasa nada
+     —el servidor de la interfaz devuelve vacío—. Vea config.local.js.ejemplo. -->
+<script src="config.local.js"></script>
+<style>dialog::backdrop{background:rgb(15 23 42/.5)}</style>
+</head>
+
+<body class="min-h-dvh bg-slate-100 text-slate-900 antialiased">
+<div id="barra"></div>
+
+<main class="mx-auto max-w-6xl px-4 py-5 pb-24">
+  <nav class="mb-5 flex gap-1 overflow-x-auto rounded-2xl bg-white p-1.5 shadow-sm ring-1 ring-slate-200">
+    <button data-seccion="usuarios" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Usuarios</button>
+    <button data-seccion="tipos" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Tipos de solicitud</button>
+    <button data-seccion="feriados" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Días no laborables</button>
+    <button data-seccion="antiguedades" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Antigüedades</button>
+    <button data-seccion="configuracion" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Configuración</button>
+    <button data-seccion="bitacora" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Bitácora</button>
+    <button data-seccion="cotejo" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Cotejo de la carga</button>
+    <button data-seccion="cambios-ficha" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Cambios de ficha</button>
+    <button data-seccion="lineamientos" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Lineamientos</button>
+    <button data-seccion="jefaturas" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Jefaturas</button>
+    <button data-seccion="talento-humano" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Talento Humano</button>
+    <button data-seccion="depuracion" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Depuración</button>
+  </nav>
+
+  <!-- ===== Talento Humano =====
+       Quiénes integran el departamento y a qué buzón llegan sus avisos. El
+       buzón del departamento existe porque los personales fallan en
+       silencio: quien tiene el rol sale de vacaciones o deja la empresa, y
+       las solicitudes siguen llegando a una dirección que nadie abre. -->
+  <section data-panel="talento-humano" class="hidden space-y-4">
+    <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <h2 class="font-medium">Correo del departamento</h2>
+      <p class="mt-0.5 text-sm text-slate-600">
+        Recibe copia de todo lo que se dirige a Talento Humano. No reemplaza a
+        los correos personales: los suma. Un buzón compartido sobrevive a que
+        alguien salga de vacaciones o deje la empresa.
+      </p>
+      <form id="form-correos-rrhh" class="mt-3 grid gap-3 sm:grid-cols-2">
+        <label>
+          <span class="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Sierra · Quito</span>
+          <input id="correo-rrhh-sierra" type="email" autocomplete="off"
+                 placeholder="talentohumano.uio@itsanet.com.ec"
+                 class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1
+                        ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </label>
+        <label>
+          <span class="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Costa · Guayaquil</span>
+          <input id="correo-rrhh-costa" type="email" autocomplete="off"
+                 placeholder="talentohumano.gye@itsanet.com.ec"
+                 class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1
+                        ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </label>
+        <div class="sm:col-span-2 flex items-center gap-3">
+          <button type="submit"
+                  class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white
+                         hover:bg-slate-800">Guardar</button>
+          <p class="text-xs text-slate-500">
+            Déjelo en blanco para que los avisos vayan solo a los correos personales.
+          </p>
+        </div>
+      </form>
+    </div>
+
+    <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <h2 class="font-medium">Integrar a alguien al departamento</h2>
+      <p class="mt-0.5 text-sm text-slate-600">
+        Pasa a ver las fichas y las solicitudes de la región que se le asigne.
+      </p>
+      <div class="mt-3 flex flex-wrap items-end gap-3">
+        <label class="min-w-0 flex-1">
+          <span class="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Persona</span>
+          <input id="th-buscar" type="search" autocomplete="off" placeholder="Nombre o cédula"
+                 class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1
+                        ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </label>
+        <label>
+          <span class="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Región</span>
+          <select id="th-region"
+                  class="mt-1 rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                         focus:bg-white focus:ring-2 focus:ring-slate-900">
+            <option value="sierra">Sierra · Quito</option>
+            <option value="costa">Costa · Guayaquil</option>
+          </select>
+        </label>
+        <button id="th-integrar" type="button" disabled
+                class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white
+                       hover:bg-slate-800 disabled:bg-slate-300">Integrar</button>
+      </div>
+      <ul id="th-candidatos" class="mt-2 space-y-1 empty:hidden"></ul>
+    </div>
+
+    <div class="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+      <header class="border-b border-slate-200 px-5 py-3.5">
+        <h2 class="font-medium">Quiénes lo integran</h2>
+        <p id="th-cuantos" class="mt-0.5 text-sm text-slate-600"></p>
+      </header>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th class="px-5 py-2.5 font-medium">Integrante</th>
+              <th class="px-3 py-2.5 font-medium">Región</th>
+              <th class="px-3 py-2.5 font-medium">Rol</th>
+              <th class="px-3 py-2.5 text-right font-medium">Por resolver</th>
+              <th class="px-3 py-2.5 font-medium"></th>
+            </tr>
+          </thead>
+          <tbody id="th-tabla"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Jefaturas =====
+       Quién tiene gente a cargo. Nombrar una jefatura es un cambio de rol y
+       ya bastaba con eso; quitarla no, porque la gente se queda apuntando a
+       alguien que ya no puede aprobarle nada. Por eso la baja pide a quién
+       pasan antes de hacer nada. -->
+  <section data-panel="jefaturas" class="hidden space-y-4">
+    <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <h2 class="font-medium">Nombrar una jefatura</h2>
+      <p class="mt-0.5 text-sm text-slate-600">
+        Busque a la persona y nómbrela. Después asígnele su gente desde la ficha
+        de cada colaborador, en Usuarios.
+      </p>
+      <div class="mt-3 flex flex-wrap items-end gap-3">
+        <label class="min-w-0 flex-1">
+          <span class="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Persona</span>
+          <input id="jef-buscar" type="search" autocomplete="off"
+                 placeholder="Nombre o cédula"
+                 class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1
+                        ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </label>
+        <button id="jef-nombrar" type="button" disabled
+                class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white
+                       hover:bg-slate-800 disabled:bg-slate-300">Nombrar jefatura</button>
+      </div>
+      <ul id="jef-candidatos" class="mt-2 space-y-1 empty:hidden"></ul>
+    </div>
+
+    <div class="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+      <header class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-5 py-3.5">
+        <div>
+          <h2 class="font-medium">Jefaturas vigentes</h2>
+          <p id="jef-cuantas" class="mt-0.5 text-sm text-slate-600"></p>
+        </div>
+        <input id="jef-filtro" type="search" placeholder="Filtrar"
+               class="rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
+      </header>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th class="px-5 py-2.5 font-medium">Jefatura</th>
+              <th class="px-3 py-2.5 font-medium">Área</th>
+              <th class="px-3 py-2.5 font-medium">Rol</th>
+              <th class="px-3 py-2.5 text-right font-medium">A cargo</th>
+              <th class="px-3 py-2.5 text-right font-medium">Por autorizar</th>
+              <th class="px-3 py-2.5 font-medium"></th>
+            </tr>
+          </thead>
+          <tbody id="jef-tabla"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Depuración =====
+       Lo que hay que revisar a mano después de la carga inicial, sin abrir un
+       cliente de base de datos. Señala; no corrige: lo que se corrige se
+       corrige por las pantallas de siempre, que dejan constancia. -->
+  <section data-panel="depuracion" class="hidden space-y-4">
+    <div id="dep-resumen" class="grid gap-3 sm:grid-cols-5"></div>
+    <div id="dep-detalle" class="space-y-4"></div>
+  </section>
+
+  <!-- ===== Lineamientos =====
+       Lo que el colaborador lee antes de enviar una solicitud. Estaba escrito
+       dentro del HTML: para cambiar una coma hacía falta un programador, y
+       son reglas que cambian por circular. -->
+  <section data-panel="lineamientos" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="border-b border-slate-200 px-5 py-3.5">
+      <h2 class="font-medium">Lineamientos de solicitud</h2>
+      <p class="mt-0.5 text-sm text-slate-600">
+        Lo que se lee antes de enviar, plegado bajo «Antes de enviar, tenga presente».
+        Escríbalos cortos: si no caben en un renglón, nadie los lee.
+      </p>
+    </header>
+
+    <div class="border-b border-slate-200 bg-slate-50 px-5 py-4">
+      <div class="flex flex-wrap items-end gap-3">
+        <label class="min-w-0 flex-1">
+          <span class="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Nuevo lineamiento</span>
+          <input id="nuevo-lineamiento" type="text" maxlength="400"
+                 placeholder="Ej.: Las vacaciones de diciembre se piden hasta el 15 de noviembre."
+                 class="mt-1 w-full rounded-xl border-0 bg-white px-3 py-2 text-sm ring-1
+                        ring-slate-300 focus:ring-2 focus:ring-slate-900">
+        </label>
+        <label>
+          <span class="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            ¿Dónde se ve?</span>
+          <select id="nuevo-lineamiento-ambito"
+                  class="mt-1 rounded-xl border-0 bg-white px-3 py-2 text-sm ring-1 ring-slate-300
+                         focus:ring-2 focus:ring-slate-900">
+            <option value="vacacion">Al pedir vacaciones</option>
+            <option value="permiso">Al pedir un permiso</option>
+            <option value="ambos">En los dos</option>
+          </select>
+        </label>
+        <button id="btn-nuevo-lineamiento"
+                class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
+          Agregar
+        </button>
+      </div>
+    </div>
+
+    <div id="lista-lineamientos" class="divide-y divide-slate-100"></div>
+  </section>
+
+  <!-- ===== Usuarios ===== -->
+  <section data-panel="usuarios" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+      <h2 class="font-medium">Personal</h2>
+      <div class="flex items-center gap-3">
+        <input id="buscar-usuario" type="search" placeholder="Nombre o cédula"
+               class="w-48 rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
+        <label class="flex items-center gap-2 text-sm text-slate-600">
+          <input id="ver-inactivos" type="checkbox" class="rounded border-slate-300"> Inactivos
+        </label>
+        <button id="btn-nuevo-usuario"
+                class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
+          + Nuevo
+        </button>
+      </div>
+    </header>
+    <div id="tabla-usuarios" class="overflow-x-auto"></div>
+  </section>
+
+  <!-- ===== Cotejo de la carga inicial =====
+       Una carga masiva puede traer errores que dentro del sistema, de uno en
+       uno, no se detectan con trescientas cincuenta personas. Esto baja la
+       tabla para compararla con el archivo del que salió. -->
+  <!-- Cambios de ficha ---------------------------------------------------
+       La cola existía en la API desde el principio y ninguna pantalla la
+       mostraba: alguien pedía corregir su cargo y el pedido se quedaba en la
+       base sin que nadie pudiera verlo. -->
+  <section data-panel="cambios-ficha" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+      <div>
+        <h2 class="font-medium">Cambios de ficha por confirmar</h2>
+        <p id="cf-resumen" class="mt-0.5 text-sm text-slate-500">Cargando…</p>
+      </div>
+      <input type="search" id="cf-buscar" placeholder="Persona, cédula o dato"
+             class="w-56 rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+    </header>
+    <div id="cf-lista" class="divide-y divide-slate-100"></div>
+  </section>
+
+  <section data-panel="cotejo" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="border-b border-slate-200 px-5 py-3.5">
+      <h2 class="font-medium">Cotejo de la carga inicial</h2>
+      <p class="mt-0.5 text-sm text-slate-500">
+        Baje lo que quedó en el sistema y compárelo con el archivo del que salió:
+        cédulas, fechas de ingreso, jefes y saldos.
+      </p>
+    </header>
+
+    <div class="space-y-5 px-5 py-4">
+      <div id="cotejo-resumen" class="grid gap-3 sm:grid-cols-4"></div>
+
+      <div class="rounded-xl bg-slate-50 p-4">
+        <label class="flex items-start gap-2.5 text-sm">
+          <input type="checkbox" id="cotejo-solo-revisar"
+                 class="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900">
+          <span>
+            <span class="font-medium">Solo lo que requiere revisión</span><br>
+            <span class="text-xs text-slate-500">
+              Sin correo real, sin jefe asignado, o con el saldo descuadrado respecto de
+              sus períodos.
+            </span>
+          </span>
+        </label>
+
+        <div class="mt-3 flex flex-wrap items-center gap-2">
+          <label class="text-sm text-slate-600" for="cotejo-departamento">Departamento</label>
+          <select id="cotejo-departamento"
+                  class="rounded-xl border-slate-300 py-1.5 text-sm focus:border-slate-900 focus:ring-slate-900">
+            <option value="">Todos</option>
+          </select>
+          <span class="mx-1 h-5 w-px bg-slate-300"></span>
+          <button type="button" data-cotejo="pdf"
+                  class="rounded-xl bg-white px-3.5 py-1.5 text-sm font-medium ring-1 ring-slate-300 hover:bg-slate-100">PDF</button>
+          <button type="button" data-cotejo="xlsx"
+                  class="rounded-xl bg-white px-3.5 py-1.5 text-sm font-medium ring-1 ring-slate-300 hover:bg-slate-100">Excel</button>
+          <button type="button" data-cotejo="csv"
+                  class="rounded-xl bg-white px-3.5 py-1.5 text-sm font-medium ring-1 ring-slate-300 hover:bg-slate-100">CSV</button>
+        </div>
+      </div>
+
+      <p class="text-xs leading-relaxed text-slate-500">
+        El archivo lleva nombres, cédulas y saldos de toda la planilla. Es información
+        personal bajo la LOPDP: guárdelo donde corresponda y no lo reenvíe fuera del área.
+        Queda constancia en la bitácora de quién lo descargó y cuándo.
+      </p>
+    </div>
+  </section>
+
+  <!-- ===== Tipos de solicitud ===== -->
+  <section data-panel="tipos" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+      <div>
+        <h2 class="font-medium">Tipos de solicitud</h2>
+        <p class="mt-0.5 text-sm text-slate-500">
+          Cada tipo define qué exige. Cambiarlo aplica a las solicitudes nuevas, no a las ya enviadas.
+        </p>
+      </div>
+      <input type="search" id="buscar-tipo" placeholder="Tipo, pilar o código"
+             class="w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900 sm:w-56">
+    </header>
+    <p id="tipos-vacio" class="hidden px-5 py-8 text-center text-sm text-slate-500"></p>
+    <div id="tabla-tipos" class="overflow-x-auto"></div>
+  </section>
+
+  <!-- ===== Feriados ===== -->
+  <section data-panel="feriados" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+      <div>
+        <h2 class="font-medium">Días no laborables</h2>
+        <p class="mt-0.5 text-sm text-slate-500">No se descuentan del saldo cuando caen dentro de una ausencia</p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <input type="search" id="buscar-feriado" placeholder="Nombre del día"
+               class="w-44 rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
+        <input id="anio-feriados" type="number" min="2020" max="2100"
+               class="w-24 rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300">
+        <button id="btn-nuevo-feriado"
+                class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
+          + Agregar
+        </button>
+      </div>
+    </header>
+    <p id="feriados-vacio" class="hidden px-5 py-8 text-center text-sm text-slate-500"></p>
+    <div id="tabla-feriados" class="overflow-x-auto"></div>
+  </section>
+
+  <!-- ===== Antigüedades ===== -->
+  <section data-panel="antiguedades" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+      <div>
+        <h2 class="font-medium">Antigüedades y días</h2>
+        <p class="mt-0.5 text-sm text-slate-500">
+          Cuántos días devenga cada persona según sus años de servicio (Art. 69 del Código del Trabajo)
+        </p>
+      </div>
+      <input type="search" id="buscar-antiguedad" placeholder="Nombre, cédula o área"
+             class="w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900 sm:w-56">
+    </header>
+    <p id="antiguedades-vacio" class="hidden px-5 py-8 text-center text-sm text-slate-500"></p>
+    <div id="tabla-antiguedades" class="overflow-x-auto"></div>
+  </section>
+
+  <!-- ===== Configuración ===== -->
+  <section data-panel="configuracion" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+      <div>
+        <h2 class="font-medium">Parámetros del sistema</h2>
+        <p class="mt-0.5 text-sm text-slate-500">
+          Deciden derechos de toda la plantilla. Cada cambio queda en la bitácora.
+        </p>
+      </div>
+      <input type="search" id="buscar-parametro" placeholder="Parámetro o valor"
+             class="w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900 sm:w-56">
+    </header>
+    <p id="parametros-vacio" class="hidden px-5 py-8 text-center text-sm text-slate-500"></p>
+    <div id="lista-configuracion" class="divide-y divide-slate-100"></div>
+  </section>
+
+  <!-- ===== Bitácora ===== -->
+  <section data-panel="bitacora" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+      <div>
+        <h2 class="font-medium">Bitácora de auditoría</h2>
+        <p class="mt-0.5 text-sm text-slate-500">Registro inmutable: no se puede editar ni borrar</p>
+      </div>
+      <input id="filtro-bitacora" type="search" placeholder="Filtrar por acción"
+             class="w-48 rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+    </header>
+    <div id="tabla-bitacora" class="overflow-x-auto"></div>
+  </section>
+</main>
+
+<!-- ===== Alta / edición de usuario ===== -->
+<dialog id="modal-usuario" class="w-[min(100vw-1.5rem,34rem)] rounded-2xl p-0">
+  <form id="form-usuario" method="dialog" class="max-h-[85dvh] overflow-y-auto">
+    <div class="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
+      <h2 id="titulo-usuario" class="font-semibold">Nuevo usuario</h2>
+      <button type="button" data-cerrar class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100">✕</button>
+    </div>
+    <div class="grid gap-4 px-5 py-4 sm:grid-cols-2">
+      <div><label for="u-cedula" class="block text-sm font-medium text-slate-700">Cédula</label>
+        <input id="u-cedula" inputmode="numeric" maxlength="10" required
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 font-mono ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
+        <p id="u-error-cedula" class="mt-1 hidden text-xs text-rose-600"></p></div>
+      <div><label for="u-nombre" class="block text-sm font-medium text-slate-700">Nombre</label>
+        <input id="u-nombre" required maxlength="120"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900"></div>
+      <div class="sm:col-span-2"><label for="u-email" class="block text-sm font-medium text-slate-700">
+        Correo institucional</label>
+        <input id="u-email" type="email" required
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
+        <p class="mt-1 text-xs text-slate-500">Ahí llegará su código de acceso</p></div>
+      <div><label for="u-rol" class="block text-sm font-medium text-slate-700">Rol</label>
+        <select id="u-rol" class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300">
+          <option value="empleado">Empleado</option>
+          <option value="jefe">Jefe inmediato</option>
+          <option value="rrhh">Talento Humano</option>
+          <option value="guardia">Guardia de seguridad</option>
+          <option value="admin">Administrador</option>
+        </select></div>
+      <div><label for="u-telefono" class="block text-sm font-medium text-slate-700">Teléfono</label>
+        <input id="u-telefono" inputmode="tel" maxlength="20"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300"></div>
+      <div><label for="u-cargo" class="block text-sm font-medium text-slate-700">Cargo</label>
+        <input id="u-cargo" maxlength="80"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300"></div>
+      <div><label for="u-departamento" class="block text-sm font-medium text-slate-700">Departamento</label>
+        <input id="u-departamento" maxlength="80"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300"></div>
+      <div><label for="u-jefe" class="block text-sm font-medium text-slate-700">Jefe inmediato</label>
+        <select id="u-jefe" class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300">
+          <option value="">Sin jefe asignado</option>
+        </select></div>
+      <div><label for="u-ingreso" class="block text-sm font-medium text-slate-700">Fecha de ingreso</label>
+        <input id="u-ingreso" type="date" required
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300"></div>
+      <div id="campo-saldo"><label for="u-saldo" class="block text-sm font-medium text-slate-700">
+        Saldo en planilla</label>
+        <input id="u-saldo" type="number" step="0.5" min="0" placeholder="Días que ya tiene"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300">
+        <p class="mt-1 text-xs text-slate-500">Si se deja vacío, se calcula desde la fecha de ingreso</p></div>
+      <p id="u-error" class="hidden rounded-xl bg-rose-50 p-3 text-sm text-rose-800 sm:col-span-2"></p>
+    </div>
+    <div class="sticky bottom-0 flex gap-3 border-t border-slate-200 bg-white px-5 py-4">
+      <button type="button" data-cerrar class="flex-1 rounded-xl bg-slate-100 px-4 py-3 font-medium hover:bg-slate-200">
+        Cancelar</button>
+      <button type="submit" class="flex-1 rounded-xl bg-slate-900 px-4 py-3 font-medium text-white hover:bg-slate-800">
+        Guardar</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4">
+  <p id="aviso" class="hidden max-w-sm rounded-xl bg-slate-900 px-4 py-3 text-center text-sm text-white shadow-lg"></p>
+</div>
+
+<script type="module" src="js/administracion.js"></script>
+
+<!-- ===== Períodos de una persona =====
+     Talento Humano necesita ver de dónde salen los días de alguien y poder
+     corregir los fines de semana obligatorios: el contador puede reclamar los
+     de quien ya los tomó antes de que el sistema existiera, y esa regla le
+     bloquea unas vacaciones normales por un dato que no es cierto. -->
+<dialog id="modal-periodos" class="w-[min(100vw-1.5rem,46rem)] rounded-2xl p-0">
+  <div class="max-h-[85dvh] overflow-y-auto">
+    <header class="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
+      <div>
+        <h2 class="font-semibold">Períodos de vacaciones</h2>
+        <p id="periodos-persona" class="text-sm text-slate-500">—</p>
+      </div>
+      <button type="button" data-cerrar
+              class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100" aria-label="Cerrar">✕</button>
+    </header>
+    <div id="periodos-cuerpo" class="overflow-x-auto"></div>
+    <footer class="space-y-1.5 border-t border-slate-200 px-5 py-3 text-xs leading-relaxed text-slate-500">
+      <p>
+        <strong>Los decimales.</strong> Los 15 días del año no aparecen de golpe:
+        se acumulan a razón de <strong>1,25 por mes</strong> —15 ÷ 12—. Por eso el
+        año en curso muestra cifras como 3,75 (tres meses) o 9,33 (siete meses y
+        medio). Los años ya cumplidos siempre son enteros.
+      </p>
+      <p>
+        <strong>Son días calendario</strong>, no laborables: cuentan los sábados y
+        domingos que caigan dentro del descanso. De los 15 días, 4 son fines de
+        semana obligatorios (Art. 69 del Código del Trabajo), y esa es la columna
+        de la derecha. Un período ya gozado por completo no ofrece corregirlos:
+        se fueron con los días.
+      </p>
+      <p>
+        <strong>Los días no gozados no se pierden.</strong> Se pueden acumular
+        hasta tres años (Art. 75) y, si no se gozan, se pagan (Art. 76).
+        Corregir un fin de semana queda en la bitácora con su nombre y el motivo.
+      </p>
+    </footer>
+  </div>
+</dialog>
+
+<!-- ============ Modal: quitar una jefatura ============ -->
+<dialog id="modal-jefatura" class="w-[min(100vw-1.5rem,32rem)] rounded-2xl p-0">
+  <form id="form-jefatura" method="dialog">
+    <div class="border-b border-slate-200 px-5 py-4">
+      <h2 class="font-semibold">Quitar la jefatura</h2>
+      <p id="jef-quien" class="mt-0.5 text-sm text-slate-500"></p>
+    </div>
+
+    <div class="space-y-4 px-5 py-4">
+      <p id="jef-aviso" class="rounded-xl bg-amber-50 p-3 text-sm leading-relaxed text-amber-900
+                               ring-1 ring-amber-200"></p>
+
+      <div id="jef-destino-caja">
+        <label for="jef-destino" class="block text-sm font-medium text-slate-700">
+          ¿A qué jefatura pasa su gente?</label>
+        <select id="jef-destino"
+                class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm ring-1
+                       ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></select>
+        <p class="mt-1 text-xs text-slate-500">
+          Pasan también las solicitudes que estaban esperando su autorización.
+        </p>
+      </div>
+
+      <div>
+        <label for="jef-rol" class="block text-sm font-medium text-slate-700">
+          ¿Con qué rol se queda?</label>
+        <select id="jef-rol"
+                class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm ring-1
+                       ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+          <option value="empleado">Empleado</option>
+          <option value="guardia">Garita</option>
+          <option value="rrhh">Talento Humano</option>
+        </select>
+      </div>
+
+      <p id="jef-error" class="hidden rounded-xl bg-rose-50 p-3 text-sm text-rose-800 ring-1 ring-rose-200"></p>
+    </div>
+
+    <div class="flex gap-3 border-t border-slate-200 px-5 py-4">
+      <button type="button" data-cerrar
+              class="flex-1 rounded-xl bg-slate-100 px-4 py-3 font-medium hover:bg-slate-200">Cancelar</button>
+      <button type="submit"
+              class="flex-1 rounded-xl bg-slate-900 px-4 py-3 font-medium text-white hover:bg-slate-800">
+        Quitar la jefatura
+      </button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ============ Modal: dar de baja a un colaborador ============ -->
+<dialog id="modal-baja" class="w-[min(100vw-1.5rem,34rem)] rounded-2xl p-0">
+  <form id="form-baja" method="dialog">
+    <div class="border-b border-slate-200 px-5 py-4">
+      <h2 class="font-semibold">Dar de baja</h2>
+      <p id="baja-quien" class="mt-0.5 text-sm text-slate-500"></p>
+    </div>
+
+    <div class="max-h-[70vh] space-y-4 overflow-y-auto px-5 py-4">
+      <p class="rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
+        La causa no es un trámite: de ella depende lo que corresponde liquidar,
+        y es lo primero que se pregunta al revisar un expediente —una auditoría,
+        el Ministerio del Trabajo, o la propia persona que reclama—.
+      </p>
+
+      <div>
+        <label for="baja-fecha" class="block text-sm font-medium text-slate-700">
+          Último día de trabajo</label>
+        <input type="date" id="baja-fecha" required
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
+      </div>
+
+      <div>
+        <label for="baja-motivo" class="block text-sm font-medium text-slate-700">
+          ¿Cómo terminó la relación laboral?</label>
+        <select id="baja-motivo" required
+                class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm ring-1
+                       ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+          <option value="">Elija la causa…</option>
+        </select>
+        <p id="baja-ayuda" class="mt-1.5 hidden rounded-lg bg-slate-50 p-2.5 text-xs
+                                  leading-relaxed text-slate-600"></p>
+      </div>
+
+      <div>
+        <label for="baja-detalle" class="block text-sm font-medium text-slate-700">
+          Detalle <span class="font-normal text-slate-500">(número de acta, acuerdo, lo que corresponda)</span>
+        </label>
+        <textarea id="baja-detalle" rows="2" maxlength="400"
+                  class="mt-1.5 w-full resize-none rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm
+                         ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></textarea>
+      </div>
+
+      <p class="rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-900 ring-1 ring-amber-200">
+        <b>Las vacaciones no gozadas se pagan en todos los casos</b>, sea cual
+        sea la causa (Código del Trabajo, Art. 76). Al confirmar se le dirá
+        cuántos días quedan por liquidar.
+      </p>
+
+      <p id="baja-error" class="hidden rounded-xl bg-rose-50 p-3 text-sm text-rose-800 ring-1 ring-rose-200"></p>
+    </div>
+
+    <div class="flex gap-3 border-t border-slate-200 px-5 py-4">
+      <button type="button" data-cerrar
+              class="flex-1 rounded-xl bg-slate-100 px-4 py-3 font-medium hover:bg-slate-200">Cancelar</button>
+      <button type="submit"
+              class="flex-1 rounded-xl bg-slate-900 px-4 py-3 font-medium text-white hover:bg-slate-800">
+        Dar de baja
+      </button>
+    </div>
+  </form>
+</dialog>
+
+</body>
+</html>

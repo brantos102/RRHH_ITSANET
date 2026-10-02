@@ -1,0 +1,887 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Permisos y Vacaciones · ITSANET</title>
+<meta name="description" content="Cómo funciona el Sistema Integrado de Permisos, Vacaciones y Control de Garita: los procesos, el cálculo de vacaciones y el estado de la implantación.">
+<style>
+/* ------------------------------------------------------------------
+   Archivo único y sin internet a propósito: esto se presenta en una
+   sala, y una presentación que depende de la red falla justo ahí.
+   Nada de CDN, nada de fuentes remotas, ninguna petición al abrirlo.
+   ------------------------------------------------------------------ */
+:root{
+  --tinta:#0f172a; --tinta-2:#334155; --tinta-3:#64748b; --tinta-4:#94a3b8;
+  --papel:#ffffff; --fondo:#f1f5f9; --linea:#e2e8f0; --linea-2:#cbd5e1;
+  --marca:#1c58d7; --marca-claro:#eff4ff; --marca-borde:#c7d8fb;
+  --bien:#047857; --bien-fondo:#ecfdf5; --bien-borde:#a7f3d0;
+  --ojo:#b45309; --ojo-fondo:#fffbeb; --ojo-borde:#fde68a;
+  --mal:#be123c; --mal-fondo:#fff1f2; --mal-borde:#fecdd3;
+  --indice:17rem;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth; scroll-padding-top:1.5rem}
+body{
+  margin:0; background:var(--fondo); color:var(--tinta);
+  font-family:"Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+  font-size:16px; line-height:1.65; -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4{line-height:1.25; margin:0; font-weight:600; letter-spacing:-.011em}
+p{margin:0 0 1rem}
+a{color:var(--marca)}
+
+/* ---------------------------------------------------------- estructura */
+.lamina{display:grid; grid-template-columns:var(--indice) 1fr; min-height:100vh}
+
+nav.indice{
+  background:var(--tinta); color:#cbd5e1; padding:1.5rem 0 2rem;
+  position:sticky; top:0; height:100vh; overflow-y:auto;
+}
+nav.indice::-webkit-scrollbar{width:6px}
+nav.indice::-webkit-scrollbar-thumb{background:#334155; border-radius:3px}
+.marca{padding:0 1.5rem 1.5rem; border-bottom:1px solid #1e293b; margin-bottom:1rem}
+.marca img{width:124px; height:auto; display:block}
+.marca span{display:block; margin-top:.6rem; font-size:.78rem; color:#64748b; letter-spacing:.02em}
+nav.indice ol{list-style:none; margin:0; padding:0 .75rem; counter-reset:paso}
+nav.indice a{
+  display:flex; gap:.6rem; align-items:baseline; padding:.42rem .75rem;
+  color:#cbd5e1; text-decoration:none; border-radius:.55rem; font-size:.9rem;
+}
+nav.indice a:hover{background:#1e293b; color:#fff}
+nav.indice a.aqui{background:var(--marca); color:#fff; font-weight:500}
+nav.indice a::before{
+  counter-increment:paso; content:counter(paso,decimal-leading-zero);
+  font-variant-numeric:tabular-nums; font-size:.72rem; color:#64748b; flex:none; width:1.4rem;
+}
+nav.indice a.aqui::before{color:#bfdbfe}
+.pie-indice{padding:1.25rem 1.5rem 0; margin-top:1.25rem; border-top:1px solid #1e293b;
+  font-size:.76rem; color:#64748b; line-height:1.55}
+
+main{padding:0 0 5rem; min-width:0}
+section{
+  background:var(--papel); border-bottom:1px solid var(--linea);
+  padding:3.25rem clamp(1.5rem,4vw,4rem);
+}
+section:nth-of-type(even){background:#fbfcfe}
+.ancho{max-width:60rem; margin:0 auto}
+
+.etiqueta{
+  display:inline-block; font-size:.7rem; font-weight:700; letter-spacing:.09em;
+  text-transform:uppercase; color:var(--marca); background:var(--marca-claro);
+  border:1px solid var(--marca-borde); border-radius:999px; padding:.2rem .7rem; margin-bottom:.9rem;
+}
+section h2{font-size:clamp(1.5rem,2.6vw,2rem); margin-bottom:.5rem}
+.bajada{font-size:1.05rem; color:var(--tinta-2); max-width:46rem; margin-bottom:2rem}
+h3{font-size:1.12rem; margin:2.25rem 0 .75rem}
+h4{font-size:.95rem; margin:1.25rem 0 .4rem}
+
+/* ------------------------------------------------------------ portada */
+.portada{
+  background:linear-gradient(160deg,#0f172a 0%,#1e293b 55%,#1c3f8f 100%);
+  color:#fff; padding:clamp(3rem,7vw,5.5rem) clamp(1.5rem,4vw,4rem);
+  border-bottom:none;
+}
+.portada h1{font-size:clamp(2rem,4.6vw,3.1rem); max-width:24ch; margin-bottom:1rem}
+.portada p{color:#cbd5e1; font-size:1.1rem; max-width:48rem}
+.portada .sello{
+  display:inline-flex; gap:.5rem; align-items:center; font-size:.78rem; letter-spacing:.08em;
+  text-transform:uppercase; color:#93c5fd; margin-bottom:1.5rem;
+}
+.portada .sello::before{content:""; width:1.75rem; height:2px; background:#3b82f6}
+
+/* --------------------------------------------------------------- datos */
+.cifras{display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(10.5rem,1fr)); margin:2rem 0}
+.cifra{background:var(--papel); border:1px solid var(--linea); border-radius:.9rem; padding:1.1rem 1.25rem}
+.portada .cifra{background:rgba(255,255,255,.07); border-color:rgba(255,255,255,.16)}
+.cifra b{display:block; font-size:1.9rem; font-weight:650; letter-spacing:-.02em; font-variant-numeric:tabular-nums}
+.cifra span{display:block; font-size:.82rem; color:var(--tinta-3); margin-top:.15rem; line-height:1.4}
+.portada .cifra b{color:#fff}
+.portada .cifra span{color:#94a3b8}
+
+/* --------------------------------------------------------------- cajas */
+.nota,.alerta,.ok{border-radius:.8rem; padding:1rem 1.15rem; margin:1.25rem 0; font-size:.95rem}
+.nota{background:var(--marca-claro); border:1px solid var(--marca-borde)}
+.alerta{background:var(--ojo-fondo); border:1px solid var(--ojo-borde); color:#78350f}
+.ok{background:var(--bien-fondo); border:1px solid var(--bien-borde); color:#064e3b}
+.nota p:last-child,.alerta p:last-child,.ok p:last-child{margin-bottom:0}
+.nota strong,.alerta strong,.ok strong{font-weight:650}
+
+blockquote{
+  margin:1.5rem 0; padding:.3rem 0 .3rem 1.25rem; border-left:3px solid var(--marca);
+  color:var(--tinta-2); font-size:1.02rem;
+}
+
+/* --------------------------------------------------------------- flujo */
+.flujo{display:grid; gap:.6rem; grid-template-columns:repeat(auto-fit,minmax(11rem,1fr)); margin:1.75rem 0}
+.etapa{
+  background:var(--papel); border:1px solid var(--linea); border-left:3px solid var(--marca);
+  border-radius:.7rem; padding:.95rem 1.05rem; position:relative;
+}
+.etapa b{display:block; font-size:.93rem; margin-bottom:.2rem}
+.etapa span{font-size:.83rem; color:var(--tinta-3); line-height:1.5; display:block}
+.etapa i{
+  position:absolute; top:.6rem; right:.75rem; font-style:normal; font-size:.7rem;
+  color:var(--tinta-4); font-variant-numeric:tabular-nums;
+}
+
+/* --------------------------------------------------------------- tabla */
+.marco{overflow-x:auto; border:1px solid var(--linea); border-radius:.8rem; margin:1.5rem 0; background:var(--papel)}
+table{border-collapse:collapse; width:100%; font-size:.9rem}
+caption{text-align:left; padding:.85rem 1rem; font-size:.84rem; color:var(--tinta-3); border-bottom:1px solid var(--linea)}
+th,td{padding:.6rem 1rem; text-align:left; border-bottom:1px solid var(--linea); vertical-align:top}
+thead th{background:#f8fafc; font-size:.73rem; text-transform:uppercase; letter-spacing:.06em; color:var(--tinta-3); font-weight:600}
+tbody tr:last-child td{border-bottom:none}
+td.num,th.num{text-align:right; font-variant-numeric:tabular-nums}
+tfoot td{font-weight:650; background:#f8fafc; border-top:2px solid var(--linea-2)}
+
+/* -------------------------------------------------------------- fórmula */
+.formula{
+  background:#0f172a; color:#e2e8f0; border-radius:.8rem; padding:1.15rem 1.3rem; margin:1.25rem 0;
+  font-family:"Cascadia Mono",Consolas,"SF Mono",Menlo,monospace; font-size:.88rem; line-height:1.75;
+  overflow-x:auto; white-space:pre;
+}
+.formula em{color:#7dd3fc; font-style:normal}
+.formula b{color:#fcd34d; font-weight:500}
+.formula span{color:#64748b}
+code{
+  background:#f1f5f9; border:1px solid var(--linea); border-radius:.3rem;
+  padding:.08rem .34rem; font-family:"Cascadia Mono",Consolas,monospace; font-size:.87em;
+}
+
+/* --------------------------------------------------------------- listas */
+ul.limpia{list-style:none; margin:1rem 0; padding:0}
+ul.limpia li{position:relative; padding-left:1.5rem; margin-bottom:.55rem; color:var(--tinta-2)}
+ul.limpia li::before{
+  content:""; position:absolute; left:.3rem; top:.65rem; width:.4rem; height:.4rem;
+  border-radius:50%; background:var(--marca);
+}
+ul.limpia li b{color:var(--tinta); font-weight:600}
+.columnas{display:grid; gap:1.5rem 2.5rem; grid-template-columns:repeat(auto-fit,minmax(17rem,1fr))}
+
+.ficha{background:var(--papel); border:1px solid var(--linea); border-radius:.9rem; padding:1.2rem 1.35rem}
+.ficha h4{margin-top:0; display:flex; align-items:center; gap:.5rem}
+.ficha p:last-child{margin-bottom:0}
+.ficha p{font-size:.92rem; color:var(--tinta-2)}
+
+.art{
+  display:inline-block; font-size:.72rem; font-weight:650; color:var(--marca);
+  background:var(--marca-claro); border:1px solid var(--marca-borde);
+  border-radius:.3rem; padding:.05rem .4rem; white-space:nowrap;
+}
+
+/* ------------------------------------------------------------ impresión */
+@media print{
+  :root{--fondo:#fff}
+  body{font-size:11pt}
+  nav.indice{display:none}
+  .lamina{display:block}
+  section{break-inside:avoid-page; break-after:page; border-bottom:none; padding:1.5rem 0}
+  section:last-of-type{break-after:auto}
+  .portada{background:#0f172a !important; -webkit-print-color-adjust:exact; print-color-adjust:exact}
+  .cifra,.nota,.alerta,.ok,.marco,.etapa,.formula{-webkit-print-color-adjust:exact; print-color-adjust:exact}
+  a{color:inherit; text-decoration:none}
+}
+
+/* ------------------------------------------------------------- estrecho */
+@media (max-width:900px){
+  .lamina{grid-template-columns:1fr}
+  nav.indice{position:static; height:auto; padding-bottom:1rem}
+  nav.indice ol{display:flex; flex-wrap:wrap; gap:.25rem}
+  nav.indice a::before{display:none}
+  .pie-indice{display:none}
+}
+</style>
+</head>
+
+<body>
+<div class="lamina">
+
+<nav class="indice" aria-label="Contenido">
+  <div class="marca">
+    <img src="data:image/png;base64,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" alt="ITSANET">
+    <span>Permisos y Vacaciones</span>
+  </div>
+  <ol>
+    <li><a href="#que-es">Qué es y qué resuelve</a></li>
+    <li><a href="#antes">Cómo se lleva hoy</a></li>
+    <li><a href="#flujo">El recorrido de una solicitud</a></li>
+    <li><a href="#calculo">El cálculo de vacaciones</a></li>
+    <li><a href="#cotejo">La hoja y el sistema, cotejados</a></li>
+    <li><a href="#fines-semana">Los dos fines de semana</a></li>
+    <li><a href="#permisos">Permisos: tres bloques</a></li>
+    <li><a href="#garita">Garita y código QR</a></li>
+    <li><a href="#temporal">Personal temporal</a></li>
+    <li><a href="#datos">Protección de datos</a></li>
+    <li><a href="#hallazgos">Lo que apareció en la carga</a></li>
+    <li><a href="#estado">Dónde estamos</a></li>
+  </ol>
+  <div class="pie-indice">
+    Documento interno de trabajo.<br>
+    No contiene datos de ninguna persona.
+  </div>
+</nav>
+
+<main>
+
+<!-- ================================================== PORTADA -->
+<section class="portada">
+  <div class="ancho">
+    <span class="sello">ITSANET · Talento Humano</span>
+    <h1>Permisos, Vacaciones y Control de Garita</h1>
+    <p>
+      Un solo lugar donde el colaborador pide, el jefe autoriza, Talento Humano
+      resuelve y la garita verifica. El saldo se calcula solo, con el Código del
+      Trabajo escrito en las reglas, y cada movimiento queda registrado.
+    </p>
+    <div class="cifras">
+      <div class="cifra"><b>351</b><span>colaboradores activos en el sistema</span></div>
+      <div class="cifra"><b>16</b><span>departamentos</span></div>
+      <div class="cifra"><b>3.298</b><span>períodos de vacaciones históricos cargados</span></div>
+      <div class="cifra"><b>2008</b><span>año del registro más antiguo recuperado</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================== 1. QUÉ ES -->
+<section id="que-es">
+  <div class="ancho">
+    <span class="etiqueta">01 · El punto de partida</span>
+    <h2>Qué es y qué resuelve</h2>
+    <p class="bajada">
+      No es un sistema de «llenar formularios». Es el expediente de ausencias de
+      la empresa: quién tiene derecho a qué, quién lo autorizó y qué pasó de
+      verdad ese día en la puerta.
+    </p>
+
+    <div class="columnas">
+      <div>
+        <h3>Para el colaborador</h3>
+        <ul class="limpia">
+          <li>Ve <b>sus días</b>, de dónde salen y hasta cuándo los tiene.</li>
+          <li>Pide vacaciones o un permiso en una pantalla, sin formato impreso.</li>
+          <li>Sigue su solicitud: en qué paso está y quién la tiene.</li>
+          <li>Entra <b>con su cédula</b> y un código que le llega al correo. Sin contraseñas que olvidar.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Para Talento Humano y las jefaturas</h3>
+        <ul class="limpia">
+          <li>El <b>calendario del equipo</b>: quién falta y cuándo, para no dejar un puesto descubierto.</li>
+          <li>Aprobación en dos etapas, con constancia de quién firmó y cuándo.</li>
+          <li>El saldo de cada quien, calculado y explicado con el artículo que lo sustenta.</li>
+          <li>Informes en PDF, Excel y CSV, con los filtros que haga falta.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="nota">
+      <p><strong>La idea que ordena todo lo demás:</strong> el sistema no decide
+      nada que no decida la ley o Talento Humano. Calcula, recuerda y deja
+      constancia. Quien autoriza sigue siendo una persona.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================== 2. ANTES -->
+<section id="antes">
+  <div class="ancho">
+    <span class="etiqueta">02 · El problema</span>
+    <h2>Cómo se lleva hoy, y qué cuesta</h2>
+    <p class="bajada">
+      Nada de esto es culpa de nadie: es lo que pasa cuando trescientas cincuenta
+      personas se administran con una hoja de cálculo y mensajería.
+    </p>
+
+    <div class="marco">
+      <table>
+        <caption>Lo que se pierde en el camino actual</caption>
+        <thead>
+          <tr><th style="width:34%">Hoy</th><th>Qué se rompe</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>El saldo vive en una hoja</b></td>
+            <td>Una sola persona sabe dónde está la fórmula. Si se equivoca una celda, nadie lo nota hasta que alguien reclama.</td>
+          </tr>
+          <tr>
+            <td><b>La autorización va por mensajería</b></td>
+            <td>«Yo te dije que sí» no es un respaldo. Cuando hay un reclamo, no hay nada que mostrar.</td>
+          </tr>
+          <tr>
+            <td><b>El jefe no ve a su equipo completo</b></td>
+            <td>Dos personas del mismo puesto salen la misma semana y se descubre el lunes.</td>
+          </tr>
+          <tr>
+            <td><b>La garita no sabe quién tiene permiso</b></td>
+            <td>O deja salir a quien no debía, o detiene a quien sí tenía autorización.</td>
+          </tr>
+          <tr>
+            <td><b>El colaborador pregunta por su saldo</b></td>
+            <td>Cada consulta es una interrupción a Talento Humano, y la respuesta tarda.</td>
+          </tr>
+          <tr>
+            <td><b>Los fines de semana obligatorios</b></td>
+            <td>La regla existe, pero no hay forma práctica de llevarle la cuenta a 351 personas.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <blockquote>
+      El sistema no reemplaza el criterio de Talento Humano. Reemplaza la
+      aritmética, la memoria y el rastro de papel.
+    </blockquote>
+  </div>
+</section>
+
+<!-- ================================================== 3. FLUJO -->
+<section id="flujo">
+  <div class="ancho">
+    <span class="etiqueta">03 · El proceso</span>
+    <h2>El recorrido de una solicitud</h2>
+    <p class="bajada">
+      Cinco pasos, siempre los mismos, para vacaciones y para permisos. Cada paso
+      avisa por correo al que sigue y queda fechado.
+    </p>
+
+    <div class="flujo">
+      <div class="etapa"><i>1</i><b>Pide</b><span>El colaborador elige fechas. El sistema le dice ahí mismo si le alcanza el saldo y cuántos días laborables son.</span></div>
+      <div class="etapa"><i>2</i><b>Autoriza el jefe</b><span>Ve el calendario de su equipo antes de decidir y asigna reemplazo si hace falta.</span></div>
+      <div class="etapa"><i>3</i><b>Resuelve Talento Humano</b><span>Revisa el respaldo, confirma el saldo y aprueba. Aquí se descuenta.</span></div>
+      <div class="etapa"><i>4</i><b>Se emite el QR</b><span>Un código con vigencia, ligado a esa autorización y a esa persona.</span></div>
+      <div class="etapa"><i>5</i><b>La garita verifica</b><span>Lee el código, registra la salida y el regreso, y marca el exceso si lo hubo.</span></div>
+    </div>
+
+    <h3>Las reglas que el sistema hace cumplir solo</h3>
+    <ul class="limpia">
+      <li><b>No se puede pedir más de lo que se tiene</b> — salvo adelanto expreso de Talento Humano, que queda registrado como tal.</li>
+      <li><b>No se pueden solapar dos ausencias</b> de la misma persona.</li>
+      <li><b>Las vacaciones se piden en bloques</b>; pedir menos del mínimo abre una solicitud formal a Talento Humano en vez de un rechazo seco.</li>
+      <li><b>Un permiso que exige respaldo no avanza sin él</b> — cita médica, calamidad, licencias legales.</li>
+      <li><b>Una ausencia aprobada no se corrige a mano.</b> Se ajusta con motivo y resolución, y el registro original se conserva.</li>
+    </ul>
+
+    <div class="alerta">
+      <p><strong>Lo que la garita aporta y la hoja no podía:</strong> el permiso
+      autorizado dice «de 10:00 a 12:00», pero lo que se registra es la hora real
+      de salida y de regreso. Si volvió a las 13:20, queda anotado el exceso. No
+      lo castiga el sistema: lo ve Talento Humano.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================== 4. CÁLCULO -->
+<section id="calculo">
+  <div class="ancho">
+    <span class="etiqueta">04 · El corazón del sistema</span>
+    <h2>Cómo se calculan las vacaciones</h2>
+    <p class="bajada">
+      Esta es la parte que hay que poder defender ante cualquiera: ante el
+      colaborador que reclama, ante una auditoría y ante el Ministerio del
+      Trabajo. Está escrita en la base de datos, no en una celda.
+    </p>
+
+    <h3>1. Cuántos días le tocan a cada quien</h3>
+    <p>
+      <span class="art">Código del Trabajo, Art. 69</span> — quince días de
+      descanso ininterrumpido por cada año de servicio. Desde el <b>sexto año</b>,
+      un día adicional por cada año, con tope de quince días extra.
+    </p>
+
+    <div class="formula"><em>dias_por_antiguedad</em>(años)
+
+  años &lt; 1    <b>→</b>   0 días      <span>no cumplió el año</span>
+  1 a 4        <b>→</b>  15 días      <span>el derecho base</span>
+  5            <b>→</b>  16 días      <span>empieza el día adicional</span>
+  6            <b>→</b>  17 días
+  …
+  19 o más     <b>→</b>  30 días      <span>15 base + 15 de tope</span></div>
+
+    <h3>2. Cuánto lleva devengado el año en curso</h3>
+    <p>
+      El derecho nace al cumplir el año, pero el colaborador necesita saber
+      cuánto lleva acumulado hoy. Se cuenta por <b>meses completos</b>
+      transcurridos desde su último aniversario:
+    </p>
+
+    <div class="formula"><em>devengado</em> = 15 ÷ 12 × meses completos = <b>1,25 días por mes</b>
+
+  Ejemplo · ingreso el 12 de marzo, hoy 1 de octubre
+  ───────────────────────────────────────────────────
+  meses completos desde el 12 de marzo    <b>6</b>   <span>(marzo→septiembre)</span>
+  1,25 × 6                                <b>7,50 días devengados</b></div>
+
+    <div class="nota">
+      <p><strong>Por qué 1,25 y no el tope de su período.</strong> Se prorratea
+      la base de quince días, no los días adicionales del Art. 69. Esos se
+      conceden <b>enteros al cumplir el año</b>, que es cuando nace el derecho —y
+      es como Talento Humano lo lleva en su hoja desde hace años—. Esto es
+      configurable: si algún día se decide prorratear también los adicionales,
+      se cambia un parámetro, no el programa.</p>
+    </div>
+
+    <h3>3. Hasta cuándo los conserva</h3>
+    <p>
+      <span class="art">Art. 75</span> — las vacaciones pueden acumularse
+      <b>hasta por tres años</b>, para gozarlas en el cuarto. El sistema avisa
+      antes de que un período llegue a ese límite.
+    </p>
+    <p>
+      <span class="art">Art. 76</span> — las vacaciones no gozadas <b>se pagan</b>.
+      No se pierden. El sistema <b>nunca</b> dice «sus días se perdieron», porque
+      sería falso y porque
+      <span class="art">Constitución, Art. 326 núm. 2</span> declara los derechos
+      laborales <b>irrenunciables</b>.
+    </p>
+
+    <h3>4. Qué se descuenta cuando sale</h3>
+    <p>
+      <span class="art">Art. 71</span> — la liquidación se hace sobre la
+      veinticuatroava parte de lo percibido. Y el consumo va contra el período
+      <b>más antiguo primero</b> (FIFO): así se protege el que está más cerca de
+      llegar al límite del Art. 75.
+    </p>
+
+    <div class="ok">
+      <p><strong>Cada cifra se puede sustentar.</strong> El sistema guarda 37
+      artículos citados y, al explicar un saldo, muestra el que lo respalda. No
+      es decoración: es lo que convierte «el sistema dice 12,5 días» en «le
+      corresponden 12,5 días por el Art. 69, y aquí está por qué».</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================== 5. COTEJO -->
+<section id="cotejo">
+  <div class="ancho">
+    <span class="etiqueta">05 · La reconciliación</span>
+    <h2>La hoja de Talento Humano y el sistema, cotejados</h2>
+    <p class="bajada">
+      Antes de cargar nada se comparó, persona por persona, el saldo de la hoja
+      contra el que calcula el sistema. Es lo que permite decir que el sistema no
+      cambió los números de nadie.
+    </p>
+
+    <div class="cifras">
+      <div class="cifra"><b>3.298</b><span>períodos históricos leídos de la hoja</span></div>
+      <div class="cifra"><b>14.863</b><span>días de vacaciones ya gozados, reconstruidos</span></div>
+      <div class="cifra"><b>4.085</b><span>días de saldo vigente, en total</span></div>
+      <div class="cifra"><b>0</b><span>saldos que el sistema movió</span></div>
+    </div>
+
+    <h3>El único desfase, y por qué no cambia ningún saldo</h3>
+    <p>
+      La hoja concede los días adicionales del Art. 69 <b>enteros en el
+      aniversario</b>. Un cálculo estrictamente prorrateado los repartiría mes a
+      mes. Los dos métodos <b>coinciden exactamente en cada aniversario</b>; solo
+      difieren <i>dentro</i> del año en curso, y únicamente para quienes pasan de
+      cinco años de servicio.
+    </p>
+
+    <div class="marco">
+      <table>
+        <caption>Colaborador con 7 años de servicio · derecho del período: 18 días</caption>
+        <thead>
+          <tr>
+            <th>Mes del período</th>
+            <th class="num">Como lo lleva la hoja</th>
+            <th class="num">Prorrateo estricto</th>
+            <th class="num">Diferencia</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Mes 3</td><td class="num">3,75</td><td class="num">4,50</td><td class="num">0,75</td></tr>
+          <tr><td>Mes 6</td><td class="num">7,50</td><td class="num">9,00</td><td class="num">1,50</td></tr>
+          <tr><td>Mes 9</td><td class="num">11,25</td><td class="num">13,50</td><td class="num">2,25</td></tr>
+          <tr><td>Mes 11</td><td class="num">13,75</td><td class="num">16,50</td><td class="num">2,75</td></tr>
+        </tbody>
+        <tfoot>
+          <tr><td>Mes 12 · aniversario</td><td class="num">18,00</td><td class="num">18,00</td><td class="num">0,00</td></tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <div class="ok">
+      <p><strong>La decisión tomada:</strong> el sistema sigue el método de la
+      hoja. Es el que Talento Humano viene aplicando, el que figura en los
+      respaldos entregados a los colaboradores y el que no le quita un día a
+      nadie al momento de liquidar. El saldo consolidado antes y después de la
+      carga es el mismo: <b>4.085,00 días</b>.</p>
+    </div>
+
+    <p>
+      Hay una justificación formal firmada de esto, con el detalle del cotejo y
+      los artículos citados, lista para presentar.
+    </p>
+  </div>
+</section>
+
+<!-- ================================================== 6. FINES DE SEMANA -->
+<section id="fines-semana">
+  <div class="ancho">
+    <span class="etiqueta">06 · Una regla difícil de llevar a mano</span>
+    <h2>Los dos fines de semana</h2>
+    <p class="bajada">
+      El descanso anual debe incluir fines de semana completos. Con 351 personas
+      y veinte años de historia, llevarle la cuenta en una hoja es imposible —y
+      el primer intento del sistema lo demostró.
+    </p>
+
+    <div class="alerta">
+      <p><strong>Lo que pasó al encender la regla:</strong> el sistema generó
+      <b>2.562 alertas sobre 351 personas</b>. Le estaba exigiendo dos fines de
+      semana a gente que ya había gozado sus días completos hacía años: períodos
+      cerrados, consumidos al cien por ciento, reclamados otra vez.</p>
+    </div>
+
+    <h3>La regla, como debe ser</h3>
+    <ul class="limpia">
+      <li><b>Período consumido por completo</b> → cumplido. No se le reclama nada a nadie por un año ya cerrado.</li>
+      <li><b>Período en curso</b> → se mide sobre lo que se vaya tomando.</li>
+      <li><b>Período sin gozar</b> → todavía no pudo cumplirlo; no es una falta.</li>
+      <li><b>Solo queda pendiente</b> lo que de verdad requiere que una persona lo confirme.</li>
+    </ul>
+
+    <div class="cifras">
+      <div class="cifra"><b>2.562</b><span>alertas antes de corregir la regla</span></div>
+      <div class="cifra"><b>240</b><span>pendientes reales, tras aplicarla bien</span></div>
+      <div class="cifra"><b>784</b><span>períodos reparados automáticamente</span></div>
+      <div class="cifra"><b>120</b><span>personas que sí requieren confirmación</span></div>
+    </div>
+
+    <p>
+      Y esa información no se muestra de golpe: es una vista que se despliega
+      cuando Talento Humano quiere verla. Un panel que grita a todo el mundo
+      deja de leerse a la semana.
+    </p>
+  </div>
+</section>
+
+<!-- ================================================== 7. PERMISOS -->
+<section id="permisos">
+  <div class="ancho">
+    <span class="etiqueta">07 · Permisos</span>
+    <h2>Tres bloques, veintidós tipos</h2>
+    <p class="bajada">
+      El operario ve <b>tres botones</b>. Los veintidós tipos existen debajo, para
+      que Talento Humano clasifique y para que los informes sirvan de algo; pero
+      a quien pide no se le pone un formulario de veintidós opciones delante.
+    </p>
+
+    <div class="columnas">
+      <div class="ficha">
+        <h4>Cita médica <span class="art">10 tipos</span></h4>
+        <p>Consulta, exámenes, odontología, control de embarazo, acompañamiento a
+        un familiar, reposo del IESS. Exigen respaldo.</p>
+      </div>
+      <div class="ficha">
+        <h4>Calamidad doméstica <span class="art">5 tipos</span></h4>
+        <p>Fallecimiento, enfermedad grave de un familiar, siniestro en el
+        domicilio. Lo que la ley reconoce como calamidad, no cualquier imprevisto.</p>
+      </div>
+      <div class="ficha">
+        <h4>Permiso personal <span class="art">7 tipos</span></h4>
+        <p>Trámites, obligaciones legales, asuntos personales. Es el bloque que
+        absorbe lo demás, con subtipo «Otros» cuando nada encaja.</p>
+      </div>
+    </div>
+
+    <h3>Dos decisiones de interfaz que cambian si se usa o no</h3>
+    <ul class="limpia">
+      <li><b>Al pasar el cursor sobre el botón</b>, aparece qué cubre ese bloque.
+      La explicación está donde se necesita, no en un párrafo que nadie lee.</li>
+      <li><b>Permisos por horas</b> el mismo día, con el horario sugerido ya
+      puesto. La mayoría de los permisos son de dos horas, no de un día.</li>
+    </ul>
+
+    <blockquote>
+      Si el operario tiene que leer tres párrafos para pedir dos horas, no usa el
+      sistema: llama por teléfono. Y entonces no hay registro de nada.
+    </blockquote>
+
+    <p>
+      Los lineamientos que se leen antes de enviar <b>los edita Talento Humano
+      desde el propio sistema</b>. Cambian por circular; no deberían necesitar un
+      programador.
+    </p>
+  </div>
+</section>
+
+<!-- ================================================== 8. GARITA -->
+<section id="garita">
+  <div class="ancho">
+    <span class="etiqueta">08 · La puerta</span>
+    <h2>Garita y código QR</h2>
+    <p class="bajada">
+      Es donde el permiso autorizado se convierte en un hecho verificable. Sin
+      esto, el sistema sería un archivador de intenciones.
+    </p>
+
+    <div class="columnas">
+      <div>
+        <h3>El panel del día</h3>
+        <ul class="limpia">
+          <li>Quién tiene permiso <b>hoy</b> y en qué horario.</li>
+          <li>Quién está fuera en este momento.</li>
+          <li>A quién <b>se le pasó la hora</b> de regreso.</li>
+          <li>Quién está de vacaciones, para no buscarlo.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>El registro</h3>
+        <ul class="limpia">
+          <li>El QR se lee y queda la <b>hora real</b> de salida.</li>
+          <li>Al volver, la <b>hora real</b> de reincorporación.</li>
+          <li>El exceso sobre lo autorizado se calcula y se marca.</li>
+          <li>El guardia <b>no puede</b> modificar nada de lo autorizado. Solo registra.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="nota">
+      <p><strong>El QR no es un adorno.</strong> Tiene vigencia, está ligado a esa
+      autorización y a esa persona, y queda constancia de cada uso. Un permiso
+      impreso se presta; un código con registro de uso, no.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================== 9. TEMPORAL -->
+<section id="temporal">
+  <div class="ancho">
+    <span class="etiqueta">09 · Personal temporal</span>
+    <h2>Quién entró, cuánto estuvo</h2>
+    <p class="bajada">
+      Un módulo aparte, con otra lógica: el temporal viene por jornadas y la
+      garita es quien lo ve entrar y salir.
+    </p>
+
+    <ul class="limpia">
+      <li>Registro por <b>cédula</b>, con labor y proveedor.</li>
+      <li>Entrada y salida por la garita. <b>Nunca se inventa una salida</b>: un dato que falta no se convierte en uno falso.</li>
+      <li>La jornada sin cerrar <b>salta a la vista</b> y la cierra Talento Humano a mano, con motivo y con su nombre.</li>
+      <li>Informe en <b>Excel, PDF o CSV</b>, por persona, por grupo, por proveedor o por fechas, para presentarlo a Finanzas.</li>
+    </ul>
+
+    <div class="alerta">
+      <p><strong>Una decisión deliberada:</strong> este módulo <b>no maneja
+      dinero</b>. Registra jornadas y horas presenciadas por la garita. La tarifa
+      y el cálculo del pago son de Finanzas, y así lo dice cada informe que sale
+      de aquí. Un sistema de Talento Humano que calcula pagos de terceros es un
+      sistema que termina discutiendo facturas.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================== 10. DATOS -->
+<section id="datos">
+  <div class="ancho">
+    <span class="etiqueta">10 · Obligación legal</span>
+    <h2>Protección de datos personales</h2>
+    <p class="bajada">
+      Esto no es un añadido: la Ley Orgánica de Protección de Datos Personales
+      del Ecuador aplica a esta base desde el primer registro, y el motivo de un
+      permiso médico es dato sensible.
+    </p>
+
+    <div class="marco">
+      <table>
+        <caption>Cómo se cumple, en concreto</caption>
+        <thead><tr><th style="width:30%">Principio</th><th>En el sistema</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><b>Minimización</b><br><span class="art">Art. 10</span></td>
+            <td>El calendario del equipo muestra <b>quién falta y cuándo, nunca el motivo</b>. Para cubrir un puesto no hace falta saber a qué médico fue.</td>
+          </tr>
+          <tr>
+            <td><b>Finalidad</b><br><span class="art">Art. 10</span></td>
+            <td>Para elegir una jefatura en una lista basta el nombre y el área. Ni cédula, ni correo, ni teléfono de terceros.</td>
+          </tr>
+          <tr>
+            <td><b>Confidencialidad</b><br><span class="art">Art. 10</span></td>
+            <td>Un colaborador no ve los datos de otro. Un jefe ve a su equipo. Talento Humano ve su región. Y lo impone la base de datos, no la pantalla.</td>
+          </tr>
+          <tr>
+            <td><b>Derechos ARCO</b><br><span class="art">Arts. 12 a 16</span></td>
+            <td>Acceso, rectificación y oposición, con solicitudes registradas y resueltas dentro del sistema.</td>
+          </tr>
+          <tr>
+            <td><b>Responsabilidad demostrada</b><br><span class="art">Art. 40</span></td>
+            <td>Bitácora de quién hizo qué, cuándo y desde dónde. Sin ella no se puede demostrar el cumplimiento, solo afirmarlo.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="nota">
+      <p><strong>Cómo se entra.</strong> Con cédula y un código de un solo uso que
+      llega al correo institucional. Sin contraseñas que apuntar en un papel bajo
+      el teclado, y sin revelar si una cédula existe o no cuando alguien prueba
+      números al azar.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================== 11. HALLAZGOS -->
+<section id="hallazgos">
+  <div class="ancho">
+    <span class="etiqueta">11 · Lo que apareció</span>
+    <h2>Lo que la carga de datos reales destapó</h2>
+    <p class="bajada">
+      Cargar veinte años de historia en un sistema que valida es, en sí mismo,
+      una auditoría. Esto es lo que salió, y ninguna de estas cosas se veía desde
+      la hoja.
+    </p>
+
+    <div class="alerta">
+      <p><strong>Las cuentas de instalación quedaron sobre personas reales.</strong>
+      Las cinco cuentas que se crearon para arrancar el sistema no quedaron
+      sueltas: se engancharon a colaboradores de la planilla. Hoy esas personas
+      cargan con un correo que no existe —así que <b>no pueden recibir su código
+      de acceso</b>— y con permisos que nadie les otorgó. Una de ellas figura
+      como jefe de <b>setenta y cuatro</b> personas; otra tiene rol de
+      administrador del sistema.</p>
+    </div>
+
+    <div class="marco">
+      <table>
+        <caption>Estado de la planilla cargada · 351 colaboradores activos</caption>
+        <thead><tr><th>Lo que hay que revisar</th><th class="num">Casos</th><th>Quién lo corrige</th></tr></thead>
+        <tbody>
+          <tr><td>Jefaturas sin correo válido (de 17)</td><td class="num">13</td><td>Talento Humano</td></tr>
+          <tr><td>Colaboradores sin teléfono</td><td class="num">184</td><td>Cada quien, en su ficha</td></tr>
+          <tr><td>Cuentas de instalación sobre personas reales</td><td class="num">5</td><td>Administrador</td></tr>
+          <tr><td>Colaboradores sin jefe asignado</td><td class="num">10</td><td>Talento Humano</td></tr>
+          <tr><td>Colaboradores sin cargo</td><td class="num">5</td><td>Talento Humano</td></tr>
+          <tr><td>Vacaciones registradas antes de la fecha de ingreso</td><td class="num">11</td><td>Talento Humano</td></tr>
+          <tr><td>Registros con fechas futuras imposibles</td><td class="num">3</td><td>Talento Humano</td></tr>
+          <tr><td>Filas duplicadas en la hoja de origen</td><td class="num">5</td><td>Talento Humano</td></tr>
+          <tr><td>Nombres con error de digitación</td><td class="num">2</td><td>Talento Humano</td></tr>
+        </tbody>
+        <tfoot>
+          <tr><td>Cédulas inválidas · saldos descuadrados</td><td class="num">0</td><td>—</td></tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <p>
+      Todo esto se revisa desde una pantalla —<b>Configuración › Depuración</b>—
+      que dice, fila por fila, qué le falta a cada ficha y qué hacer con ella. No
+      corrige sola: señala. Lo que se corrige, se corrige por las pantallas de
+      siempre, que dejan constancia de quién lo hizo.
+    </p>
+
+    <div class="alerta">
+      <p><strong>El departamento de Talento Humano, en el sistema, son dos
+      personas.</strong> Una en cada rol, las dos en la Sierra, <b>y ninguna de
+      las dos tiene un correo que pueda recibir los avisos</b>. Así, una
+      solicitud que llega a la etapa de Talento Humano no le avisa a nadie: no
+      da error, no se pierde, simplemente se queda esperando a que alguien
+      entre a mirar la bandeja. Por eso ahora existe un <b>correo del
+      departamento</b> por región, que recibe copia de todo y sobrevive a que
+      una persona salga de vacaciones o deje la empresa.</p>
+    </div>
+
+    <div class="alerta">
+      <p><strong>Y una concentración que conviene mirar.</strong> Hay
+      <b>17 jefaturas para 351 personas</b>, y tres de ellas concentran
+      <b>181</b>: una con 74, otra con 57 y otra con 50. El sistema ahora impide
+      quitarle el mando a una jefatura sin decir a quién pasa su gente —antes,
+      ese clic dejaba a setenta y cuatro personas sin a quién pedirle permiso, y
+      no avisaba.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================== 12. ESTADO -->
+<section id="estado">
+  <div class="ancho">
+    <span class="etiqueta">12 · Dónde estamos</span>
+    <h2>Estado de la implantación</h2>
+
+    <div class="cifras">
+      <div class="cifra"><b>36</b><span>tablas</span></div>
+      <div class="cifra"><b>35</b><span>vistas de consulta</span></div>
+      <div class="cifra"><b>155</b><span>funciones con las reglas</span></div>
+      <div class="cifra"><b>37</b><span>artículos legales citados</span></div>
+    </div>
+
+    <div class="columnas">
+      <div>
+        <h3>Listo y probado</h3>
+        <ul class="limpia">
+          <li>Acceso con cédula y código al correo.</li>
+          <li>Solicitud, autorización en dos etapas y notificaciones.</li>
+          <li>Cálculo de saldos conforme al Código del Trabajo.</li>
+          <li>Historial de veinte años cargado y cotejado.</li>
+          <li>Calendario del equipo, con histórico incluido.</li>
+          <li>Garita: QR, salida, regreso y exceso.</li>
+          <li>Personal temporal e informes a Finanzas.</li>
+          <li>Informes en PDF, Excel y CSV con filtros.</li>
+          <li>Chat con Talento Humano por región.</li>
+          <li>Depuración de datos, jefaturas y departamento de Talento Humano.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Antes de publicar</h3>
+        <ul class="limpia">
+          <li><b>Corregir los correos</b> de las jefaturas: sin correo no hay acceso, y sin jefe no hay aprobación.</li>
+          <li><b>Desenganchar las cuentas de instalación</b> de las personas reales.</li>
+          <li><b>Revisar la asignación de jefaturas</b>, con tres que concentran 181 personas.</li>
+          <li><b>Definir el correo del departamento</b> para la Sierra y para la Costa, y completar quiénes lo integran.</li>
+          <li><b>Pruebas con colaboradores reales</b>, una semana, con los cuatro perfiles.</li>
+          <li><b>Capacitación</b> a jefaturas y garita: son quienes más cambian de hábito.</li>
+          <li><b>Los tres manuales</b>: usuario, técnico y de procesos.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="ok">
+      <p><strong>Cómo se sabe que funciona.</strong> Cada regla de este documento
+      está respaldada por pruebas automáticas que se ejecutan completas antes de
+      cada cambio: <b>554 pruebas</b> contra una base de datos real —no simulada—
+      y <b>13 recorridos de navegador</b> que hacen el flujo completo como lo haría
+      una persona. Si alguna falla, el cambio no entra.</p>
+    </div>
+
+    <h3>Lo que hay que decidir en esta reunión</h3>
+    <ul class="limpia">
+      <li>¿Se confirma el <b>método de cálculo de la hoja</b> como el oficial? (Sección 5.)</li>
+      <li>¿Quién corrige los <b>correos de las jefaturas</b>, y para cuándo?</li>
+      <li>¿Qué <b>área arranca primero</b> en la prueba piloto?</li>
+      <li>¿Los <b>240 fines de semana pendientes</b> se confirman uno por uno o se da por cumplido lo anterior a una fecha de corte?</li>
+      <li>¿Cuál es el <b>correo oficial del departamento</b> en Quito y en Guayaquil?</li>
+    </ul>
+  </div>
+</section>
+
+</main>
+</div>
+
+<script>
+/* Marca en el índice la sección que se está leyendo. Nada más: un documento
+   que se presenta en una sala no debe depender de JavaScript para leerse. */
+(function () {
+  var enlaces = Array.prototype.slice.call(document.querySelectorAll('nav.indice a'));
+  var secciones = enlaces.map(function (a) {
+    return document.querySelector(a.getAttribute('href'));
+  }).filter(Boolean);
+  if (!secciones.length || !('IntersectionObserver' in window)) return;
+
+  var vista = new IntersectionObserver(function (entradas) {
+    entradas.forEach(function (entrada) {
+      if (!entrada.isIntersecting) return;
+      enlaces.forEach(function (a) { a.classList.remove('aqui'); });
+      var activo = enlaces.filter(function (a) {
+        return a.getAttribute('href') === '#' + entrada.target.id;
+      })[0];
+      if (activo) activo.classList.add('aqui');
+    });
+  }, { rootMargin: '-15% 0px -70% 0px' });
+
+  secciones.forEach(function (s) { vista.observe(s); });
+})();
+</script>
+</body>
+</html>

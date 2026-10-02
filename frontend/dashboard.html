@@ -1,0 +1,639 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>Mi panel · Permisos y Vacaciones</title>
+<link rel="icon" type="image/png" href="img/icono.png">
+<link rel="stylesheet" href="vendor/tailwind.css">
+<script src="config.js"></script>
+<!-- Ajustes de ESTA máquina, fuera del repositorio: el puerto del backend si
+     no es el 8000, una URL distinta. Si el archivo no existe no pasa nada
+     —el servidor de la interfaz devuelve vacío—. Vea config.local.js.ejemplo. -->
+<script src="config.local.js"></script>
+<style>
+  dialog::backdrop { background: rgb(15 23 42 / .5); }
+  dialog[open] { animation: aparecer .15s ease-out; }
+  @keyframes aparecer { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
+</style>
+</head>
+
+<body class="min-h-dvh bg-slate-100 text-slate-900 antialiased">
+
+<div id="barra"></div>
+
+<header class="border-b border-slate-200 bg-white">
+  <div class="mx-auto flex max-w-4xl items-center gap-3 px-4 py-3">
+    <div class="min-w-0 flex-1">
+      <p id="cab-nombre" class="truncate text-base font-semibold">…</p>
+      <p id="cab-cargo" class="truncate text-sm text-slate-500">…</p>
+    </div>
+  </div>
+</header>
+
+<nav id="pestanas" class="hidden border-b border-slate-200 bg-white">
+  <div class="mx-auto flex max-w-4xl gap-1 px-2">
+    <button data-pestana="panel"
+            class="border-b-2 border-slate-900 px-4 py-3 text-sm font-medium">Mi panel</button>
+    <button data-pestana="aprobaciones"
+            class="border-b-2 border-transparent px-4 py-3 text-sm font-medium text-slate-500 hover:text-slate-900">
+      Por aprobar <span id="cuenta-pendientes"
+        class="ml-1 hidden rounded-full bg-rose-100 px-1.5 py-0.5 text-xs font-semibold text-rose-700"></span>
+    </button>
+    <button data-pestana="anulaciones" id="pestana-anulaciones"
+            class="hidden border-b-2 border-transparent px-4 py-3 text-sm font-medium text-slate-500 hover:text-slate-900">
+      Anulaciones <span id="cuenta-anulaciones"
+        class="ml-1 hidden rounded-full bg-orange-100 px-1.5 py-0.5 text-xs font-semibold text-orange-700"></span>
+    </button>
+  </div>
+</nav>
+
+<main class="mx-auto max-w-4xl space-y-6 px-4 py-6 pb-24">
+<div id="vista-panel" class="flex flex-col gap-6">
+
+  <!-- ================= Alertas ================= -->
+  <!-- ================= Aviso de la empresa =================
+       Lo escribe el administrador desde «Pantalla principal». Vacío no se
+       muestra: un recuadro vacío arriba de todo es peor que no tener aviso. -->
+  <section id="anuncio" data-bloque="anuncio"
+           class="hidden rounded-2xl bg-slate-900 p-5 text-white shadow-sm">
+    <p class="text-xs font-medium uppercase tracking-wide text-slate-400"
+       id="anuncio-titulo">Aviso de la empresa</p>
+    <p id="anuncio-cuerpo" class="mt-2 whitespace-pre-line text-sm leading-relaxed"></p>
+  </section>
+
+  <!-- ================= Alertas ================= -->
+  <section id="alertas" data-bloque="alertas" class="hidden space-y-3" aria-live="polite"></section>
+
+  <!-- ================= Resumen ================= -->
+  <section id="resumen" class="grid gap-3 sm:grid-cols-3">
+    <article data-bloque="saldo" class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:col-span-1">
+      <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Días disponibles</p>
+      <!-- La cifra grande es la que la persona reconoce como suya: la misma
+           que Talento Humano lleva en su hoja. Mostrar aquí solo los días de
+           años cumplidos ponía un «0 días» enorme delante de alguien que
+           tenía 8,75, y ese cero no se lo explica nadie. El desglose —qué
+           parte es exigible y qué parte se lleva acumulada del año en
+           marcha— va debajo, dicho en palabras. -->
+      <p class="mt-2 flex items-baseline gap-1.5">
+        <span id="saldo-dias" class="text-4xl font-semibold tabular-nums">—</span>
+        <span id="saldo-unidad" class="text-sm text-slate-500">días</span>
+      </p>
+      <p id="saldo-composicion" class="mt-2 text-sm leading-relaxed text-slate-600"></p>
+      <p id="periodos-resumen" class="mt-1 text-sm text-slate-500"></p>
+      <p id="saldo-en-curso" class="mt-1 hidden text-sm text-slate-500"></p>
+      <p id="saldo-por-vencer" class="mt-1 hidden text-sm font-medium text-amber-700"></p>
+      <p id="saldo-aviso" class="mt-2 hidden rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900"></p>
+
+      <!-- Un desplegable y no otra pantalla: quien no tiene la duda no lo
+           abre, y quien la tiene la resuelve sin salir de aquí. -->
+      <details class="mt-3 rounded-xl bg-slate-50 px-3 py-2">
+        <summary class="cursor-pointer text-sm font-medium text-slate-700">
+          ¿De dónde salen estos días?
+        </summary>
+        <div class="mt-2 space-y-2 text-xs leading-relaxed text-slate-600">
+          <p>
+            La ley le da <strong>15 días por cada año trabajado</strong>, y uno
+            más por cada año a partir del sexto, hasta 15 adicionales
+            (Art.&nbsp;69 del Código del Trabajo).
+          </p>
+          <p>
+            Esos 15 días no aparecen de golpe al cumplir el año: se van
+            acumulando <strong>1,25 días cada mes</strong> —15 dividido para
+            12—. Por eso su saldo tiene decimales. Si lleva tres meses en el
+            año en curso, lleva acumulados 3,75 días.
+          </p>
+          <p>
+            Son <strong>días calendario</strong>, no laborables: cuentan los
+            sábados y domingos que caigan dentro de su descanso.
+          </p>
+          <p>
+            Los días que no tome <strong>no se pierden</strong>. Puede
+            acumularlos hasta tres años (Art.&nbsp;75) y, si al final no los
+            goza, se le pagan (Art.&nbsp;76).
+          </p>
+          <button id="btn-detalle-periodos"
+                  class="mt-1 font-medium text-slate-900 underline decoration-slate-300
+                         underline-offset-4 hover:decoration-slate-900">
+            Ver el cálculo año por año
+          </button>
+        </div>
+      </details>
+
+      <button id="btn-detalle-saldo"
+              class="mt-3 text-sm font-medium text-slate-900 underline decoration-slate-300 underline-offset-4
+                     hover:decoration-slate-900">
+        Ver mi historial de vacaciones
+      </button>
+    </article>
+
+    <article data-bloque="antiguedad" class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Antigüedad</p>
+      <p id="antiguedad" class="mt-2 text-2xl font-semibold">—</p>
+      <p id="fecha-ingreso" class="mt-1 text-sm text-slate-500">—</p>
+    </article>
+
+    <!-- Fines de semana obligatorios.
+
+         Callado a propósito. Antes le gritaba «2» a todo el mundo, incluido
+         quien ya había gozado sus períodos completos: quince días seguidos
+         contienen dos fines de semana por calendario, así que el aviso le
+         pedía declarar algo que ya había hecho. Un aviso que no se puede
+         atender enseña a ignorar los avisos.
+
+         Ahora, cuando no hay nada que resolver, dice «Al día» y punto. El
+         detalle —qué son y de dónde salen— va plegado: quien tiene la duda
+         lo abre, y quien no, no tropieza con él. -->
+    <article data-bloque="fines_semana" class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Fines de semana</p>
+      <p id="fds-pendientes" class="mt-2 text-2xl font-semibold">—</p>
+      <p id="fds-detalle" class="mt-1 text-sm leading-snug text-slate-500">
+        obligatorios por consumir en su período
+      </p>
+      <details class="mt-2">
+        <summary class="cursor-pointer select-none text-xs font-medium text-slate-500
+                        hover:text-slate-800">¿Qué son estos días?</summary>
+        <div class="mt-1.5 space-y-1.5 text-xs leading-relaxed text-slate-500">
+          <p>
+            Los 15 días de vacaciones son <strong>calendario</strong>: dentro caen dos
+            fines de semana (Art.&nbsp;69 del Código del Trabajo). El sistema los cuenta
+            para que nadie tome solo los laborables y quede debiendo cuatro días que en
+            realidad ya descansó.
+          </p>
+          <p id="fds-nota"></p>
+        </div>
+      </details>
+    </article>
+  </section>
+
+  <!-- ================= Acciones ================= -->
+  <section data-bloque="acciones" class="grid gap-3 sm:grid-cols-2">
+    <button data-nueva="vacacion"
+            class="flex items-center gap-3 rounded-2xl bg-slate-900 p-5 text-left text-white
+                   transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2">
+      <span class="text-2xl">🏖️</span>
+      <span>
+        <span class="block font-medium">Solicitar vacaciones</span>
+        <span class="block text-sm text-slate-300">Días calendario, según su saldo</span>
+      </span>
+    </button>
+
+    <button data-nueva="permiso"
+            class="flex items-center gap-3 rounded-2xl bg-white p-5 text-left ring-1 ring-slate-200
+                   transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2">
+      <span class="text-2xl">📄</span>
+      <span>
+        <span class="block font-medium">Solicitar permiso</span>
+        <span class="block text-sm text-slate-500">Médico, calamidad, estudios y más</span>
+      </span>
+    </button>
+  </section>
+
+  <!-- ================= Calendario del equipo ================= -->
+  <section data-bloque="calendario" class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h2 class="font-medium">Ausencias del equipo</h2>
+        <p class="mt-0.5 text-sm text-slate-500">Quién está fuera y cuándo, para no dejar el puesto descubierto</p>
+      </div>
+      <div class="flex items-center gap-1">
+        <button id="mes-anterior" class="rounded-lg px-2.5 py-1.5 text-slate-500 hover:bg-slate-100" aria-label="Mes anterior">‹</button>
+        <span id="mes-actual" class="min-w-[9rem] text-center text-sm font-medium"></span>
+        <button id="mes-siguiente" class="rounded-lg px-2.5 py-1.5 text-slate-500 hover:bg-slate-100" aria-label="Mes siguiente">›</button>
+      </div>
+    </div>
+    <div id="calendario" class="mt-4 overflow-x-auto"></div>
+  </section>
+
+  <!-- ================= Logros ================= -->
+  <section id="seccion-logros" data-bloque="logros" class="hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <h2 class="font-medium">Mis logros</h2>
+    <ul id="lista-logros" class="mt-3 space-y-2"></ul>
+  </section>
+
+  <!-- ================= Solicitudes ================= -->
+  <section data-bloque="solicitudes">
+    <div class="mb-3 flex flex-wrap items-center justify-between gap-3 px-1">
+      <h2 class="font-medium">Mis solicitudes</h2>
+      <input id="filtro-solicitudes" type="search" placeholder="Buscar por Nº, tipo o estado"
+             class="w-full max-w-xs rounded-xl border-0 bg-white px-3 py-2 text-sm ring-1 ring-slate-300
+                    focus:ring-2 focus:ring-slate-900 sm:w-64">
+    </div>
+    <div id="lista-solicitudes" class="space-y-3">
+      <p class="rounded-2xl bg-white p-5 text-sm text-slate-500 ring-1 ring-slate-200">Cargando…</p>
+    </div>
+  </section>
+</div>
+
+<!-- ================= Bandeja de aprobaciones ================= -->
+<div id="vista-aprobaciones" class="hidden space-y-3"></div>
+<div id="vista-anulaciones" class="hidden space-y-3"></div>
+</main>
+
+<!-- ================= Modal: nueva solicitud ================= -->
+<dialog id="modal-solicitud"
+        class="w-[min(100vw-1.5rem,34rem)] rounded-2xl p-0 backdrop:backdrop-blur-sm">
+  <form id="form-solicitud" method="dialog" class="max-h-[85dvh] overflow-y-auto">
+    <header class="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
+      <h2 id="titulo-solicitud" class="font-semibold">Nueva solicitud</h2>
+      <button type="button" data-cerrar class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100" aria-label="Cerrar">✕</button>
+    </header>
+
+    <div class="space-y-4 px-5 py-4">
+      <!-- Tipo de permiso -->
+      <div id="campo-tipo-permiso" class="hidden space-y-3">
+        <div>
+          <span class="block text-sm font-medium text-slate-700">¿De qué se trata?</span>
+          <div id="pilares" class="mt-2 grid gap-2 sm:grid-cols-3"></div>
+        </div>
+
+        <div id="campo-subtipo" class="hidden">
+          <label for="tipo-permiso" class="block text-sm font-medium text-slate-700">Especifique</label>
+          <select id="tipo-permiso"
+                  class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                         focus:bg-white focus:ring-2 focus:ring-slate-900">
+            <option value="">Seleccione…</option>
+          </select>
+        </div>
+
+        <p id="info-permiso" class="hidden rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-600"></p>
+      </div>
+
+      <!-- Lineamientos, plegados.
+
+           El texto ya no vive aquí: lo escribe Talento Humano desde su
+           módulo, porque son reglas internas que cambian por circular y no
+           por versión del sistema.
+
+           Y va plegado. Cinco renglones de texto delante de quien solo
+           quiere pedir tres días se convierten en cinco renglones que nadie
+           lee: el que tiene la duda lo abre, y el que no, no tropieza con
+           ellos. El título dice cuántos son, para que abrirlo no sea a
+           ciegas. -->
+      <details id="aviso-vacaciones"
+               class="hidden rounded-xl bg-slate-50 text-xs leading-relaxed text-slate-600
+                      ring-1 ring-slate-200">
+        <summary id="aviso-titulo"
+                 class="cursor-pointer select-none px-3 py-2.5 font-medium text-slate-800">
+          Antes de enviar, tenga presente
+        </summary>
+        <ul id="aviso-lista" class="list-disc space-y-1 px-3 pb-3 pl-7"></ul>
+      </details>
+
+      <!-- Duración: día completo o unas horas del mismo día -->
+      <div id="campo-modalidad" class="hidden">
+        <span class="block text-sm font-medium text-slate-700">¿Cuánto tiempo necesita?</span>
+        <div class="mt-2 grid grid-cols-2 gap-2">
+          <button type="button" data-modalidad="dias"
+                  class="rounded-xl px-3 py-2.5 text-sm ring-1 ring-slate-200 hover:ring-slate-400">
+            Uno o más días completos
+          </button>
+          <button type="button" data-modalidad="horas"
+                  class="rounded-xl px-3 py-2.5 text-sm ring-1 ring-slate-200 hover:ring-slate-400">
+            Unas horas del mismo día
+          </button>
+        </div>
+      </div>
+
+      <!-- Hora del compromiso: de ahí sale el horario sugerido -->
+      <div id="campo-cita" class="hidden">
+        <label for="hora-cita" class="block text-sm font-medium text-slate-700">
+          ¿A qué hora es su cita o compromiso?
+        </label>
+        <input type="time" id="hora-cita"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
+        <p class="mt-1.5 text-xs text-slate-500">
+          Con esa hora le proponemos el rango de permiso, contando traslado y espera.
+          Puede ajustarlo.
+        </p>
+      </div>
+
+      <!-- Fechas -->
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label for="fecha-inicio" class="block text-sm font-medium text-slate-700">Desde</label>
+          <input type="date" id="fecha-inicio" required
+                 class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                        focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </div>
+        <div>
+          <label for="fecha-fin" class="block text-sm font-medium text-slate-700">Hasta</label>
+          <input type="date" id="fecha-fin" required
+                 class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                        focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </div>
+      </div>
+
+      <!-- Horas (solo permisos por horas) -->
+      <div id="campo-horas" class="hidden grid-cols-2 gap-3">
+        <div>
+          <label for="hora-inicio" class="block text-sm font-medium text-slate-700">Hora de inicio</label>
+          <input type="time" id="hora-inicio"
+                 class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                        focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </div>
+        <div>
+          <label for="hora-fin" class="block text-sm font-medium text-slate-700">Hora de fin</label>
+          <input type="time" id="hora-fin"
+                 class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                        focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </div>
+        <p id="total-horas" class="col-span-2 hidden rounded-xl bg-cyan-50 px-3 py-2 text-xs text-cyan-900"></p>
+      </div>
+
+      <!-- Previsualización en vivo, con el desglose de los días -->
+      <div id="previsualizacion" class="hidden rounded-xl p-3 text-sm"></div>
+
+      <!-- Excepción al bloque mínimo de vacaciones -->
+      <div id="campo-excepcion" class="hidden rounded-xl bg-amber-50 p-3 ring-1 ring-amber-200">
+        <label class="flex items-start gap-2.5 text-sm">
+          <input type="checkbox" id="excepcion-bloque"
+                 class="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900">
+          <span class="text-amber-900">
+            <span class="font-medium">Solicitar como excepción</span><br>
+            <span id="texto-excepcion" class="text-xs"></span>
+          </span>
+        </label>
+      </div>
+
+      <!-- Descripción -->
+      <div>
+        <div class="flex items-baseline justify-between">
+          <label for="descripcion" class="block text-sm font-medium text-slate-700">Descripción</label>
+          <span id="contador-desc" class="text-xs text-slate-400">0/200</span>
+        </div>
+        <!-- La guía de qué escribir, plegada.
+
+             Eran cuatro renglones de texto seguido encima del campo, cada vez
+             que alguien pide un permiso. Quien pide su tercer permiso del año
+             no los lee: los salta, y con ellos se salta el resto de la
+             pantalla. Plegados, el que tiene la duda los abre y el que no, no
+             tropieza. -->
+        <details id="mandato" class="mt-1 hidden">
+          <summary class="cursor-pointer select-none text-xs font-medium text-slate-500
+                          hover:text-slate-800">
+            ¿Qué debo escribir aquí?
+          </summary>
+          <p id="mandato-texto" class="mt-1 text-xs leading-relaxed text-slate-500"></p>
+        </details>
+        <textarea id="descripcion" rows="3" maxlength="200" required
+                  placeholder="Motivo, lugar, hora y cuánto tiempo estará ausente"
+                  class="mt-1.5 w-full resize-none rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                         focus:bg-white focus:ring-2 focus:ring-slate-900"></textarea>
+        <div id="ejemplo-descripcion"
+             class="mt-2 hidden rounded-xl bg-cyan-50 p-3 text-xs leading-relaxed text-cyan-900
+                    ring-1 ring-cyan-100"></div>
+      </div>
+
+      <!-- Justificación (condicional) -->
+      <div id="campo-justificacion" class="hidden">
+        <label for="justificacion" class="block text-sm font-medium text-slate-700">
+          Justificación <span class="font-normal text-rose-600">(obligatoria)</span>
+        </label>
+        <textarea id="justificacion" rows="3" minlength="10"
+                  placeholder="Explique el motivo con al menos 10 caracteres"
+                  class="mt-1.5 w-full resize-none rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                         focus:bg-white focus:ring-2 focus:ring-slate-900"></textarea>
+      </div>
+
+      <!-- Adjuntos -->
+      <div id="campo-adjuntos" class="hidden">
+        <label id="etiqueta-adjuntos" class="block text-sm font-medium text-slate-700">Respaldo</label>
+        <p id="guia-adjuntos" class="mt-0.5 text-xs leading-relaxed text-slate-600"></p>
+        <p class="mt-0.5 text-xs text-slate-500">Foto, escaneo o PDF. Máximo 10 MB por archivo.</p>
+        <input type="file" id="adjuntos" multiple accept="image/jpeg,image/png,image/webp,image/heic,application/pdf"
+               class="mt-2 block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0
+                      file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:text-white hover:file:bg-slate-800">
+        <ul id="lista-adjuntos" class="mt-2 space-y-1"></ul>
+      </div>
+
+      <p id="error-solicitud" class="hidden rounded-xl bg-rose-50 p-3 text-sm text-rose-800 ring-1 ring-rose-200" role="alert"></p>
+    </div>
+
+    <footer class="sticky bottom-0 flex gap-3 border-t border-slate-200 bg-white px-5 py-4">
+      <button type="button" data-cerrar class="flex-1 rounded-xl bg-slate-100 px-4 py-3 font-medium hover:bg-slate-200">
+        Cancelar
+      </button>
+      <button type="submit" id="btn-enviar-solicitud"
+              class="flex-1 rounded-xl bg-slate-900 px-4 py-3 font-medium text-white hover:bg-slate-800 disabled:opacity-50">
+        Enviar solicitud
+      </button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- ================= Modal: detalle del saldo ================= -->
+<dialog id="modal-saldo" class="w-[min(100vw-1.5rem,38rem)] rounded-2xl p-0">
+  <div class="max-h-[85dvh] overflow-y-auto">
+    <header class="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
+      <h2 class="font-semibold">De dónde salen sus días</h2>
+      <button type="button" data-cerrar class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100" aria-label="Cerrar">✕</button>
+    </header>
+    <div id="contenido-saldo" class="space-y-5 px-5 py-4"></div>
+  </div>
+</dialog>
+
+<!-- ================= Modal: quién cubre el puesto ================= -->
+<dialog id="modal-reemplazo" class="w-[min(100vw-1.5rem,30rem)] rounded-2xl p-0">
+  <form id="form-reemplazo" method="dialog">
+    <div class="border-b border-slate-200 px-5 py-4">
+      <h2 class="font-semibold">¿Quién cubre el puesto?</h2>
+      <p class="mt-0.5 text-sm text-slate-500">
+        Usted conoce la carga del equipo. Puede dejarlo sin asignar y decidirlo después.
+      </p>
+    </div>
+    <div class="px-5 py-4">
+      <label for="reemplazo-jefe" class="block text-sm font-medium text-slate-700">Reemplazo</label>
+      <select id="reemplazo-jefe"
+              class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                     focus:bg-white focus:ring-2 focus:ring-slate-900">
+        <option value="">Cargando…</option>
+      </select>
+      <p class="mt-1.5 text-xs text-slate-500">
+        Quien también estará ausente en esas fechas aparece bloqueado.
+      </p>
+    </div>
+    <div class="flex gap-3 border-t border-slate-200 px-5 py-4">
+      <button type="button" data-cerrar class="flex-1 rounded-xl bg-slate-100 px-4 py-3 font-medium hover:bg-slate-200">
+        Cancelar
+      </button>
+      <button type="submit" class="flex-1 rounded-xl bg-emerald-600 px-4 py-3 font-medium text-white hover:bg-emerald-700">
+        Aprobar solicitud
+      </button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ================= Modal: rechazar ================= -->
+<dialog id="modal-rechazo" class="w-[min(100vw-1.5rem,30rem)] rounded-2xl p-0">
+  <form id="form-rechazo" method="dialog">
+    <div class="border-b border-slate-200 px-5 py-4">
+      <h2 class="font-semibold">Rechazar solicitud</h2>
+      <p id="rechazo-de" class="mt-0.5 text-sm text-slate-500"></p>
+    </div>
+    <div class="px-5 py-4">
+      <label for="motivo-rechazo" class="block text-sm font-medium text-slate-700">
+        Motivo <span class="font-normal text-slate-500">(lo verá el empleado)</span>
+      </label>
+      <textarea id="motivo-rechazo" rows="3" maxlength="300" required
+                placeholder="Ej.: coincide con el cierre contable del mes"
+                class="mt-1.5 w-full resize-none rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                       focus:bg-white focus:ring-2 focus:ring-slate-900"></textarea>
+    </div>
+    <div class="flex gap-3 border-t border-slate-200 px-5 py-4">
+      <button type="button" data-cerrar class="flex-1 rounded-xl bg-slate-100 px-4 py-3 font-medium hover:bg-slate-200">
+        Cancelar
+      </button>
+      <button type="submit" class="flex-1 rounded-xl bg-rose-600 px-4 py-3 font-medium text-white hover:bg-rose-700">
+        Confirmar rechazo
+      </button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ================= Modal: código QR ================= -->
+<dialog id="modal-qr" class="w-[min(100vw-1.5rem,22rem)] rounded-2xl p-0">
+  <div>
+    <header class="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+      <h2 class="font-semibold">Su código de salida</h2>
+      <button type="button" data-cerrar class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100" aria-label="Cerrar">✕</button>
+    </header>
+    <div class="px-5 py-5 text-center">
+      <img id="imagen-qr" alt="Código QR de salida"
+           class="mx-auto w-full max-w-[16rem] rounded-xl bg-white p-3 ring-1 ring-slate-200">
+      <p id="qr-vigencia" class="mt-3 text-sm text-slate-600"></p>
+      <p class="mt-1 text-xs text-slate-400">Muéstrelo en garita. También llegó a su correo.</p>
+    </div>
+  </div>
+</dialog>
+
+<!-- ================= Aviso flotante ================= -->
+<div id="aviso" class="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4">
+  <p id="aviso-texto" class="hidden max-w-sm rounded-xl bg-slate-900 px-4 py-3 text-center text-sm text-white shadow-lg"></p>
+</div>
+
+<!-- ===== Historial de vacaciones =====
+     La pregunta más simple que se le ocurre a cualquiera —«¿cuándo tomé
+     vacaciones la última vez?»— y hasta hoy el sistema no podía responderla.
+     Lo de antes de este sistema y lo tramitado aquí van en la misma línea de
+     tiempo, pero cada uno dice de dónde viene. -->
+<dialog id="modal-historial" class="w-[min(100vw-1.5rem,38rem)] rounded-2xl p-0">
+  <div class="max-h-[85dvh] overflow-y-auto">
+    <header class="sticky top-0 flex items-start justify-between gap-3 border-b border-slate-200 bg-white px-5 py-4">
+      <div>
+        <h2 class="font-semibold">Mi historial de vacaciones</h2>
+        <p id="historial-resumen" class="mt-0.5 text-sm text-slate-500">Cargando…</p>
+      </div>
+      <button type="button" data-cerrar
+              class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100" aria-label="Cerrar">✕</button>
+    </header>
+    <div class="border-b border-slate-100 px-5 py-2.5">
+      <input type="search" id="buscar-historial" placeholder="Buscar por año o fecha"
+             class="w-full rounded-lg border-slate-300 text-sm focus:border-slate-900 focus:ring-slate-900">
+    </div>
+    <div id="historial-lista" class="divide-y divide-slate-100"></div>
+    <footer class="border-t border-slate-200 px-5 py-3 text-xs leading-relaxed text-slate-500">
+      Lo marcado como <strong>registro de Talento Humano</strong> viene de la hoja que el
+      departamento llevaba antes de este sistema. No pasó por aquí, así que no tiene número
+      de solicitud. Si algo no corresponde, escríbales por el chat.
+    </footer>
+  </div>
+</dialog>
+
+<script type="module" src="js/dashboard.js"></script>
+
+<!-- ============ Modal: vacaciones emergentes (excepción al bloque mínimo) ============
+     Pedir menos días de los que fija la política no es un trámite ordinario:
+     lo autoriza Talento Humano. Este formulario arma la solicitud formal, la
+     deja registrada en el sistema y la envía al grupo de Talento Humano de la
+     región de la persona, con copia a su propio correo para que le quede la
+     constancia y pueda darle seguimiento desde su bandeja. -->
+<dialog id="modal-excepcion"
+        class="w-[min(100vw-1.5rem,36rem)] rounded-2xl p-0 backdrop:backdrop-blur-sm">
+  <form id="form-excepcion" method="dialog" class="max-h-[85dvh] overflow-y-auto">
+    <header class="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
+      <h2 class="font-semibold">Solicitud a Talento Humano</h2>
+      <button type="button" data-cerrar="modal-excepcion"
+              class="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Cerrar">✕</button>
+    </header>
+
+    <div class="space-y-4 px-5 py-4">
+      <div class="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
+        <p id="excepcion-encabezado" class="font-medium"></p>
+        <p class="mt-1 text-xs leading-relaxed">
+          Esta solicitud <strong>no descuenta días todavía</strong>. Queda registrada y pasa a
+          Talento Humano; si la autorizan, se registra como <strong>vacaciones emergentes</strong>
+          y ahí sí se descuentan los días. Después su jefe confirma la cobertura del puesto.
+        </p>
+      </div>
+
+      <dl class="grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3 text-sm">
+        <div><dt class="text-xs text-slate-500">Desde</dt>
+             <dd id="excepcion-desde" class="font-medium">—</dd></div>
+        <div><dt class="text-xs text-slate-500">Hasta</dt>
+             <dd id="excepcion-hasta" class="font-medium">—</dd></div>
+        <div><dt class="text-xs text-slate-500">Días solicitados</dt>
+             <dd id="excepcion-dias" class="font-medium">—</dd></div>
+        <div><dt class="text-xs text-slate-500">Resuelve</dt>
+             <dd id="excepcion-area" class="font-medium">Talento Humano</dd></div>
+      </dl>
+
+      <div>
+        <label for="excepcion-motivo" class="block text-sm font-medium">
+          Motivo por el que no puede tomar el bloque completo
+        </label>
+        <p class="mt-0.5 text-xs leading-relaxed text-slate-500">
+          Quien autoriza necesita entender por qué su caso se aparta de la política. Diga el
+          hecho concreto y las fechas. Por ejemplo: «Debo acompañar a mi madre a una cirugía
+          programada el martes 3; el alta es el miércoles 4 y regreso el jueves.»
+        </p>
+        <textarea id="excepcion-motivo" rows="4" minlength="30" maxlength="600" required
+                  class="mt-1.5 w-full rounded-xl border-slate-300 text-sm focus:border-slate-900 focus:ring-slate-900"
+                  placeholder="Hecho concreto, fechas y por qué no admite espera"></textarea>
+        <p class="mt-1 text-xs text-slate-400"><span id="excepcion-contador">0</span>/600 · mínimo 30</p>
+      </div>
+
+      <div>
+        <label for="excepcion-adjuntos" class="block text-sm font-medium">
+          Respaldo <span class="font-normal text-rose-600">(obligatorio)</span>
+        </label>
+        <p class="mt-0.5 text-xs text-slate-500">
+          Certificado, cita, citación o el documento que sustente el caso. La solicitud no
+          se puede enviar sin él: es lo que sustenta apartarse de la política.
+        </p>
+        <input type="file" id="excepcion-adjuntos" multiple
+               accept="image/jpeg,image/png,image/webp,image/heic,application/pdf"
+               class="mt-1.5 w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-900
+                      file:px-3 file:py-1.5 file:text-sm file:text-white">
+        <ul id="excepcion-lista-adjuntos" class="mt-2 space-y-1"></ul>
+      </div>
+
+      <div class="rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
+        <p class="font-medium text-slate-700">A dónde va esta solicitud</p>
+        <p id="excepcion-destinatarios" class="mt-1">Cargando el equipo de su región…</p>
+        <p class="mt-1.5">
+          Se envía copia a <span id="excepcion-mi-correo" class="font-medium">su correo</span>,
+          que es su constancia. Puede responder desde ahí y le llegará a Talento Humano.
+        </p>
+      </div>
+
+      <p id="excepcion-error" class="hidden rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700"></p>
+    </div>
+
+    <footer class="sticky bottom-0 flex gap-2 border-t border-slate-200 bg-white px-5 py-4">
+      <button type="button" data-cerrar="modal-excepcion"
+              class="flex-1 rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-medium hover:bg-slate-200">
+        Cancelar
+      </button>
+      <button type="submit" id="btn-enviar-excepcion"
+              class="flex-1 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800">
+        Enviar a Talento Humano
+      </button>
+    </footer>
+  </form>
+</dialog>
+
+</body>
+</html>
