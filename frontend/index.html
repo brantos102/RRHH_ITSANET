@@ -63,10 +63,16 @@
     <form id="paso-identidad" class="hidden" novalidate>
       <button type="button" data-volver-acceso
               class="mb-3 text-sm text-slate-500 hover:text-slate-900">← Volver</button>
-      <h2 class="font-semibold text-slate-900">Complete sus datos</h2>
+      <h2 class="font-semibold text-slate-900">Comprobemos que es usted</h2>
       <p class="mt-1 text-sm leading-relaxed text-slate-600">
-        Su cédula está registrada, pero no tenemos un correo donde enviarle el
-        código. Confirme dos datos de su expediente y podrá registrarlo.
+        Su expediente ya está en el sistema —con su cargo, su jefe y su fecha
+        de ingreso—, pero <b>no tiene un correo</b> donde enviarle el código.
+      </p>
+      <p class="mt-2 text-sm leading-relaxed text-slate-600">
+        Como no hay a dónde escribirle, lo único que puede acreditar que es
+        usted son dos datos que ya constan en su expediente. <b>No se los
+        estamos pidiendo para registrarlos</b>: los tenemos, y los usamos
+        para compararlos.
       </p>
 
       <label for="nacimiento" class="mt-4 block text-sm font-medium text-slate-700">
@@ -111,7 +117,19 @@
         Ahí llegará su código cada vez que entre. Use el institucional si lo tiene.
       </p>
 
-      <label for="f-telefono" class="mt-3 block text-sm font-medium text-slate-700">
+      <!-- Lo que el expediente ya tiene. No se vuelve a pedir: pedirle a
+           alguien todo lo que el sistema ya sabe es la forma más rápida de
+           que decida que el sistema no sabe nada. -->
+      <div id="f-ya-consta" class="mt-4 hidden rounded-xl bg-emerald-50 p-3 ring-1 ring-emerald-200">
+        <p class="text-sm font-medium text-emerald-900">Esto ya consta en su expediente</p>
+        <ul id="f-ya-consta-lista" class="mt-1.5 space-y-0.5 text-sm text-emerald-800"></ul>
+        <p class="mt-2 text-xs text-emerald-700">
+          No hace falta que lo escriba de nuevo. Podrá revisarlo y corregirlo
+          después, desde «Mi ficha personal».
+        </p>
+      </div>
+
+      <label id="f-telefono-label" for="f-telefono" class="mt-3 block text-sm font-medium text-slate-700">
         Teléfono personal <span class="text-rose-600">*</span>
       </label>
       <input id="f-telefono" type="tel" inputmode="numeric" required autocomplete="tel"
@@ -119,7 +137,7 @@
              class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 ring-1 ring-slate-300
                     focus:bg-white focus:ring-2 focus:ring-slate-900">
 
-      <fieldset class="mt-4 rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200">
+      <fieldset id="f-emergencia" class="mt-4 rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200">
         <legend class="px-1 text-sm font-medium text-slate-700">Contacto de emergencia</legend>
         <p class="mb-2 text-xs text-slate-500">A quién avisamos si algo ocurre en la jornada.</p>
         <input id="f-emer-nombre" type="text" required placeholder="Nombre completo"
@@ -148,7 +166,7 @@
         </div>
       </fieldset>
 
-      <label for="f-direccion" class="mt-3 block text-sm font-medium text-slate-700">
+      <label id="f-direccion-label" for="f-direccion" class="mt-3 block text-sm font-medium text-slate-700">
         Dirección <span class="font-normal text-slate-500">(opcional)</span>
       </label>
       <input id="f-direccion" type="text" autocomplete="street-address"
@@ -206,6 +224,15 @@
         </div>
       </fieldset>
 
+      <p class="mt-4 rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
+        Lo que usted declara aquí —su correo, su teléfono, su contacto de
+        emergencia— rige de inmediato. <b>Los datos delicados</b> —su cargo, su
+        jefe inmediato, su fecha de ingreso— <b>los verifica Talento Humano</b>
+        antes de que cualquier cambio tenga efecto, para dejar constancia de su
+        veracidad. Sus datos se tratan conforme a la Ley Orgánica de Protección
+        de Datos Personales.
+      </p>
+
       <p id="error-ficha" class="mt-3 hidden text-sm text-rose-600" role="alert"></p>
 
       <button type="submit" id="btn-ficha"
@@ -257,7 +284,7 @@
 </main>
 
 <script type="module">
-import { api, sesion, validarCedula, ErrorApi } from "./js/api.js";
+import { api, sesion, validarCedula, ErrorApi, esc } from "./js/api.js";
 
 const $ = (id) => document.getElementById(id);
 const pasoCedula = $("paso-cedula"), pasoCodigo = $("paso-codigo");
@@ -367,6 +394,30 @@ $("paso-identidad").addEventListener("submit", async (e) => {
     tokenAlta = r.token;
     $("ficha-saludo").textContent =
       `${r.nombre}, registre dónde ubicarlo. Le enviaremos su código al correo que indique.`;
+
+    /* Lo que ya consta NO se vuelve a pedir: se muestra y se oculta el
+       campo. Pedirle a alguien cuyo expediente está completo todo lo que el
+       sistema ya sabe es la forma más rápida de que decida que el sistema
+       no sabe nada —y esa persona existe: tiene cargo, jefe y teléfono—. */
+    const consta = r.ya_consta || {};
+    const puestos = [];
+    const ocultar = (campo, etiqueta, valor, titulo) => {
+      if (!valor) return;
+      puestos.push(`<li>· <b>${titulo}:</b> ${esc(String(valor))}</li>`);
+      $(campo).closest("fieldset") === null
+        ? ($(campo).classList.add("hidden"), $(etiqueta)?.classList.add("hidden"))
+        : $(campo).closest("fieldset").classList.add("hidden");
+      $(campo).required = false;
+    };
+    ocultar("f-telefono", "f-telefono-label", consta.telefono, "Teléfono");
+    ocultar("f-direccion", "f-direccion-label", consta.direccion, "Dirección");
+    if (consta.emergencia) {
+      puestos.push(`<li>· <b>Contacto de emergencia:</b> ${esc(consta.emergencia)}</li>`);
+      $("f-emergencia").classList.add("hidden");
+      ["f-emer-nombre", "f-emer-telefono"].forEach((id) => { $(id).required = false; });
+    }
+    $("f-ya-consta").classList.toggle("hidden", !puestos.length);
+    $("f-ya-consta-lista").innerHTML = puestos.join("");
     $("f-cargo-actual").textContent =
       [r.cargo, r.departamento].filter(Boolean).join(" · ") || "Sin cargo registrado";
     $("f-jefe-actual").textContent = r.jefe || "Sin jefe registrado";
@@ -434,10 +485,16 @@ $("paso-ficha").addEventListener("submit", async (e) => {
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return mostrarError("ficha", "Escriba un correo válido: ahí llegará su código.");
   }
-  if (telefono.length < 7) {
+  // Solo se exige lo que se preguntó: lo que ya constaba se ocultó arriba y
+  // el servidor lo conserva. Que al final no quede sin teléfono ni sin
+  // contacto lo comprueba la base, contra el expediente y no contra esta
+  // pantalla, que es justo lo que permite no repreguntar.
+  const piden = (id) => !$(id).closest("fieldset, label, div")?.classList.contains("hidden")
+                         && $(id).required;
+  if (piden("f-telefono") && telefono.length < 7) {
     return mostrarError("ficha", "El teléfono personal es obligatorio.");
   }
-  if (emerNombre.length < 3 || emerTelefono.length < 7) {
+  if (piden("f-emer-nombre") && (emerNombre.length < 3 || emerTelefono.length < 7)) {
     return mostrarError("ficha", "Complete el contacto de emergencia: nombre y teléfono.");
   }
 
@@ -454,10 +511,13 @@ $("paso-ficha").addEventListener("submit", async (e) => {
     }
 
     const respuesta = await api.completarFicha({
-      token: tokenAlta, email, telefono,
-      emergencia_nombre: emerNombre,
+      token: tokenAlta, email,
+      // Nulo y no cadena vacía: lo que no se preguntó no viaja, y el
+      // servidor conserva lo que ya tenía en vez de borrarlo.
+      telefono: telefono || null,
+      emergencia_nombre: emerNombre || null,
       emergencia_parentesco: $("f-emer-parentesco").value.trim() || null,
-      emergencia_telefono: emerTelefono,
+      emergencia_telefono: emerTelefono || null,
       direccion: $("f-direccion").value.trim() || null,
       cargo_correcto: cargoOk,
       cargo_propuesto: cargoOk ? null : $("f-cargo-nuevo").value.trim(),

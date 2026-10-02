@@ -402,16 +402,22 @@ class PruebaIdentidad(BaseModel):
 class FichaInicial(BaseModel):
     token: uuid.UUID
     email: EmailStr
-    telefono: str = Field(..., min_length=7, max_length=20,
-                          description="Personal. Obligatorio: es como se ubica a la persona")
-    emergencia_nombre: str = Field(..., min_length=3, max_length=120)
+    # Opcionales en la petición, NO en el resultado: lo que ya consta en el
+    # expediente no se vuelve a pedir, y al terminar se comprueba que la
+    # persona quede con teléfono y contacto de emergencia, vengan de donde
+    # vengan. Pedirle de nuevo a alguien cuyo expediente ya está completo
+    # todo lo que el sistema ya sabe es la forma más rápida de que decida
+    # que el sistema no sabe nada.
+    telefono: str | None = Field(None, min_length=7, max_length=20,
+                                 description="Personal. Si ya consta, no hace falta repetirlo")
+    emergencia_nombre: str | None = Field(None, min_length=3, max_length=120)
     # La base guarda el parentesco como enumerado: se acota aquí para que un
     # valor libre dé un mensaje claro y no un error interno.
     emergencia_parentesco: Literal[
         "conyuge", "conviviente", "hijo", "padre", "madre", "hermano",
         "abuelo", "nieto", "suegro", "cunado", "otro",
     ] | None = None
-    emergencia_telefono: str = Field(..., min_length=7, max_length=20)
+    emergencia_telefono: str | None = Field(None, min_length=7, max_length=20)
     direccion: str | None = Field(None, max_length=200)
     tipo_sangre: str | None = None
     # Confirmar el cargo y el jefe es parte del primer ingreso: la planilla
@@ -466,8 +472,13 @@ async def probar_identidad(datos: PruebaIdentidad, request: Request) -> dict:
         )
 
     usuario = await obtener_uno(
-        """select u.id, u.nombre, u.cargo, u.departamento,
-                  j.nombre as jefe_nombre
+        """select u.id, u.nombre, u.cargo, u.departamento, u.fecha_ingreso,
+                  j.nombre as jefe_nombre,
+                  nullif(btrim(coalesce(u.telefono, '')), '') as telefono,
+                  nullif(btrim(coalesce(u.direccion, '')), '') as direccion,
+                  u.tipo_sangre,
+                  (select c.nombre from public.emergency_contacts c
+                    where c.user_id = u.id and c.es_principal limit 1) as emergencia
              from public.users u
              left join public.users j on j.id = u.jefe_id
             where u.cedula = %(cedula)s and u.activo
@@ -504,6 +515,17 @@ async def probar_identidad(datos: PruebaIdentidad, request: Request) -> dict:
         "cargo": usuario["cargo"],
         "departamento": usuario["departamento"],
         "jefe": usuario["jefe_nombre"],
+        "fecha_ingreso": usuario["fecha_ingreso"],
+        # Qué consta ya en el expediente, para no volvérselo a pedir. Se
+        # devuelven los valores de lo que la propia persona declaró —su
+        # teléfono, su dirección— y solo el NOMBRE del contacto de
+        # emergencia: basta para decirle «ya lo tenemos» sin exponer de más.
+        "ya_consta": {
+            "telefono": usuario["telefono"],
+            "direccion": usuario["direccion"],
+            "tipo_sangre": usuario["tipo_sangre"],
+            "emergencia": usuario["emergencia"],
+        },
         "minutos": 30,
     }
 
@@ -600,6 +622,28 @@ async def completar_ficha(
                                "Vuelva a empezar desde la pantalla de acceso."},
         )
 
+    # Opcional en la petición no significa opcional en el resultado: lo que
+    # no llegó tiene que constar ya. Se comprueba contra el expediente, no
+    # contra el formulario, que es lo que permite no repreguntar.
+    ya = await obtener_uno(
+        """select nullif(btrim(coalesce(u.telefono, '')), '') as telefono,
+                  (select 1 from public.emergency_contacts c
+                    where c.user_id = u.id and c.es_principal limit 1) as emergencia
+             from public.users u where u.id = %s""",
+        (alta["user_id"],),
+    ) or {}
+    faltan = []
+    if not (datos.telefono or ya.get("telefono")):
+        faltan.append("su teléfono")
+    if not ((datos.emergencia_nombre and datos.emergencia_telefono) or ya.get("emergencia")):
+        faltan.append("un contacto de emergencia")
+    if faltan:
+        raise HTTPException(
+            status_code=422,
+            detail={"mensaje": f"Falta {' y '.join(faltan)}. Son los datos con los que "
+                               "se le ubica si ocurre algo durante la jornada."},
+        )
+
     ocupado = await obtener_uno(
         "select 1 as x from public.users where email = %s and id <> %s",
         (datos.email, alta["user_id"]),
@@ -618,7 +662,7 @@ async def completar_ficha(
                     """
                     update public.users set
                       email = %(email)s, correo_pendiente = false,
-                      telefono = %(telefono)s,
+                      telefono = coalesce(%(telefono)s, telefono),
                       direccion = coalesce(%(direccion)s, direccion),
                       tipo_sangre = coalesce(%(sangre)s, tipo_sangre),
                       ficha_completa = true, ficha_completada_en = now()
@@ -634,19 +678,23 @@ async def completar_ficha(
                 # segundo intento chocaba con el índice único y moría con un
                 # «El registro ya existe» que no le dice nada a nadie, después
                 # de haber guardado ya el correo y el teléfono.
-                await cur.execute(
-                    """
-                    insert into public.emergency_contacts
-                        (user_id, nombre, parentesco, telefono, es_principal)
-                    values (%s, %s, %s::parentesco, %s, true)
-                    on conflict (user_id) where es_principal do update
-                      set nombre = excluded.nombre,
-                          parentesco = excluded.parentesco,
-                          telefono = excluded.telefono
-                    """,
-                    (alta["user_id"], datos.emergencia_nombre.strip(),
-                     datos.emergencia_parentesco or "otro", datos.emergencia_telefono),
-                )
+                # Solo si la persona declaró uno nuevo: quien ya lo tenía
+                # en su expediente no lo volvió a escribir, y pisarlo con
+                # nulos borraría un dato que sirve para avisar a su familia.
+                if datos.emergencia_nombre and datos.emergencia_telefono:
+                    await cur.execute(
+                        """
+                        insert into public.emergency_contacts
+                            (user_id, nombre, parentesco, telefono, es_principal)
+                        values (%s, %s, %s::parentesco, %s, true)
+                        on conflict (user_id) where es_principal do update
+                          set nombre = excluded.nombre,
+                              parentesco = excluded.parentesco,
+                              telefono = excluded.telefono
+                        """,
+                        (alta["user_id"], datos.emergencia_nombre.strip(),
+                         datos.emergencia_parentesco or "otro", datos.emergencia_telefono),
+                    )
                 if datos.cargo_correcto:
                     await cur.execute(
                         "update public.users set cargo_confirmado_en = now() where id = %s",
