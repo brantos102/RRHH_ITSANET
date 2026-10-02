@@ -572,5 +572,69 @@
   </form>
 </dialog>
 
+<!-- ============ Modal: dar de baja a un colaborador ============ -->
+<dialog id="modal-baja" class="w-[min(100vw-1.5rem,34rem)] rounded-2xl p-0">
+  <form id="form-baja" method="dialog">
+    <div class="border-b border-slate-200 px-5 py-4">
+      <h2 class="font-semibold">Dar de baja</h2>
+      <p id="baja-quien" class="mt-0.5 text-sm text-slate-500"></p>
+    </div>
+
+    <div class="max-h-[70vh] space-y-4 overflow-y-auto px-5 py-4">
+      <p class="rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
+        La causa no es un trámite: de ella depende lo que corresponde liquidar,
+        y es lo primero que se pregunta al revisar un expediente —una auditoría,
+        el Ministerio del Trabajo, o la propia persona que reclama—.
+      </p>
+
+      <div>
+        <label for="baja-fecha" class="block text-sm font-medium text-slate-700">
+          Último día de trabajo</label>
+        <input type="date" id="baja-fecha" required
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
+      </div>
+
+      <div>
+        <label for="baja-motivo" class="block text-sm font-medium text-slate-700">
+          ¿Cómo terminó la relación laboral?</label>
+        <select id="baja-motivo" required
+                class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm ring-1
+                       ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+          <option value="">Elija la causa…</option>
+        </select>
+        <p id="baja-ayuda" class="mt-1.5 hidden rounded-lg bg-slate-50 p-2.5 text-xs
+                                  leading-relaxed text-slate-600"></p>
+      </div>
+
+      <div>
+        <label for="baja-detalle" class="block text-sm font-medium text-slate-700">
+          Detalle <span class="font-normal text-slate-500">(número de acta, acuerdo, lo que corresponda)</span>
+        </label>
+        <textarea id="baja-detalle" rows="2" maxlength="400"
+                  class="mt-1.5 w-full resize-none rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm
+                         ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></textarea>
+      </div>
+
+      <p class="rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-900 ring-1 ring-amber-200">
+        <b>Las vacaciones no gozadas se pagan en todos los casos</b>, sea cual
+        sea la causa (Código del Trabajo, Art. 76). Al confirmar se le dirá
+        cuántos días quedan por liquidar.
+      </p>
+
+      <p id="baja-error" class="hidden rounded-xl bg-rose-50 p-3 text-sm text-rose-800 ring-1 ring-rose-200"></p>
+    </div>
+
+    <div class="flex gap-3 border-t border-slate-200 px-5 py-4">
+      <button type="button" data-cerrar
+              class="flex-1 rounded-xl bg-slate-100 px-4 py-3 font-medium hover:bg-slate-200">Cancelar</button>
+      <button type="submit"
+              class="flex-1 rounded-xl bg-slate-900 px-4 py-3 font-medium text-white hover:bg-slate-800">
+        Dar de baja
+      </button>
+    </div>
+  </form>
+</dialog>
+
 </body>
 </html>

@@ -236,6 +236,11 @@ export const api = {
   ajustarSaldo: (id, saldo) =>
     peticion(`/admin/usuarios/${id}/saldo?saldo=${saldo}`, { method: "POST" }),
   antiguedades: () => peticion("/admin/antiguedades"),
+  motivosSalida: () => peticion("/admin/motivos-salida"),
+  darDeBaja: (id, datos) =>
+    peticion(`/admin/usuarios/${id}/baja`,
+             { method: "POST", body: JSON.stringify(datos) }),
+  salidas: () => peticion("/admin/salidas"),
   adminJefaturas: () => peticion("/admin/jefaturas"),
   talentoHumano: () => peticion("/admin/talento-humano"),
   integrarTalentoHumano: (persona_id, region) =>

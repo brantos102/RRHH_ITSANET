@@ -1177,6 +1177,79 @@ async def recorrido_permiso_hoy(nav, capturas) -> Paso:
     return paso
 
 
+async def recorrido_baja(nav, capturas) -> Paso:
+    """Dar de baja a alguien, con la causa que el Código del Trabajo pide.
+
+    Una baja era `activo = false` y una fecha. Eso basta para que la persona
+    deje de entrar, y no basta para nada más: de la causa depende qué se
+    liquida, y es lo primero que pregunta cualquiera que revise el
+    expediente.
+    """
+    from app.db import ejecutar, obtener_uno
+
+    paso = Paso("baja")
+    CEDULA = "0914723788"
+
+    await ejecutar(
+        """insert into public.users (cedula, nombre, rol, fecha_ingreso, email, cargo, departamento)
+           values (%s, 'Prueba Salida Laboral', 'empleado', current_date - 2000,
+                   'salida.prueba@itsanet.test', 'Estibador', 'ALMACENAMIENTO')
+           on conflict (cedula) do update
+             set activo = true, fecha_salida = null, motivo_salida = null""", (CEDULA,))
+
+    pg = await (await nav.new_context(viewport={"width": 1440, "height": 1000})).new_page()
+    await _entrar(pg, ADMIN)
+    await pg.goto(f"{FRONTEND}/administracion.html#usuarios")
+    await pg.wait_for_selector("#tabla-usuarios tbody tr", timeout=15000)
+    await pg.fill("#buscar-usuario", "Prueba Salida Laboral")
+    await pg.wait_for_timeout(1500)
+
+    await pg.locator("#tabla-usuarios [data-activo]").first.click()
+    await pg.wait_for_selector("#modal-baja[open]", timeout=8000)
+    await pg.wait_for_timeout(600)
+    paso.ok("desactivar ya no es un clic suelto: abre la baja con causa")
+
+    opciones = await pg.locator("#baja-motivo option").count()
+    if opciones < 10:
+        raise Falla(f"Solo ofrece {opciones - 1} causas; el Código del Trabajo tiene más.")
+    texto = await pg.inner_text("#baja-motivo")
+    for causa in ("Renuncia", "Despido intempestivo", "Visto bueno", "Desahucio", "Jubilación"):
+        if causa not in texto:
+            raise Falla(f"Falta la causa «{causa}».")
+    paso.ok(f"ofrece {opciones - 1} causas del Código del Trabajo, con su artículo")
+
+    await pg.select_option("#baja-motivo", "despido_intempestivo")
+    await pg.wait_for_timeout(400)
+    ayuda = " ".join((await pg.inner_text("#baja-ayuda")).split())
+    if "Art. 188" not in ayuda:
+        raise Falla(f"No muestra el sustento de la causa elegida: «{ayuda}»")
+    paso.ok(f"y al elegirla explica qué implica: {ayuda[:80]}")
+
+    await pg.fill("#baja-detalle", "Acta 2026-114 de terminacion unilateral")
+    await pg.click("#form-baja button[type=submit]")
+    await pg.wait_for_selector("#aviso:not(.hidden)", timeout=10000)
+    mensaje = " ".join((await pg.inner_text("#aviso")).split())
+    if "Art. 76" not in mensaje:
+        raise Falla(f"No recuerda que las vacaciones no gozadas se pagan: «{mensaje}»")
+    paso.ok(f"recuerda lo que hay que liquidar: {mensaje[:95]}")
+
+    fila = await obtener_uno(
+        """select activo, motivo_salida::text as motivo, detalle_salida
+             from public.users where cedula = %s""", (CEDULA,))
+    if fila["activo"] or fila["motivo"] != "despido_intempestivo":
+        raise Falla(f"La baja no quedó registrada con su causa: {dict(fila)}")
+    if "2026-114" not in (fila["detalle_salida"] or ""):
+        raise Falla("El detalle no quedó en el expediente.")
+    paso.ok("la causa y el detalle quedan en el expediente")
+
+    if capturas:
+        await pg.screenshot(path=str(capturas / "baja.png"), full_page=True)
+
+    await ejecutar("delete from public.users where cedula = %s", (CEDULA,))
+    paso.ok("y se deja la base como estaba")
+    return paso
+
+
 async def recorrido_menu(nav, capturas) -> Paso:
     """La navegación, que ahora es vertical y tiene dos formas."""
     paso = Paso("menu")
@@ -1461,6 +1534,7 @@ RECORRIDOS = {
                        "El departamento, su buzón, y la firma dibujada retirada"),
     "permiso-hoy": (recorrido_permiso_hoy,
                     "Un permiso para hoy, y el adjunto que no tumba la solicitud"),
+    "baja": (recorrido_baja, "Dar de baja con la causa que el Código del Trabajo pide"),
     "menu": (recorrido_menu, "La navegación vertical: barra en escritorio, cajón en teléfono"),
     "temporal": (recorrido_temporal, "Personal temporal: jornada, cierre manual y semana"),
 }

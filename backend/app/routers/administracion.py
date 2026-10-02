@@ -308,6 +308,99 @@ async def cambiar_correos_departamento(datos: CorreoDepartamento, request: Reque
     }
 
 
+MOTIVOS_SALIDA = (
+    "renuncia", "despido_intempestivo", "visto_bueno_empleador",
+    "visto_bueno_trabajador", "desahucio", "fin_de_contrato",
+    "mutuo_acuerdo", "jubilacion", "fallecimiento", "otro",
+)
+
+
+class BajaColaborador(BaseModel):
+    """Cómo terminó la relación laboral. Las causas son las del Código del Trabajo."""
+
+    fecha_salida: date
+    motivo: Literal[
+        "renuncia", "despido_intempestivo", "visto_bueno_empleador",
+        "visto_bueno_trabajador", "desahucio", "fin_de_contrato",
+        "mutuo_acuerdo", "jubilacion", "fallecimiento", "otro",
+    ]
+    detalle: str | None = Field(None, max_length=400)
+
+
+@router.get("/admin/motivos-salida")
+async def motivos_de_salida(usuario: RRHH) -> list[dict]:
+    """Las causas, con el artículo que las sustenta.
+
+    Va aquí y no escrito en la pantalla porque de la causa depende lo que
+    corresponde liquidar, y quien la elige tiene que ver el sustento en el
+    momento de elegirla, no buscarlo después.
+    """
+    return [
+        {"codigo": "renuncia", "nombre": "Renuncia voluntaria",
+         "articulo": "Art. 169 núm. 2",
+         "ayuda": "El trabajador decide terminar la relación."},
+        {"codigo": "despido_intempestivo", "nombre": "Despido intempestivo",
+         "articulo": "Art. 188",
+         "ayuda": "Terminación unilateral del empleador sin causa legal. Genera indemnización."},
+        {"codigo": "visto_bueno_empleador", "nombre": "Visto bueno pedido por la empresa",
+         "articulo": "Art. 172",
+         "ayuda": "Por causas imputables al trabajador, calificado por el Inspector del Trabajo."},
+        {"codigo": "visto_bueno_trabajador", "nombre": "Visto bueno pedido por el trabajador",
+         "articulo": "Art. 173",
+         "ayuda": "Por causas imputables al empleador, calificado por el Inspector del Trabajo."},
+        {"codigo": "desahucio", "nombre": "Desahucio",
+         "articulo": "Art. 184",
+         "ayuda": "Aviso de terminación al vencimiento del plazo. Genera bonificación."},
+        {"codigo": "fin_de_contrato", "nombre": "Terminación del contrato",
+         "articulo": "Art. 169 núm. 3",
+         "ayuda": "Se cumplió el plazo o concluyó la obra para la que se contrató."},
+        {"codigo": "mutuo_acuerdo", "nombre": "Mutuo acuerdo",
+         "articulo": "Art. 169 núm. 2",
+         "ayuda": "Las dos partes convienen en terminar la relación."},
+        {"codigo": "jubilacion", "nombre": "Jubilación",
+         "articulo": "Art. 188 y siguientes", "ayuda": "Por edad o por años de servicio."},
+        {"codigo": "fallecimiento", "nombre": "Fallecimiento",
+         "articulo": "Art. 169 núm. 1",
+         "ayuda": "Lo pendiente se liquida con los derechohabientes."},
+        {"codigo": "otro", "nombre": "Otra causa",
+         "articulo": None, "ayuda": "Detállela: queda en el expediente."},
+    ]
+
+
+@router.post("/admin/usuarios/{user_id}/baja")
+async def dar_de_baja(user_id: uuid.UUID, datos: BajaColaborador,
+                      request: Request, usuario: RRHH) -> dict:
+    """Da de baja con causa y dice qué queda abierto a su nombre.
+
+    No se impide la baja por tener gente a cargo o solicitudes en trámite
+    —la persona ya se fue y el expediente tiene que reflejarlo—, pero se
+    devuelve para resolverlo ahora en vez de descubrirlo semanas después.
+    """
+    try:
+        fila = await obtener_uno(
+            "select public.dar_de_baja(%s, %s, %s, %s, %s) as r",
+            (user_id, datos.fecha_salida, datos.motivo, datos.detalle, usuario["id"]),
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise traducir(exc) from exc
+
+    await registrar(request, "colaborador_dado_de_baja", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="users", entidad_id=str(user_id),
+                    detalle={"motivo": datos.motivo,
+                             "fecha_salida": str(datos.fecha_salida),
+                             "dias_por_liquidar": fila["r"].get("dias_por_liquidar")})
+    return fila["r"]
+
+
+@router.get("/admin/salidas")
+async def salidas(usuario: RRHH, limite: int = 200) -> list[dict]:
+    """Quiénes salieron, cuándo, por qué y con cuántos días por liquidar."""
+    filas = await obtener_todos(
+        "select * from public.v_salidas limit %s", (min(limite, 1000),))
+    return [{**f, "id": str(f["id"]),
+             "dias_por_liquidar": float(f["dias_por_liquidar"] or 0)} for f in filas]
+
+
 class NuevaJefatura(BaseModel):
     persona_id: uuid.UUID
 

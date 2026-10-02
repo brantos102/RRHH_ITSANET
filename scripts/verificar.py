@@ -228,6 +228,7 @@ async def revisar_base() -> int:
         # que de verdad aportan (ver `funciones` y `dentro_de`, más abajo).
         ("0038 códigos anulados y usados, separados", None),
         ("0039 respaldo sugerido, justificación obligatoria", None),
+        ("0040 salida con motivo", "public.v_salidas"),
     ]
 
     # Las migraciones que solo cambian funciones se comprueban por la función.

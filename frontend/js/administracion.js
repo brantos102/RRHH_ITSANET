@@ -216,13 +216,81 @@ document.addEventListener("click", async (e) => {
 
   const activo = e.target.closest("[data-activo]");
   if (activo) {
-    try {
-      avisar((await api.editarUsuario(activo.dataset.activo,
-                                      { activo: activo.dataset.valor === "1" })).mensaje);
-      await cargarUsuarios();
-    } catch (err) { avisar(err.message, true); }
+    // Reactivar es un clic. Dar de baja NO: sin la causa, el expediente
+    // queda sin lo primero que se pregunta al revisarlo.
+    if (activo.dataset.valor === "1") {
+      try {
+        avisar((await api.editarUsuario(activo.dataset.activo, { activo: true })).mensaje);
+        await cargarUsuarios();
+      } catch (err) { avisar(err.message, true); }
+    } else {
+      abrirBaja(activo.dataset.activo);
+    }
   }
 });
+
+/* ---------------------------------------------------------------- bajas */
+let enBaja = null;
+let motivosSalida = null;
+
+async function abrirBaja(id) {
+  const persona = estado.usuarios.find((u) => String(u.id) === String(id));
+  enBaja = { id, nombre: persona?.nombre || "" };
+
+  $("baja-quien").textContent = persona
+    ? `${persona.nombre} · ${persona.cargo || "sin cargo"} · ${persona.departamento || "sin área"}`
+    : "";
+  $("baja-error").classList.add("hidden");
+  $("baja-detalle").value = "";
+  $("baja-fecha").value = new Date().toISOString().slice(0, 10);
+  $("baja-fecha").max = new Date().toISOString().slice(0, 10);
+
+  if (!motivosSalida) {
+    try { motivosSalida = await api.motivosSalida(); }
+    catch { motivosSalida = []; }
+  }
+  $("baja-motivo").innerHTML = `<option value="">Elija la causa…</option>` +
+    motivosSalida.map((m) => `<option value="${esc(m.codigo)}">${esc(m.nombre)}${
+      m.articulo ? ` · ${esc(m.articulo)}` : ""}</option>`).join("");
+  $("baja-ayuda").classList.add("hidden");
+  $("modal-baja").showModal();
+}
+
+$("baja-motivo").addEventListener("change", () => {
+  const elegido = (motivosSalida || []).find((m) => m.codigo === $("baja-motivo").value);
+  $("baja-ayuda").textContent = elegido
+    ? `${elegido.ayuda}${elegido.articulo ? ` (Código del Trabajo, ${elegido.articulo})` : ""}`
+    : "";
+  $("baja-ayuda").classList.toggle("hidden", !elegido);
+});
+
+$("form-baja").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!enBaja) return;
+  try {
+    const r = await api.darDeBaja(enBaja.id, {
+      fecha_salida: $("baja-fecha").value,
+      motivo: $("baja-motivo").value,
+      detalle: $("baja-detalle").value.trim() || null,
+    });
+    $("modal-baja").close();
+    /* Lo que queda abierto a su nombre se dice AHORA, no se descubre
+       semanas después cuando alguien busca a un jefe que ya no está. */
+    const pendiente = [
+      r.personas_a_cargo ? `${r.personas_a_cargo} persona(s) le reportaban` : null,
+      r.solicitudes_pendientes ? `${r.solicitudes_pendientes} solicitud(es) en trámite` : null,
+    ].filter(Boolean);
+    avisar(r.mensaje + (pendiente.length ? ` Queda por resolver: ${pendiente.join(" y ")}.` : ""));
+    enBaja = null;
+    await cargarUsuarios();
+  } catch (err) {
+    $("baja-error").textContent = err.message;
+    $("baja-error").classList.remove("hidden");
+  }
+});
+
+$("modal-baja").querySelectorAll("[data-cerrar]").forEach((b) =>
+  b.addEventListener("click", () => $("modal-baja").close()));
 
 $("u-cedula").addEventListener("input", (e) => {
   e.target.value = e.target.value.replace(/\D/g, "").slice(0, 10);
