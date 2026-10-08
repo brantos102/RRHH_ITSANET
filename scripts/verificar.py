@@ -229,6 +229,7 @@ async def revisar_base() -> int:
         ("0038 códigos anulados y usados, separados", None),
         ("0039 respaldo sugerido, justificación obligatoria", None),
         ("0040 salida con motivo", "public.v_salidas"),
+        ("0041 días del período en curso", None),
     ]
 
     # Las migraciones que solo cambian funciones se comprueban por la función.
@@ -256,6 +257,10 @@ async def revisar_base() -> int:
         # sobre lo que afirma.
         "0031 ningún día se pierde":
             ("generar_alertas_vacaciones", "Ningún día se pierde"),
+        # Un día de diferencia que solo se ve en el texto: se comprueba por
+        # el comentario que explica el cambio, dentro de la propia función.
+        "0041 días del período en curso":
+            ("explicar_saldo_base", "El PERÍODO EN CURSO"),
         # El respaldo dejó de bloquear el envío: se comprueba por el
         # comentario que explica por qué, dentro de la propia función.
         "0039 respaldo sugerido, justificación obligatoria":

@@ -192,7 +192,13 @@ async def test_mi_saldo_explica_con_base_legal(cliente, sesion):
     assert r.status_code == 200
     detalle = r.json()
     assert detalle["anios_servicio"] == 7
-    assert detalle["dias_por_anio_actual"] == 17          # Art. 69: 15 + 2
+    # Siete años CUMPLIDOS significa estar cursando el período 8, y ese
+    # período vale 18 días: 15 de base y 3 por antigüedad (Art. 69). Esta
+    # prueba esperaba 17 y con eso fijaba el error: la cifra se calculaba
+    # con los años cumplidos en vez de con el período en curso, de modo que
+    # le decía a la persona un día menos del que el propio sistema le asigna
+    # al cerrar el período (migración 0041).
+    assert detalle["dias_por_anio_actual"] == 18
     assert any(a["articulo"] == "Art. 69" for a in detalle["base_legal"])
     assert len(detalle["periodos"]) >= 7
 

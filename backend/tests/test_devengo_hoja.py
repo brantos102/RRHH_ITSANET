@@ -14,7 +14,8 @@ from __future__ import annotations
 import re
 from decimal import Decimal
 
-from app.db import obtener_uno
+from app.db import ejecutar, obtener_uno
+from tests.test_reglas_nuevas import auth  # noqa: F401
 
 BASE = Decimal("1.25")   # quince días partidos para doce
 
@@ -180,3 +181,47 @@ async def test_ningun_aviso_dice_que_los_dias_se_pierden(cliente):
     assert not guardados, (
         "quedan avisos enviados que afirman que los días se pierden: "
         f"{[g['id'] for g in guardados][:5]}")
+
+
+# ------------------------------------------------- el período en curso vale
+# lo del PERÍODO, no lo de los años cumplidos (migración 0041)
+async def test_a_este_anio_le_tocan_los_dias_del_periodo_en_curso(cliente, auth, empleado):
+    """Quien lleva 7 años CUMPLIDOS cursa su período 8, que vale 18 días.
+
+    Los períodos se generan por su número —el 6 valió 16, el 7 valió 17— pero
+    la línea informativa los calculaba por los años cumplidos, y le decía 17
+    a quien va a consolidar 18. El saldo nunca estuvo mal: el año en curso
+    devenga sobre la base de quince. Lo que estaba mal era lo que se le decía
+    a la persona, que es el número que Talento Humano contrasta con su hoja.
+    """
+    await ejecutar(
+        "update public.users set fecha_ingreso = current_date - interval '7 years 6 months' "
+        "where id = %s", (empleado["id"],))
+
+    saldo = (await cliente.get("/auth/mi-saldo", headers=auth)).json()
+    assert saldo["anios_servicio"] == 7
+    assert saldo["dias_por_anio_actual"] == 18, (
+        "cursa el período 8: 15 base + 3 por antigüedad")
+
+
+async def test_por_debajo_de_seis_anios_no_cambia_nada(cliente, auth, empleado):
+    """Todos esos períodos valen quince: el día adicional nace en el sexto."""
+    await ejecutar(
+        "update public.users set fecha_ingreso = current_date - interval '3 years 2 months' "
+        "where id = %s", (empleado["id"],))
+    saldo = (await cliente.get("/auth/mi-saldo", headers=auth)).json()
+    assert saldo["anios_servicio"] == 3
+    assert saldo["dias_por_anio_actual"] == 15
+
+
+async def test_la_correccion_no_mueve_el_saldo(cliente, auth, empleado):
+    """El año en curso devenga sobre la base de quince, no sobre el tope del
+    período: por eso esto corrige un texto y no un número de días."""
+    await ejecutar(
+        "update public.users set fecha_ingreso = current_date - interval '7 years 6 months' "
+        "where id = %s", (empleado["id"],))
+    saldo = (await cliente.get("/auth/mi-saldo", headers=auth)).json()
+    fila = await obtener_uno(
+        "select round(coalesce(sum(dias_saldo), 0), 2) as total "
+        "from public.vacation_periods where user_id = %s and not caducado", (empleado["id"],))
+    assert float(saldo["saldo_total"]) == float(fila["total"])
