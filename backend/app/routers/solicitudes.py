@@ -85,7 +85,9 @@ async def tipos_permiso(_: Annotated[dict, Depends(usuario_actual)]) -> list[dic
                l.norma, l.articulo, l.titulo as articulo_titulo, l.texto as articulo_texto
         from public.permission_types pt
         left join public.permission_categories c on c.id = pt.category_id
-        left join public.legal_references l on l.codigo = pt.legal_ref
+        -- La vista aplica el modo: un artículo oculto no tiene fila y el
+        -- left join deja el tipo de permiso sin cita, que es lo pedido.
+        left join public.v_legal_colaborador l on l.codigo = pt.legal_ref
         where pt.activo
         order by pt.orden
         """
@@ -305,7 +307,7 @@ async def tabla_antiguedad(_: Annotated[dict, Depends(usuario_actual)]) -> dict:
     )
     lineamientos = await obtener_todos(
         """select codigo, articulo, titulo, texto, categoria
-             from public.legal_references
+             from public.v_legal_colaborador
             where starts_with(codigo, 'ITSANET_') order by orden"""
     )
     # Las reglas internas que se leen antes de enviar. Viven en una tabla y no

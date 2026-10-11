@@ -286,8 +286,13 @@ function pintarResumen(perfil, saldo) {
   const enRiesgo = diasEnteros(saldo?.proximo_dias);
   porVencer.classList.toggle("hidden", !vence || enRiesgo < 1);
   if (vence && enRiesgo >= 1) {
+    // La cita del artículo ya no va escrita aquí: Talento Humano puede
+    // ocultarla desde Configuración porque el Art. 75 citado a secas arma
+    // discusiones. El HECHO —qué día vence y cuántos días— se dice siempre:
+    // es lo que la persona necesita para actuar.
+    const cita = saldo?.citar?.art_75 === false ? "" : " (Art. 75)";
     porVencer.textContent =
-      `${plural(enRiesgo, "día vence", "días vencen")} el ${fecha(vence)} (Art. 75).`;
+      `${plural(enRiesgo, "día vence", "días vencen")} el ${fecha(vence)}${cita}.`;
   }
 
   // Si el saldo guardado no cuadra con los períodos, el titular estaría
@@ -838,7 +843,10 @@ $("btn-detalle-periodos").addEventListener("click", () => {
             (a) => `<details class="rounded-xl bg-slate-50 p-3">
               <summary class="cursor-pointer text-sm font-medium">${esc(a.articulo)} — ${esc(a.titulo)}</summary>
               <p class="mt-2 text-xs leading-relaxed text-slate-600">${esc(a.texto)}</p>
-              <p class="mt-1.5 text-xs text-slate-400">${esc(a.norma)}</p>
+              <p class="mt-1.5 text-xs text-slate-400">${esc(a.norma)}${
+                a.modo === "resumen"
+                  ? " · resumen de la empresa, no el texto literal de la norma"
+                  : ""}</p>
             </details>`
           )
           .join("")}

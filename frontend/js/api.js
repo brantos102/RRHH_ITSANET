@@ -268,6 +268,9 @@ export const api = {
   crearFeriado: (datos) => peticion("/admin/feriados", { method: "POST", body: JSON.stringify(datos) }),
   quitarFeriado: (fecha) => peticion(`/admin/feriados/${fecha}`, { method: "DELETE" }),
   adminConfiguracion: () => peticion("/admin/configuracion"),
+  baseLegal: () => peticion("/admin/base-legal"),
+  cambiarArticulo: (codigo, cambio) =>
+    peticion(`/admin/base-legal/${codigo}`, { method: "PATCH", body: JSON.stringify(cambio) }),
   cambiarParametro: (clave, valor) =>
     peticion(`/admin/configuracion/${clave}`, { method: "PATCH", body: JSON.stringify({ valor }) }),
   bitacora: (limite = 100) => peticion(`/admin/bitacora?limite=${limite}`),

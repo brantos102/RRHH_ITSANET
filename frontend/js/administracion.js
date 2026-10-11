@@ -618,6 +618,10 @@ async function corregirFDS({ user, fds, tope, actual }) {
 
 /* -------------------------------------------------------- configuración */
 async function cargarConfiguracion() {
+  await Promise.all([cargarParametros(), cargarBaseLegal()]);
+}
+
+async function cargarParametros() {
   const parametros = await api.adminConfiguracion();
   $("lista-configuracion").innerHTML = parametros.map((p) => `
     <div class="flex flex-wrap items-center gap-4 px-5 py-4">
@@ -649,9 +653,113 @@ async function cargarConfiguracion() {
       }
       try {
         avisar((await api.cambiarParametro(campo.dataset.parametro, campo.value)).mensaje);
-        await cargarConfiguracion();
+        await cargarParametros();
       } catch (err) {
         campo.value = original;
+        avisar(err.message, true);
+      }
+    });
+  });
+}
+
+/* ------------------------------------------------------------ base legal
+   Citar la ley es obligación de la empresa; citarla suelta es lo que arma la
+   discusión en el mostrador. El Art. 75 leído a secas parece una invitación a
+   acumular, y el Art. 76 un derecho a cobrar en lugar de descansar, cuando
+   opera sobre la liquidación. De ahí los tres modos.
+
+   Lo que no se ofrece es borrar el artículo de la base: ocultarlo quita la
+   constancia de que la empresa informó el derecho, no el derecho. */
+const MODOS = {
+  completo: "Texto completo de la norma",
+  resumen: "Resumen en lenguaje llano",
+  oculto: "No se le muestra",
+};
+
+async function cargarBaseLegal() {
+  const articulos = await api.baseLegal();
+  $("lista-base-legal").innerHTML = articulos.map((a) => {
+    const mostrado = a.visibilidad === "resumen" ? (a.resumen || "") : a.texto;
+    return `
+    <div class="px-5 py-4" data-articulo="${esc(a.codigo)}">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0 flex-1">
+          <p class="font-medium">${esc(a.articulo)} — ${esc(a.titulo)}
+            ${a.sale_en_el_panel
+              ? `<span class="ml-1 rounded-full bg-slate-900 px-2 py-0.5 text-xs font-normal text-white">
+                   en el panel</span>` : ""}</p>
+          <p class="mt-0.5 text-xs text-slate-500">${esc(a.norma)}</p>
+        </div>
+        <select data-modo="${esc(a.codigo)}" ${esAdmin ? "" : "disabled"}
+                class="rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                       focus:bg-white focus:ring-2 focus:ring-slate-900 disabled:opacity-60">
+          ${Object.entries(MODOS).map(([v, n]) =>
+            `<option value="${v}" ${a.visibilidad === v ? "selected" : ""}>${n}</option>`).join("")}
+        </select>
+      </div>
+
+      <p class="mt-2 rounded-lg bg-slate-50 p-2.5 text-xs leading-relaxed
+                ${a.visibilidad === "oculto" ? "text-slate-400 line-through" : "text-slate-600"}">
+        ${esc(mostrado || "Sin resumen escrito.")}</p>
+
+      <details class="mt-2" ${a.visibilidad === "resumen" ? "open" : ""}>
+        <summary class="cursor-pointer text-xs font-medium text-slate-500">
+          Resumen en lenguaje llano</summary>
+        <textarea data-resumen="${esc(a.codigo)}" rows="3" maxlength="600"
+                  ${esAdmin ? "" : "disabled"}
+                  placeholder="Diga el derecho y su límite en una frase. Sin esto no se puede usar el modo resumen."
+                  class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-xs leading-relaxed
+                         ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900
+                         disabled:opacity-60">${esc(a.resumen || "")}</textarea>
+      </details>
+
+      ${a.visibilidad_en
+        ? `<p class="mt-1.5 text-xs text-slate-400">
+             Lo cambió ${esc(a.visibilidad_por || "alguien que ya no está")}
+             el ${fechaHora(a.visibilidad_en)}.</p>` : ""}
+    </div>`;
+  }).join("");
+
+  if (!esAdmin) return;
+
+  // El resumen se guarda al salir del campo, antes de cambiar el modo: así
+  // elegir «resumen» no choca con la regla de que el resumen no puede estar
+  // vacío.
+  $("lista-base-legal").querySelectorAll("[data-resumen]").forEach((campo) => {
+    const original = campo.value;
+    campo.addEventListener("change", async () => {
+      if (campo.value.trim() === original.trim()) return;
+      try {
+        await api.cambiarArticulo(campo.dataset.resumen, { resumen: campo.value.trim() });
+        avisar("Resumen guardado.");
+        await cargarBaseLegal();
+      } catch (err) {
+        campo.value = original;
+        avisar(err.message, true);
+      }
+    });
+  });
+
+  $("lista-base-legal").querySelectorAll("[data-modo]").forEach((sel) => {
+    const original = sel.value;
+    sel.addEventListener("change", async () => {
+      const codigo = sel.dataset.modo;
+      if (sel.value === "oculto" && !confirm(
+            "Ocultarlo no quita el derecho: quita la constancia de que la empresa lo informó.\n\n" +
+            "¿Prefiere el modo resumen? Cancele y elíjalo. ¿Ocultar de todos modos?")) {
+        sel.value = original;
+        return;
+      }
+      // Si hay un resumen escrito y sin guardar, va primero.
+      const texto = $("lista-base-legal")
+        .querySelector(`[data-resumen="${codigo}"]`)?.value.trim();
+      try {
+        const cambio = { visibilidad: sel.value };
+        if (texto) cambio.resumen = texto;
+        avisar((await api.cambiarArticulo(codigo, cambio)).mensaje);
+        await cargarBaseLegal();
+      } catch (err) {
+        sel.value = original;
         avisar(err.message, true);
       }
     });
@@ -859,6 +967,8 @@ async function descargarCotejo(formato) {
   { campo: "buscar-antiguedad", contenedor: "tabla-antiguedades", vacio: "antiguedades-vacio" },
   { campo: "buscar-parametro", contenedor: "lista-configuracion",
     filas: ":scope > *", vacio: "parametros-vacio" },
+  { campo: "buscar-articulo", contenedor: "lista-base-legal",
+    filas: ":scope > *", vacio: "articulos-vacio" },
 ].forEach(montarBuscador);
 
 document.querySelectorAll("[data-cotejo]").forEach((b) =>

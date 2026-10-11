@@ -243,11 +243,11 @@ async def glosario(categoria: str | None = None) -> list[dict]:
 
     if categoria:
         return await obtener_todos(
-            """select codigo, norma, articulo, titulo, texto, categoria
-               from public.legal_references where categoria = %s order by orden""",
+            """select codigo, norma, articulo, titulo, texto, categoria, modo
+               from public.v_legal_colaborador where categoria = %s order by orden""",
             (categoria,),
         )
     return await obtener_todos(
-        """select codigo, norma, articulo, titulo, texto, categoria
-           from public.legal_references order by orden"""
+        """select codigo, norma, articulo, titulo, texto, categoria, modo
+           from public.v_legal_colaborador order by orden"""
     )

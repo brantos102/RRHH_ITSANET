@@ -80,6 +80,17 @@ class CambioParametro(BaseModel):
     valor: str = Field(..., max_length=100)
 
 
+class CambioArticulo(BaseModel):
+    """Cómo se le muestra un artículo al colaborador.
+
+    `resumen` se guarda aunque el modo elegido sea otro: así Talento Humano
+    puede redactarlo con calma y recién después decidir mostrarlo.
+    """
+
+    visibilidad: Literal["completo", "resumen", "oculto"] | None = None
+    resumen: str | None = Field(None, max_length=600)
+
+
 # ------------------------------------------------------------------ personal
 @router.get("/admin/usuarios")
 async def listar_usuarios(usuario: RRHH, q: str = "", incluir_inactivos: bool = False) -> list[dict]:
@@ -648,6 +659,73 @@ async def cambiar_parametro(clave: str, cambio: CambioParametro,
                     cedula=usuario["cedula"], entidad="app_config", entidad_id=clave,
                     detalle={"antes": anterior["valor"], "ahora": cambio.valor})
     return {"mensaje": f"«{clave}» pasó de {anterior['valor']} a {cambio.valor}."}
+
+
+# ------------------------------------------------------------- base legal
+# Citar la ley es obligación de la empresa, pero citarla SUELTA es lo que
+# arma la discusión en el mostrador: el Art. 75 leído a secas parece una
+# invitación a acumular, y el Art. 76 parece un derecho a cobrar en lugar de
+# descansar. De ahí los tres modos. Lo que no se ofrece es borrar el
+# artículo: los derechos laborales son irrenunciables (Constitución, Art. 326
+# núm. 2) y ocultar la norma no quita el derecho, solo quita la prueba de que
+# la empresa lo informó.
+@router.get("/admin/base-legal")
+async def listar_base_legal(usuario: RRHH, categoria: str | None = None) -> list[dict]:
+    """Los artículos con su modo actual y quién lo cambió."""
+    condicion = "where l.categoria = %s" if categoria else ""
+    return await obtener_todos(
+        f"""select l.codigo, l.norma, l.articulo, l.titulo, l.texto, l.categoria,
+                   l.visibilidad, l.resumen, l.visibilidad_en,
+                   q.nombre as visibilidad_por,
+                   l.codigo in ('CT_ART_69','CT_ART_75','CT_ART_73','CT_ART_74')
+                     as sale_en_el_panel
+              from public.legal_references l
+              left join public.users q on q.id = l.visibilidad_por
+              {condicion}
+             order by l.orden""",
+        (categoria,) if categoria else (),
+    )
+
+
+@router.patch("/admin/base-legal/{codigo}")
+async def cambiar_articulo(codigo: str, cambio: CambioArticulo,
+                           request: Request, usuario: Admin) -> dict:
+    """Solo administración: decide lo que trescientas cincuenta personas leen."""
+    antes = await obtener_uno(
+        "select articulo, visibilidad, resumen from public.legal_references where codigo = %s",
+        (codigo,))
+    if antes is None:
+        raise HTTPException(status_code=404, detail={"mensaje": "Ese artículo no existe."})
+
+    resumen = cambio.resumen.strip() if cambio.resumen is not None else None
+    modo = cambio.visibilidad or antes["visibilidad"]
+    # El resumen vacío con el modo resumen dejaría el artículo en blanco, que
+    # es peor que cualquiera de los tres modos. La base lo rechaza igual; aquí
+    # se dice en castellano antes de llegar a ella.
+    if modo == "resumen" and not (resumen or (antes["resumen"] or "").strip()):
+        raise HTTPException(status_code=422, detail={
+            "mensaje": f"Para mostrar {antes['articulo']} en resumen hay que escribir el resumen."})
+
+    fila = await obtener_uno(
+        """update public.legal_references
+              set visibilidad     = coalesce(%s, visibilidad),
+                  resumen         = coalesce(%s, resumen),
+                  visibilidad_en  = now(),
+                  visibilidad_por = %s
+            where codigo = %s
+          returning articulo, visibilidad""",
+        (cambio.visibilidad, resumen, str(usuario["id"]), codigo))
+
+    await registrar(request, "base_legal_modificada", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="legal_references", entidad_id=codigo,
+                    detalle={"antes": {"visibilidad": antes["visibilidad"],
+                                       "resumen": antes["resumen"]},
+                             "ahora": {"visibilidad": fila["visibilidad"],
+                                       "resumen": resumen if resumen is not None else antes["resumen"]}})
+    dicho = {"completo": "con su texto completo",
+             "resumen": "en resumen",
+             "oculto": "oculto"}[fila["visibilidad"]]
+    return {"mensaje": f"{fila['articulo']} queda {dicho} para el colaborador."}
 
 
 # ------------------------------------------------- cotejo con el archivo de origen

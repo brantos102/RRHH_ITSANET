@@ -35,22 +35,51 @@ async def guardia_auth(cliente, codigos, empleado):
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
 
+def _proximo_laborable(desde: date | None = None) -> date:
+    """El primer día de lunes a viernes a partir de la fecha dada.
+
+    Hace falta porque el sistema no computa días en sábado ni domingo: una
+    solicitud fechada en fin de semana se rechaza con «no genera días
+    computables», y estas pruebas se caían enteras los sábados y domingos.
+    """
+    dia = desde or date.today()
+    while dia.weekday() >= 5:
+        dia += timedelta(days=1)
+    return dia
+
+
 async def _permiso_por_horas_aprobado(cliente, auth, jefe_auth, rrhh_auth,
                                       hora_inicio: str = "12:00",
                                       hora_fin: str = "15:00") -> dict:
-    """Un permiso de hoy, por horas, ya aprobado y con su QR."""
+    """Un permiso de hoy, por horas, ya aprobado y con su QR.
+
+    Se pide para un día laborable y recién después se lo fecha hoy. Parece un
+    rodeo y es lo contrario: así la solicitud recorre la validación completa
+    de la API —que no computa días en fin de semana— y la vista de garita,
+    que se ancla a `current_date`, encuentra la fila donde la espera. Antes se
+    pedía directamente para hoy y las dieciocho pruebas de garita y retorno
+    fallaban los sábados y domingos, por el calendario y no por el código.
+    """
     tipo = await obtener_uno(
         """select id from public.permission_types
             where admite_horas and not requiere_adjunto and activo
               and (max_horas is null or max_horas >= 4) order by id limit 1""")
+    laborable = _proximo_laborable()
     creada = await cliente.post("/solicitudes", headers=auth, json={
         "tipo": "permiso", "permission_type_id": tipo["id"],
-        "fecha_inicio": str(date.today()), "fecha_fin": str(date.today()),
+        "fecha_inicio": str(laborable), "fecha_fin": str(laborable),
         "hora_inicio": hora_inicio, "hora_fin": hora_fin,
         "descripcion": "Diligencia personal de la tarde",
         "justificacion": "Turno asignado para esa tarde.", "firmar": False})
     assert creada.status_code == 201, creada.text
     cuerpo = creada.json()
+    # Antes de aprobar: una solicitud ya aprobada no admite cambio de fechas
+    # —hay un disparador que lo impide, y está bien que lo impida—.
+    if laborable != date.today():
+        await ejecutar(
+            """update public.requests
+                  set fecha_inicio = current_date, fecha_fin = current_date
+                where id = %s""", (cuerpo["id"],))
     for etapa in (jefe_auth, rrhh_auth):
         await cliente.post(f"/aprobaciones/{cuerpo['id']}/decidir", headers=etapa,
                            json={"accion": "aprobar"})

@@ -328,7 +328,7 @@ async def mis_notificaciones(usuario: Annotated[dict, Depends(usuario_actual)]) 
                n.leida_en, n.created_at,
                l.norma, l.articulo, l.titulo as articulo_titulo, l.texto as articulo_texto
         from public.notifications n
-        left join public.legal_references l on l.codigo = n.legal_ref
+        left join public.v_legal_colaborador l on l.codigo = n.legal_ref
         where n.user_id = %s
         order by n.leida_en nulls first, n.created_at desc
         limit 50

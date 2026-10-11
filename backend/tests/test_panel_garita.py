@@ -16,7 +16,8 @@ from app.db import ejecutar, obtener_todos, obtener_uno
 from tests.conftest import CEDULA_PRUEBA
 from tests.test_reglas_nuevas import (CEDULA_JEFE_R, CEDULA_RRHH_R,  # noqa: F401
                                       auth, jefe_auth, rrhh_auth)
-from tests.test_retorno import guardia_auth, _permiso_por_horas_aprobado  # noqa: F401
+from tests.test_retorno import (guardia_auth, _permiso_por_horas_aprobado,  # noqa: F401
+                                _proximo_laborable)
 
 
 async def _situacion(request_id) -> dict:
@@ -124,15 +125,20 @@ async def test_una_solicitud_no_aprobada_no_entra_al_panel(
     cliente, auth, jefe_auth, rrhh_auth
 ):
     """El panel es de quien PUEDE salir, no de quien lo pidió."""
+    # Se pide para un día laborable y se la fecha hoy: en fin de semana el
+    # sistema no computa días y la solicitud ni se crearía.
+    laborable = _proximo_laborable()
     r = await cliente.post("/solicitudes", headers=auth, json={
         "tipo": "permiso", "permission_type_id": 7,
-        "fecha_inicio": str(__import__("datetime").date.today()),
-        "fecha_fin": str(__import__("datetime").date.today()),
+        "fecha_inicio": str(laborable), "fecha_fin": str(laborable),
         "hora_inicio": "09:00", "hora_fin": "10:00",
         "descripcion": "Permiso que se queda en trámite",
         "justificacion": "Trámite personal que no admite espera.",
     })
     assert r.status_code == 201, r.text
+    await ejecutar(
+        """update public.requests set fecha_inicio = current_date, fecha_fin = current_date
+            where id = %s""", (r.json()["id"],))
     filas = await obtener_todos(
         "select request_id from public.v_garita_hoy where request_id = %s",
         (r.json()["id"],))

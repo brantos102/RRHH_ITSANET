@@ -400,6 +400,35 @@
     <div id="lista-configuracion" class="divide-y divide-slate-100"></div>
   </section>
 
+  <!-- ===== Base legal: qué artículos lee el colaborador =====
+       El Art. 75 citado a secas se lee como una invitación a acumular, y el
+       Art. 76 como un derecho a cobrar en lugar de descansar. Aquí Talento
+       Humano decide cómo se cuenta cada artículo, sin tocar código. -->
+  <section data-panel="configuracion" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+      <div>
+        <h2 class="font-medium">Base legal que ve el colaborador</h2>
+        <p class="mt-0.5 text-sm text-slate-500">
+          Tres modos por artículo: el texto completo de la norma, un resumen en
+          lenguaje llano que ustedes redactan, u oculto.
+        </p>
+      </div>
+      <input type="search" id="buscar-articulo" placeholder="Artículo o norma"
+             class="w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900 sm:w-56">
+    </header>
+    <div class="border-b border-amber-200 bg-amber-50 px-5 py-3 text-xs leading-relaxed text-amber-900">
+      <strong>Antes de ocultar un artículo.</strong> Los derechos laborales son
+      irrenunciables (Constitución, Art.&nbsp;326 núm.&nbsp;2): ocultar la norma no
+      quita el derecho, solo quita la constancia de que la empresa lo informó. El
+      modo <em>resumen</em> evita la discusión sin perder esa constancia. La
+      consecuencia operativa —«3 días vencen el 30 de junio»— se sigue mostrando
+      siempre; lo único que se calla es la cita.
+    </div>
+    <p id="articulos-vacio" class="hidden px-5 py-8 text-center text-sm text-slate-500"></p>
+    <div id="lista-base-legal" class="divide-y divide-slate-100"></div>
+  </section>
+
   <!-- ===== Bitácora ===== -->
   <section data-panel="bitacora" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
     <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
