@@ -230,6 +230,12 @@ async def revisar_base() -> int:
         ("0039 respaldo sugerido, justificación obligatoria", None),
         ("0040 salida con motivo", "public.v_salidas"),
         ("0041 días del período en curso", None),
+        ("0042 base legal opcional", "public.v_legal_colaborador"),
+        # Esta no crea nada: añade un caso dentro del disparador de
+        # inserción. Se comprueba por la marca del cambio (ver `dentro_de`).
+        ("0043 permiso de un día no hábil", None),
+        ("0044 papeles firmados", "public.informes_firmados"),
+        ("0045 tablero de indicadores", "public.tablero_bloques"),
     ]
 
     # Las migraciones que solo cambian funciones se comprueban por la función.
@@ -265,6 +271,10 @@ async def revisar_base() -> int:
         # comentario que explica por qué, dentro de la propia función.
         "0039 respaldo sugerido, justificación obligatoria":
             ("tg_requests_validar_requisitos", "el respaldo se sugiere"),
+        # El guardia que cubre el domingo tenía el turno y no podía pedir
+        # permiso para él. Se comprueba por el comentario que lo explica.
+        "0043 permiso de un día no hábil":
+            ("tg_requests_before_insert", "SEA HÁBIL"),
     }
 
     # Y una que solo quita una línea de una vista: se comprueba que la vista
