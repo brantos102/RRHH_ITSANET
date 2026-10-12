@@ -11,9 +11,15 @@ Fecha: 12 de octubre de 2026.
 
 ## 1. La respuesta corta
 
-**Sí, hace falta un servidor. Uno.** No un clúster, no tres máquinas, no
-Kubernetes. Este sistema es pequeño en cómputo y delicado en datos: lo caro
-aquí no es la capacidad, es la custodia.
+**Sí, hace falta un servidor.** Para el sistema de RRHH solo, uno pequeño:
+es minúsculo en cómputo y delicado en datos, y lo caro no es la capacidad
+sino la custodia.
+
+**Con el control de bodega en el plan, la respuesta cambia**: hacen falta
+dos máquinas —una de trabajo y una de respaldo en caliente—, tienen que
+estar **dentro de la empresa** y no en la nube, y el gasto que de verdad
+decide el proyecto no es el servidor sino **la cobertura inalámbrica de la
+bodega y los terminales**. Vea la sección 9.
 
 Y hace falta decidir **dónde viven los datos de 350 personas reales**, que es
 la decisión que de verdad cuesta deshacer.
@@ -86,7 +92,11 @@ con una o dos terminales. Eso lo atiende de sobra un servidor modesto.
 
 ---
 
-## 4. ¿Necesita servidores? Sí: uno. Las tres formas de tenerlo
+## 4. ¿Necesita servidores? Las tres formas de tenerlo
+
+Las tres opciones se comparan abajo pensando en el sistema de RRHH. Si entra
+el control de bodega, la Opción A deja de ser una preferencia y pasa a ser la
+única viable: vea la sección 9.
 
 ### Opción A — Un servidor propio en ITSANET (recomendada)
 
@@ -269,17 +279,163 @@ computador: eso es lo urgente.
 
 ---
 
-## 9. Lo que yo decidiría
+## 9. El segundo proyecto: control de bodega (WMS)
 
-1. Un servidor propio en ITSANET, 8 núcleos / 16 GB / dos discos en espejo,
-   con UPS. Opción A.
-2. Respaldos cifrados fuera de la oficina. Opción C.
-3. PostgreSQL propio. **No** MySQL.
-4. HTTPS desde el primer día.
-5. Docker Compose para que el sexto proyecto de RI se despliegue como el
-   primero.
+Esto cambia el dimensionamiento. No la arquitectura, pero sí el tamaño del
+equipo y, sobre todo, **dónde tiene que estar**.
 
-La inversión está dominada por una compra de orden de **USD 1.500 a 2.500**
-una sola vez, más unos dólares al mes de respaldo. Para un sistema que
-sostiene el expediente laboral de 351 personas, es barato; lo que sale caro
-es la alternativa de dejarlo donde está.
+### Por qué no se parece al sistema de RRHH
+
+| | RRHH | Bodega |
+|---|---|---|
+| Uso | episódico: 2 o 3 veces al año por persona | continuo, todo el turno |
+| Usuarios a la vez | 20 a 30 en el pico | todos los que están en piso |
+| Si se cae | molesta; se tramita mañana | **para la operación** |
+| Datos al año | ~10 MB | cientos de MB |
+| Qué pasa con un error | un saldo mal | **stock que no existe** |
+
+La planilla dice que **ALMACENAMIENTO tiene 136 personas** y DISTRIBUCIÓN 37.
+Aunque solo una parte esté con terminal en mano, son decenas de dispositivos
+golpeando el servidor sin parar durante el turno. Eso es otro régimen de
+trabajo, no el mismo con más gente.
+
+### Lo que de verdad exige cada criterio suyo
+
+| Criterio | Lo que obliga a tener |
+|---|---|
+| Rotación 365 días, promedio diario, pedido semanal | Histórico de movimientos de un año entero, consultable rápido. Es el dato que más va a pesar. |
+| **FIFO** | Fecha de ingreso **por lote y por posición**, y una asignación que tome siempre el más viejo **bloqueando la fila** para que dos preparadores no se lleven el mismo lote. |
+| Posiciones de Abastecimiento y Picking, y segregar lo que no está «Disponible» | Un estado por posición y por lote (disponible, cuarentena, dañado, vencido) con la regla **en la base**, no en la pantalla. |
+| Ordenar posiciones para optimizar el recorrido | Una secuencia de recorrido por pasillo, no el orden alfabético del código. |
+| Sugerir reposición por % de ocupación | Capacidad declarada por posición y ocupación calculada, no estimada a ojo. |
+| **Sincronizar stock en tiempo real al transferir** | **Transacciones.** Es el requisito que decide toda la arquitectura. |
+
+### El requisito que lo decide todo: «en tiempo real» y «sin errores»
+
+Usted dijo dos cosas: que los datos estén actualizados, y que no haya caídas
+ni errores. Hay que separarlas porque se resuelven en sitios distintos:
+
+**Los errores de información no los arregla un servidor más grande.** Los
+arregla que la base de datos **se niegue** a quedar en un estado imposible.
+En Excel, si dos personas transfieren el mismo pallet a la vez, gana el
+último que guarda y el stock queda mal sin que nadie se entere: no hay error,
+hay una celda con un número equivocado. En una base de datos con
+transacciones, la segunda operación **espera** a que termine la primera y
+después ve la realidad. Esa diferencia —no la velocidad, no la pantalla— es
+todo el valor de salir de Excel.
+
+Lo mismo con el FIFO: si la regla vive en una fórmula, se la salta cualquiera
+que escriba encima de la celda. Si vive en la base como una restricción, no
+se la salta nadie, ni por error ni con prisa.
+
+**Las caídas sí son infraestructura**, y ahí hay una consecuencia dura:
+
+> **Con un WMS, el servidor en la nube deja de ser una opción.** Si se cae el
+> enlace a internet y el stock vive afuera, la bodega **se detiene**: no se
+> puede recibir, ni reponer, ni preparar un pedido. El servidor tiene que
+> estar en la misma red que los terminales.
+
+Esto convierte la Opción A (servidor propio) de recomendación en **requisito**.
+
+### Lo que se suele olvidar y es lo que hace fracasar un WMS
+
+No es el servidor. Es esto, por orden de cuántos proyectos tumba:
+
+1. **Cobertura inalámbrica en los pasillos.** Entre racks metálicos, a tres
+   metros de altura, en cámaras frías. Un terminal que pierde la señal a
+   mitad de una transferencia es exactamente el error que usted quiere
+   evitar. **Haga un relevamiento de cobertura antes de comprar nada**: es
+   más barato que descubrirlo con la operación parada.
+2. **Los terminales.** Lector de código de barras con teclado físico y
+   batería para todo el turno. Un teléfono con una aplicación de cámara
+   funciona en la demostración y no en el quinto pallet de la mañana.
+3. **La codificación de posiciones.** Si hoy las posiciones no están
+   rotuladas con un código legible por máquina, ese es el primer proyecto, y
+   no es de informática.
+4. **Qué se hace cuando el terminal no tiene señal.** Hay que decidirlo
+   antes: o se bloquea la operación, o se trabaja en papel y se carga
+   después. La segunda opción trae de vuelta los errores que se querían
+   quitar, así que mi recomendación es cubrir bien la red y bloquear.
+
+### Cómo cambia el equipo que hay que comprar
+
+| | Solo RRHH | RRHH + bodega |
+|---|---|---|
+| CPU | 4 núcleos | **8 núcleos** |
+| RAM | 8 GB | **32 GB** |
+| Disco | 250 GB SSD | **2 × 960 GB NVMe en espejo** |
+| UPS | recomendable | **obligatoria, con apagado automático** |
+| Segundo servidor | no | **sí, de respaldo en caliente** |
+
+El segundo servidor merece explicación. Para RRHH, una caída de medio día es
+una molestia. Para la bodega, es la operación parada y camiones esperando.
+PostgreSQL sabe mantener una copia al día en otra máquina (replicación), y
+pasar a la copia es cuestión de minutos. **No es alta disponibilidad
+automática, y está bien que no lo sea**: automatizar el relevo trae sus
+propios modos de falla y aquí no se justifica. Lo que se necesita es que
+exista la copia y que alguien sepa el procedimiento.
+
+Orden de magnitud con el segundo equipo y la UPS: **USD 4.000 a 7.000** de
+inversión única, más el relevamiento y los puntos de acceso inalámbricos, más
+los terminales, que se cotizan aparte y suelen costar más que el servidor.
+
+### Esto refuerza el veredicto sobre PostgreSQL
+
+El WMS es, precisamente, el caso que **necesita** lo que MySQL no da bien:
+
+- **Transacciones con bloqueo de fila** para que dos preparadores no se lleven
+  el mismo lote. PostgreSQL lo resuelve con `SELECT ... FOR UPDATE SKIP
+  LOCKED`, que además deja que el segundo tome el siguiente lote en vez de
+  quedarse esperando: justo lo que quiere en un piso de bodega.
+- **Restricciones de exclusión** para que dos lotes no ocupen la misma
+  posición. MySQL no las tiene.
+- **Consultas de ventana** para el promedio móvil de 365 días sin recorrer la
+  tabla entera cada vez.
+
+Si ya iba a tener PostgreSQL por el sistema de RRHH, el WMS corre en el mismo
+motor, en otra base de datos, en el mismo servidor. Un motor, dos bases, dos
+aplicaciones.
+
+### Lo que yo haría con el WMS, antes de escribir código
+
+1. **Relevamiento de cobertura inalámbrica** en la bodega. Primero.
+2. **Inventario de posiciones**: cuántas, cómo se llaman, cuál es el recorrido
+   real, cuál es la capacidad de cada una. Sin esto no hay optimización de
+   recorrido ni porcentaje de ocupación que valga.
+3. **El Excel actual, completo, con sus fórmulas.** Es la especificación que
+   ya existe y está probada por el uso: ahí está el criterio de rotación, el
+   de pedido semanal y las excepciones que nadie escribió nunca.
+4. Recién entonces, el modelo de datos y las primeras pantallas.
+
+El orden importa: un WMS construido sin los pasos 1 y 2 se entrega, se prueba
+bien en la oficina y fracasa en el pasillo.
+
+---
+
+## 10. Lo que yo decidiría
+
+1. **Un servidor propio en ITSANET**, no en la nube. Con el WMS en el plan
+   esto deja de ser preferencia y pasa a ser requisito: si se cae el enlace,
+   la bodega se para.
+2. **8 núcleos / 32 GB / dos NVMe en espejo**, con UPS y apagado automático.
+   Dimensionado para la bodega, que es lo exigente; RRHH va de pasajero.
+3. **Un segundo servidor de respaldo en caliente**, con la copia de
+   PostgreSQL al día y un procedimiento escrito de relevo. Sin automatizarlo.
+4. **Respaldos cifrados fuera de la oficina**, con restauración de prueba
+   cada tres meses.
+5. **PostgreSQL propio. No MySQL.** Para RRHH porque las 55 políticas de
+   seguridad por fila no tienen equivalente; para la bodega porque el bloqueo
+   de filas y las restricciones de exclusión son justo lo que impide vender
+   dos veces el mismo lote.
+6. **HTTPS desde el primer día**, con proxy inverso.
+7. **Docker Compose**, para que el tercer proyecto de RI se despliegue como
+   el primero.
+8. Antes de una línea de código del WMS: **relevamiento de cobertura
+   inalámbrica, inventario de posiciones y el Excel actual completo.**
+
+Orden de magnitud de la inversión única: **USD 4.000 a 7.000** en servidores
+y UPS, más los puntos de acceso y los terminales de bodega, que se cotizan
+aparte y suelen pesar más que el servidor. Para sostener el expediente
+laboral de 351 personas y el stock de la operación, es barato; lo caro es
+seguir con el stock en una hoja de cálculo y el sistema de RRHH en un
+computador personal.
