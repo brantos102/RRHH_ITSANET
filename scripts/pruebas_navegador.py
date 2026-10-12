@@ -1279,6 +1279,85 @@ async def recorrido_papeles(nav, capturas) -> Paso:
     return paso
 
 
+async def recorrido_indicadores(nav, capturas) -> Paso:
+    """El tablero de indicadores, y lo que NO puede aparecer en él.
+
+    Dos cosas se miran aquí. Que las cifras lleguen a la pantalla —un tablero
+    que se queda en «Calculando…» es peor que no tenerlo—, y que no se escape
+    ni un nombre: son agregados, y quién está de vacaciones es el calendario
+    del equipo, que tiene sus propios permisos.
+
+    Y que apagar un indicador lo apague de verdad. Si la casilla no hiciera
+    nada, el tablero dejaría de ser configurable el primer día que alguien lo
+    intentara.
+    """
+    from app.db import ejecutar, obtener_todos, obtener_uno
+
+    paso = Paso("indicadores")
+
+    pg = await (await nav.new_context(viewport={"width": 1280, "height": 1100})).new_page()
+    errores: list[str] = []
+    pg.on("console", lambda m: errores.append(m.text) if m.type == "error" else None)
+    await _entrar(pg, ADMIN)
+    await pg.goto(f"{FRONTEND}/indicadores.html")
+    await pg.wait_for_selector("#tablero article", timeout=15000)
+    await pg.wait_for_timeout(600)
+
+    tarjetas = await pg.locator("#tablero article").count()
+    if tarjetas < 9:
+        raise Falla(f"El tablero pinta {tarjetas} indicadores y tiene que pintar nueve.")
+    paso.ok(f"los {tarjetas} indicadores se calculan y se pintan")
+
+    # Ninguna cifra en blanco: un hueco en un tablero se lee como un cero.
+    for i in range(tarjetas):
+        cifra = (await pg.locator("#tablero article p.text-3xl").nth(i).inner_text()).strip()
+        if not cifra or cifra == "—":
+            titulo = await pg.locator("#tablero article p.text-sm").nth(i).inner_text()
+            raise Falla(f"El indicador «{titulo.strip()}» no trae cifra.")
+    paso.ok("y ninguno se queda sin número")
+
+    # --- Lo que NO puede estar: nombres y cédulas -------------------------
+    pantalla = await pg.inner_text("body")
+    gente = await obtener_todos(
+        "select nombre, cedula from public.users where activo limit 25")
+    for persona in gente:
+        if persona["cedula"] and persona["cedula"] in pantalla:
+            raise Falla(f"El tablero está mostrando la cédula {persona['cedula']}.")
+    paso.ok(f"sin una sola cédula en pantalla (se comprobaron {len(gente)})")
+
+    # --- Apagar un indicador lo apaga de verdad ---------------------------
+    await pg.click("#btn-configurar")
+    await pg.wait_for_selector("#modal-configurar[open]", timeout=8000)
+    await pg.wait_for_timeout(400)
+    if capturas:
+        await pg.screenshot(path=str(capturas / "indicadores.png"), full_page=True)
+
+    await pg.uncheck("[data-visible='pasivo']")
+    await pg.wait_for_timeout(1200)
+    await pg.click("[data-cerrar='modal-configurar']")
+    await pg.wait_for_timeout(500)
+    quedan = await pg.locator("#tablero article").count()
+    if quedan != tarjetas - 1:
+        raise Falla(f"Se apagó un indicador y siguen {quedan} de {tarjetas} en pantalla.")
+    paso.ok("apagar un indicador lo quita de la pantalla")
+
+    fila = await obtener_uno(
+        "select visible from public.tablero_bloques where clave = 'pasivo'")
+    if fila["visible"]:
+        raise Falla("La casilla se desmarcó en pantalla pero no se guardó.")
+    paso.ok("y queda guardado, no solo escondido")
+
+    if errores:
+        raise Falla(f"La consola del navegador tiene errores: {errores[0][:110]}")
+    paso.ok("y la consola del navegador queda limpia")
+
+    await ejecutar(
+        "update public.tablero_bloques set visible = true, actualizado_en = null, "
+        "actualizado_por = null where clave = 'pasivo'")
+    paso.ok("y se deja el tablero como estaba")
+    return paso
+
+
 async def recorrido_baja(nav, capturas) -> Paso:
     """Dar de baja a alguien, con la causa que el Código del Trabajo pide.
 
@@ -1632,6 +1711,8 @@ RECORRIDOS = {
     "acceso": (recorrido_acceso, "Entrar con cédula y código; el saldo sin decimales"),
     "papeles": (recorrido_papeles,
                 "Los dos papeles de vacaciones: se emiten, se abren y se imprimen"),
+    "indicadores": (recorrido_indicadores,
+                    "El tablero: se calcula, se configura y no enseña nombres"),
     "chat": (recorrido_chat, "Consulta a Talento Humano, su bandeja y la respuesta"),
     "ficha": (recorrido_ficha, "Ficha personal, quién decide cada dato, confirmación de RR.HH."),
     "garita": (recorrido_garita, "Salida, regreso y exceso sobre la hora autorizada"),

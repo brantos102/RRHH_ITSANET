@@ -270,6 +270,10 @@ export const api = {
   adminConfiguracion: () => peticion("/admin/configuracion"),
   baseLegal: () => peticion("/admin/base-legal"),
   papelesDeTodos: (parametros = "") => peticion(`/admin/papeles${parametros}`),
+  tablero: () => peticion("/tablero"),
+  tableroConfiguracion: () => peticion("/admin/tablero"),
+  cambiarBloqueTablero: (clave, cambio) =>
+    peticion(`/admin/tablero/${clave}`, { method: "PATCH", body: JSON.stringify(cambio) }),
   reemitirTrazabilidad: (userId, motivo) =>
     peticion(`/admin/papeles/${userId}/reemitir-trazabilidad`,
              { method: "POST", body: JSON.stringify({ motivo }) }),

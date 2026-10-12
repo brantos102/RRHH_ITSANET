@@ -55,6 +55,11 @@ const MODULOS = [
   {
     id: "informes", texto: "Informes", roles: ["jefe", "rrhh", "admin"],
     opciones: [
+      // Primero el tablero: es la pantalla desde la que se decide a cuál de
+      // los informes de abajo hay que entrar. Al revés —los informes
+      // primero— uno baja listas de trescientas filas para enterarse de algo
+      // que el tablero dice en una cifra.
+      { texto: "Indicadores", href: "indicadores.html", roles: ["rrhh", "admin"] },
       { texto: "Solicitudes", href: "informes.html" },
       { texto: "Por departamento", href: "informes.html#departamentos" },
     ],
@@ -176,13 +181,22 @@ export function montarNavegacion(contenedor, { activo = "panel", contadores = {}
   const LLAVE = "rrhh.menu.cerrados";
   const cerrados = new Set(leerCerrados());
 
+  /* Una opción suelta puede ser de menos gente que su grupo entero: el jefe
+     entra a Informes y no al tablero. Sin este filtro la vería, la pulsaría y
+     la pantalla la devolvería al panel sin decir por qué, que es la peor
+     forma de negar un permiso. */
+  const opcionesDe = (m) =>
+    (m.opciones || []).filter((o) => !o.roles || o.roles.includes(perfil.rol));
+
   const pendientesDe = (m) =>
-    (m.opciones || []).some((o) => o.contador && contadores[o.contador]);
+    opcionesDe(m).some((o) => o.contador && contadores[o.contador]);
 
   const abierto = (m) =>
     activo === m.id || pendientesDe(m) || !cerrados.has(m.id);
 
-  const seccion = (m) => m.opciones ? `
+  // Un grupo que se queda sin opciones para este rol no se dibuja: una
+  // cabecera que se despliega en nada es un callejón.
+  const seccion = (m) => (m.opciones && opcionesDe(m).length) ? `
     <div class="mt-2" data-grupo="${m.id}">
       <button type="button" data-plegar="${m.id}" aria-expanded="${abierto(m)}"
               class="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-[11px]
@@ -200,7 +214,7 @@ export function montarNavegacion(contenedor, { activo = "panel", contadores = {}
         </svg>
       </button>
       <div data-opciones class="${abierto(m) ? "" : "hidden"} mt-0.5">
-        ${m.opciones.map((o) => `
+        ${opcionesDe(m).map((o) => `
           <a href="${o.href}" class="flex items-center gap-2 rounded-lg py-1.5 pl-6 pr-3 text-sm
                                      text-slate-300 hover:bg-slate-800 hover:text-white">
             ${iconoOpcion(o.texto)}
