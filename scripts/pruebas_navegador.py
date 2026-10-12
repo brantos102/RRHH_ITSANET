@@ -1177,6 +1177,108 @@ async def recorrido_permiso_hoy(nav, capturas) -> Paso:
     return paso
 
 
+async def recorrido_papeles(nav, capturas) -> Paso:
+    """Los dos papeles que el colaborador firma y lleva a Talento Humano.
+
+    El riesgo real de esta pantalla no está en la base sino en el navegador:
+    el documento NO se puede enlazar con una URL normal porque la petición
+    lleva cabecera de autorización, y una pestaña nueva no la manda. Se
+    descarga con el token y se abre desde la memoria. Si algún día eso deja
+    de funcionar, el colaborador verá un botón que no hace nada, y eso no lo
+    detecta ninguna prueba de backend.
+
+    Se comprueban las dos reglas de emisión, que son lo que distingue un
+    documento del otro: el de la solicitud sale siempre, el historial se
+    firma una sola vez.
+    """
+    from datetime import date, timedelta
+
+    from app.db import ejecutar, obtener_todos, obtener_uno
+
+    paso = Paso("papeles")
+
+    persona = await obtener_uno(
+        "select id from public.users where cedula = %s", (EMPLEADA,))
+    await ejecutar("delete from public.informes_firmados where user_id = %s",
+                   (persona["id"],))
+
+    ctx = await nav.new_context(viewport={"width": 1280, "height": 1000})
+    pg = await ctx.new_page()
+    await _entrar(pg, EMPLEADA)
+    await pg.wait_for_selector("#saldo-dias", timeout=15000)
+
+    # --- Se piden unas vacaciones con la anticipación que exige la regla ---
+    lunes = date.today() + timedelta(days=(7 - date.today().weekday()) % 7 or 7, weeks=4)
+    await pg.click("[data-nueva='vacacion']")
+    await pg.wait_for_selector("#modal-solicitud[open]", timeout=8000)
+    await pg.fill("#fecha-inicio", lunes.isoformat())
+    await pg.fill("#fecha-fin", (lunes + timedelta(days=7)).isoformat())
+    await pg.fill("#descripcion", "Descanso programado con la familia")
+    await pg.wait_for_timeout(700)
+    await pg.click("#form-solicitud button[type=submit]")
+
+    # --- El papel se ofrece en el momento, no «en algún sitio del panel» ---
+    try:
+        await pg.wait_for_selector("#modal-papeles[open]", timeout=12000)
+    except Exception as exc:  # noqa: BLE001
+        error = await pg.inner_text("#error-solicitud") if await pg.locator(
+            "#error-solicitud").is_visible() else ""
+        raise Falla("Tras registrar las vacaciones no se ofrece el papel para firmar"
+                    + (f": la pantalla dice «{' '.join(error.split())}»" if error else "")
+                    ) from exc
+
+    ofrecidos = await pg.locator("#papeles-emitidos [data-imprimir]").count()
+    if ofrecidos < 2:
+        raise Falla("La primera vez tienen que ofrecerse los dos papeles: "
+                    f"el de la solicitud y la constancia de goce. Se ofrece {ofrecidos}.")
+    paso.ok("al registrar las vacaciones se ofrecen los dos papeles para firmar")
+
+    # --- Y se abre de verdad: es donde falla el token en una pestaña nueva ---
+    async with ctx.expect_page(timeout=15000) as nueva:
+        await pg.locator("#papeles-emitidos [data-imprimir]").first.click()
+    doc = await nueva.value
+    await doc.wait_for_load_state()
+    texto = await doc.inner_text("body")
+    if "Solicitud y constancia de vacaciones" not in texto:
+        raise Falla(f"El documento abierto no es el formulario de la solicitud: «{texto[:90]}»")
+    for seccion in ("IDENTIFICACIÓN DEL COLABORADOR", "DECLARACIÓN Y FIRMAS"):
+        if seccion not in texto.upper():
+            raise Falla(f"Al documento le falta la sección «{seccion}».")
+    paso.ok("el documento se abre e imprime con sus cuatro secciones")
+    if capturas:
+        await doc.screenshot(path=str(capturas / "papel-solicitud.png"), full_page=True)
+    await doc.close()
+
+    # --- La regla central: el historial se firma una sola vez ---
+    await pg.click("[data-cerrar='modal-papeles']")
+    antes = await obtener_todos(
+        """select tipo::text as tipo from public.informes_firmados
+            where user_id = %s and tipo = 'trazabilidad'""", (persona["id"],))
+    if len(antes) != 1:
+        raise Falla(f"La constancia de goce debería ser una y hay {len(antes)}.")
+    paso.ok("la constancia de goce se emitió una sola vez")
+
+    # --- Y queda en el panel para volver a imprimirla ---
+    await pg.reload()
+    await pg.wait_for_selector("#seccion-papeles:not(.hidden)", timeout=15000)
+    enlistados = await pg.locator("#lista-papeles [data-imprimir]").count()
+    if enlistados < 2:
+        raise Falla("El panel no deja volver a imprimir los papeles emitidos.")
+    paso.ok(f"quedan {enlistados} documentos a mano en el panel")
+
+    if capturas:
+        await pg.screenshot(path=str(capturas / "papeles-panel.png"), full_page=True)
+
+    fila = await obtener_uno(
+        """select r.id from public.requests r join public.users u on u.id = r.user_id
+            where u.cedula = %s order by r.created_at desc limit 1""", (EMPLEADA,))
+    await ejecutar("delete from public.informes_firmados where user_id = %s",
+                   (persona["id"],))
+    await ejecutar("delete from public.requests where id = %s", (fila["id"],))
+    paso.ok("y se deja la base como estaba")
+    return paso
+
+
 async def recorrido_baja(nav, capturas) -> Paso:
     """Dar de baja a alguien, con la causa que el Código del Trabajo pide.
 
@@ -1454,6 +1556,19 @@ async def recorrido_temporal(nav, capturas) -> Paso:
     await pg.wait_for_selector("#caja-sin-cerrar:not(.hidden)", timeout=15000)
     paso.ok("una jornada de ayer sin salida aparece señalada en rojo")
 
+    # El total de la semana cuenta lo de ESTA semana, y la jornada de ayer no
+    # siempre está en ella: los lunes, «ayer» es domingo y pertenece a la
+    # semana anterior. Esta comprobación se caía todos los lunes por el
+    # calendario y no por el código. Se reabre la jornada de hoy, que está en
+    # la semana en curso cualquier día que se corra el guion, y es además el
+    # caso que de verdad preocupa: horas de esta semana sin cerrar.
+    await ejecutar(
+        """update public.jornadas_temporales set salida_en = null, horas = null
+            where temporal_id = %s and fecha = current_date""",
+        (persona["id"],))
+    await pg.reload()
+    await pg.wait_for_selector("#caja-sin-cerrar:not(.hidden)", timeout=15000)
+
     aviso = await pg.inner_text("#semana-aviso")
     if "incompleta" not in aviso:
         raise Falla("Las horas de la semana no avisan de que están incompletas.")
@@ -1515,6 +1630,8 @@ async def recorrido_temporal(nav, capturas) -> Paso:
 
 RECORRIDOS = {
     "acceso": (recorrido_acceso, "Entrar con cédula y código; el saldo sin decimales"),
+    "papeles": (recorrido_papeles,
+                "Los dos papeles de vacaciones: se emiten, se abren y se imprimen"),
     "chat": (recorrido_chat, "Consulta a Talento Humano, su bandeja y la respuesta"),
     "ficha": (recorrido_ficha, "Ficha personal, quién decide cada dato, confirmación de RR.HH."),
     "garita": (recorrido_garita, "Salida, regreso y exceso sobre la hora autorizada"),

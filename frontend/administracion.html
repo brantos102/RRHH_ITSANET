@@ -25,6 +25,7 @@
     <button data-seccion="feriados" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Días no laborables</button>
     <button data-seccion="antiguedades" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Antigüedades</button>
     <button data-seccion="configuracion" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Configuración</button>
+    <button data-seccion="papeles" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Papeles firmados</button>
     <button data-seccion="bitacora" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Bitácora</button>
     <button data-seccion="cotejo" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Cotejo de la carga</button>
     <button data-seccion="cambios-ficha" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Cambios de ficha</button>
@@ -427,6 +428,41 @@
     </div>
     <p id="articulos-vacio" class="hidden px-5 py-8 text-center text-sm text-slate-500"></p>
     <div id="lista-base-legal" class="divide-y divide-slate-100"></div>
+  </section>
+
+  <!-- ===== Papeles firmados =====
+       Qué se emitió, quién lo imprimió y cuántas veces. Y el único sitio
+       desde donde se autoriza una segunda constancia de goce. -->
+  <section data-panel="papeles" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+      <div>
+        <h2 class="font-medium">Papeles para firmar</h2>
+        <p class="mt-0.5 text-sm text-slate-500">
+          Lo emitido, quién lo imprimió y cuántas veces.
+        </p>
+      </div>
+      <div class="flex gap-2">
+        <select id="filtro-papel-tipo"
+                class="rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                       focus:bg-white focus:ring-2 focus:ring-slate-900">
+          <option value="">Los dos tipos</option>
+          <option value="trazabilidad">Constancia de goce</option>
+          <option value="solicitud">Solicitud de vacaciones</option>
+        </select>
+        <input type="search" id="buscar-papel" placeholder="Nombre, cédula o folio"
+               class="w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900 sm:w-56">
+      </div>
+    </header>
+    <div class="border-b border-slate-200 bg-slate-50 px-5 py-3 text-xs leading-relaxed text-slate-600">
+      <strong>La constancia de goce se emite una sola vez.</strong> Es el acta de
+      que la empresa y el colaborador están de acuerdo en el punto de partida. Si
+      hace falta otra —se extravió la firmada, se corrigió un registro antiguo—,
+      se autoriza aquí con el motivo: nace con folio propio y <em>la anterior
+      sigue siendo un documento válido</em>, porque está firmada.
+    </div>
+    <p id="papeles-vacio" class="hidden px-5 py-8 text-center text-sm text-slate-500"></p>
+    <div id="tabla-papeles" class="overflow-x-auto"></div>
   </section>
 
   <!-- ===== Bitácora ===== -->

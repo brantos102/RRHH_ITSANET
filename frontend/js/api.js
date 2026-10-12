@@ -269,6 +269,10 @@ export const api = {
   quitarFeriado: (fecha) => peticion(`/admin/feriados/${fecha}`, { method: "DELETE" }),
   adminConfiguracion: () => peticion("/admin/configuracion"),
   baseLegal: () => peticion("/admin/base-legal"),
+  papelesDeTodos: (parametros = "") => peticion(`/admin/papeles${parametros}`),
+  reemitirTrazabilidad: (userId, motivo) =>
+    peticion(`/admin/papeles/${userId}/reemitir-trazabilidad`,
+             { method: "POST", body: JSON.stringify({ motivo }) }),
   cambiarArticulo: (codigo, cambio) =>
     peticion(`/admin/base-legal/${codigo}`, { method: "PATCH", body: JSON.stringify(cambio) }),
   cambiarParametro: (clave, valor) =>
@@ -315,6 +319,36 @@ export const api = {
 
   // La pantalla principal: qué bloques se ven, en qué orden y para qué roles.
   misBloques: () => peticion("/panel/bloques"),
+  /* ---------------------------------------------- papeles para firmar
+     Se descargan con el token y se abren en una pestaña nueva desde la
+     memoria del navegador. No se puede enlazar la URL directamente: la
+     petición lleva cabecera de autorización y una pestaña nueva no la
+     mandaría, así que el enlace daría 401 y el colaborador vería una
+     pantalla en blanco sin saber por qué. */
+  misPapeles: () => peticion("/papeles/mios"),
+  papelDeLaSolicitud: (id) => peticion(`/papeles/de-la-solicitud/${id}`),
+  asegurarTrazabilidad: () => peticion("/papeles/trazabilidad", { method: "POST" }),
+
+  async abrirPapel(id) {
+    const r = await fetch(`${API}/papeles/${id}.html`, {
+      headers: { Authorization: `Bearer ${sesion.token}` },
+    });
+    if (!r.ok) {
+      throw new ErrorApi("No se pudo preparar el documento para imprimir.", r.status);
+    }
+    const url = URL.createObjectURL(new Blob([await r.text()], { type: "text/html" }));
+    const ventana = window.open(url, "_blank");
+    if (!ventana) {
+      URL.revokeObjectURL(url);
+      throw new ErrorApi(
+        "El navegador bloqueó la ventana del documento. Permita las ventanas " +
+        "emergentes de este sitio y vuelva a intentarlo.", 0);
+    }
+    // Sin esto el documento queda en memoria mientras la pestaña viva.
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    return ventana;
+  },
+
   panelConfiguracion: () => peticion("/panel/configuracion"),
   panelCambiar: (clave, cambios) =>
     peticion(`/panel/configuracion/${clave}`,

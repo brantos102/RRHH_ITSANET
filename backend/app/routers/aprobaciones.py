@@ -224,14 +224,30 @@ async def pendientes(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[
         # Y también hace de jefe de su propio equipo: sin esto, una excepción
         # devuelta por la ruta invertida a un jefe con rol rrhh se quedaba sin
         # nadie que la viera.
+        #
+        # Y LO HUÉRFANO. Quien no tiene jefe asignado —quince de las 351
+        # personas de la planilla— generaba una solicitud en `pendiente_jefe`
+        # con `jefe_id` nulo. La bandeja del jefe filtra por `jefe_id = <el
+        # mío>` y nulo no es nadie; esta filtraba por `pendiente_rrhh`, que es
+        # un paso después. La solicitud existía, el colaborador la veía
+        # «pendiente» y no había una sola pantalla desde la que decidirla.
+        # Decidirla sí se podía: lo que faltaba era poder encontrarla.
         filtro = """(
             (r.estado = 'pendiente_rrhh' and coalesce(r.region, 'sierra') = %s)
+            or (r.estado = 'pendiente_jefe' and r.jefe_id is null
+                and coalesce(r.region, 'sierra') = %s)
             or (r.jefe_id = %s and r.estado = 'pendiente_jefe')
         )"""
-        parametros = (usuario.get("region") or "sierra", usuario["id"])
+        region = usuario.get("region") or "sierra"
+        parametros = (region, region, usuario["id"])
     elif usuario["rol"] == "admin":
-        # Administración ve todas las regiones: es quien cubre los huecos.
-        filtro = "(r.estado = 'pendiente_rrhh' or (r.jefe_id = %s and r.estado = 'pendiente_jefe'))"
+        # Administración ve todas las regiones: es quien cubre los huecos, y
+        # el hueco de quien no tiene jefe es justo uno de ellos.
+        filtro = """(
+            r.estado = 'pendiente_rrhh'
+            or (r.estado = 'pendiente_jefe' and r.jefe_id is null)
+            or (r.jefe_id = %s and r.estado = 'pendiente_jefe')
+        )"""
         parametros = (usuario["id"],)
     else:
         raise HTTPException(
@@ -249,6 +265,10 @@ async def pendientes(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[
                u.nombre as empleado, u.cedula, u.departamento, u.cargo, rp.nombre as reemplazo,
                u.dias_vacaciones as saldo_actual,
                pt.nombre as categoria, j.nombre as jefe_nombre,
+               -- Decidir por un jefe que NO EXISTE no es lo mismo que decidir
+               -- por uno que no contesta, y quien resuelve tiene que poder
+               -- distinguirlo antes de firmar.
+               r.jefe_id is null as sin_jefe,
                (select count(*) from public.request_attachments a where a.request_id = r.id) as adjuntos
         from public.requests r
         join public.users u on u.id = r.user_id

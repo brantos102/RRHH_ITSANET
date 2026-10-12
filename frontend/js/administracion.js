@@ -29,7 +29,7 @@ const avisar = (texto, error = false) => {
 const CARGADORES = {
   usuarios: cargarUsuarios, tipos: cargarTipos, feriados: cargarFeriados,
   antiguedades: cargarAntiguedades, configuracion: cargarConfiguracion,
-  bitacora: cargarBitacora, cotejo: cargarCotejo,
+  bitacora: cargarBitacora, cotejo: cargarCotejo, papeles: cargarPapelesFirmados,
   "cambios-ficha": cargarCambiosFicha, lineamientos: cargarLineamientos,
   jefaturas: cargarJefaturasAdmin, "talento-humano": cargarTalentoHumano,
   depuracion: cargarDepuracion,
@@ -766,6 +766,115 @@ async function cargarBaseLegal() {
   });
 }
 
+
+/* --------------------------------------------------------- papeles firmados
+   Lo emitido, quién lo imprimió y cuántas veces. Y el único sitio desde donde
+   se autoriza una segunda constancia de goce.
+
+   La reemisión no corrige ni reemplaza a la anterior: la anterior está
+   firmada y sigue siendo un documento válido. La nueva nace con su folio y
+   con el nombre de quien la autorizó impreso en el pie, que es lo que hace
+   falta para poder explicar en una auditoría por qué hay dos. */
+const TIPO_PAPEL = {
+  trazabilidad: "Constancia de goce",
+  solicitud: "Solicitud de vacaciones",
+};
+
+async function cargarPapelesFirmados() {
+  const tipo = $("filtro-papel-tipo").value;
+  const q = ($("buscar-papel").value || "").trim();
+  const partes = [];
+  if (tipo) partes.push(`tipo=${encodeURIComponent(tipo)}`);
+  if (q) partes.push(`q=${encodeURIComponent(q)}`);
+  const papeles = await api.papelesDeTodos(partes.length ? `?${partes.join("&")}` : "");
+
+  $("papeles-vacio").classList.toggle("hidden", papeles.length > 0);
+  if (!papeles.length) {
+    $("papeles-vacio").textContent = q || tipo
+      ? "Ningún papel coincide con esa búsqueda."
+      : "Todavía no se ha emitido ninguno. Salen solos al pedir vacaciones.";
+    $("tabla-papeles").innerHTML = "";
+    return;
+  }
+
+  $("tabla-papeles").innerHTML = `
+    <table class="w-full text-left text-sm">
+      <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+        <tr><th class="px-3 py-2.5">Colaborador</th><th class="px-3 py-2.5">Documento</th>
+            <th class="px-3 py-2.5">Folio</th><th class="px-3 py-2.5">Emitido</th>
+            <th class="px-3 py-2.5">Impresiones</th><th class="px-3 py-2.5"></th></tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        ${papeles.map((p) => `
+          <tr class="hover:bg-slate-50 ${p.es_el_vigente ? "" : "text-slate-400"}">
+            <td class="px-3 py-2.5">
+              <div class="font-medium">${esc(p.nombre)}</div>
+              <div class="text-xs text-slate-500">${esc(p.cedula)}
+                ${p.departamento ? " · " + esc(p.departamento) : ""}</div>
+            </td>
+            <td class="px-3 py-2.5">
+              ${esc(TIPO_PAPEL[p.tipo] || p.tipo)}
+              ${p.es_reemision
+                ? `<div class="text-xs text-amber-700">reemisión · ${esc(p.autorizado_por || "")}</div>
+                   <div class="text-xs text-slate-500">${esc(p.autorizacion_motivo || "")}</div>`
+                : ""}
+              ${p.solicitud_folio ? `<div class="text-xs text-slate-500">solicitud N.º ${esc(p.solicitud_folio)}</div>` : ""}
+            </td>
+            <td class="px-3 py-2.5 font-mono text-xs">${esc(p.folio)}</td>
+            <td class="px-3 py-2.5 whitespace-nowrap text-slate-500">${fechaHora(p.emitido_en)}</td>
+            <td class="px-3 py-2.5 tabular-nums">
+              ${Number(p.impresiones) || 0}
+              ${p.ultima_impresion
+                ? `<div class="text-xs text-slate-400">última: ${fechaHora(p.ultima_impresion)}</div>`
+                : `<div class="text-xs text-rose-700">sin imprimir</div>`}
+            </td>
+            <td class="px-3 py-2.5 text-right whitespace-nowrap">
+              <button type="button" data-ver-papel="${esc(p.id)}"
+                      class="rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200">
+                Ver</button>
+              ${p.tipo === "trazabilidad" && p.es_el_vigente
+                ? `<button type="button" data-reemitir="${esc(p.user_id || "")}"
+                           data-nombre="${esc(p.nombre)}"
+                           class="rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-white">
+                     Reemitir</button>`
+                : ""}
+            </td>
+          </tr>`).join("")}
+      </tbody>
+    </table>`;
+}
+
+document.addEventListener("click", async (e) => {
+  const ver = e.target.closest("[data-ver-papel]");
+  if (ver) {
+    try {
+      await api.abrirPapel(ver.dataset.verPapel);
+    } catch (err) {
+      avisar(err.message, true);
+    }
+    return;
+  }
+
+  const reemitir = e.target.closest("[data-reemitir]");
+  if (!reemitir) return;
+  const motivo = prompt(
+    `Nueva constancia de goce para ${reemitir.dataset.nombre}.\n\n` +
+    "La anterior está firmada y sigue siendo válida; esta nace con su propio " +
+    "folio y con su nombre como quien la autorizó.\n\n" +
+    "¿Por qué se reemite? (mínimo 15 caracteres)",
+    "El colaborador extravió el ejemplar firmado.");
+  if (motivo === null) return;
+  if (motivo.trim().length < 15) {
+    return avisar("Explique el motivo en al menos 15 caracteres.", true);
+  }
+  try {
+    avisar((await api.reemitirTrazabilidad(reemitir.dataset.reemitir, motivo.trim())).mensaje);
+    await cargarPapelesFirmados();
+  } catch (err) {
+    avisar(err.message, true);
+  }
+});
+
 /* ------------------------------------------------------------- bitácora */
 async function cargarBitacora() {
   const registros = await api.bitacora(100);
@@ -797,6 +906,15 @@ async function cargarBitacora() {
 }
 
 $("filtro-bitacora").addEventListener("input", () => cargarBitacora());
+
+// Esta búsqueda va al servidor y no sobre lo pintado: la consulta trae como
+// mucho doscientos papeles, y filtrar solo esos escondería el resto.
+let temporizadorPapeles;
+["buscar-papel", "filtro-papel-tipo"].forEach((id) =>
+  $(id).addEventListener("input", () => {
+    clearTimeout(temporizadorPapeles);
+    temporizadorPapeles = setTimeout(() => cargarPapelesFirmados(), 300);
+  }));
 
 /* ----------------------------------------------------------- lineamientos
 

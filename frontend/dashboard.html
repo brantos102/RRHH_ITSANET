@@ -212,6 +212,23 @@
     <ul id="lista-logros" class="mt-3 space-y-2"></ul>
   </section>
 
+  <!-- ================= Papeles para firmar =================
+       Los dos documentos que se imprimen, se firman a mano y se presentan en
+       Talento Humano. Van en su propio bloque y no escondidos dentro del
+       historial: son un trámite pendiente, no un dato de consulta. -->
+  <section id="seccion-papeles" data-bloque="papeles"
+           class="hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 class="font-medium">Documentos para firmar</h2>
+        <p class="mt-0.5 text-sm text-slate-500">
+          Imprímalos, fírmelos a mano y preséntelos en Talento Humano.
+        </p>
+      </div>
+    </div>
+    <div id="lista-papeles" class="mt-3 divide-y divide-slate-100"></div>
+  </section>
+
   <!-- ================= Solicitudes ================= -->
   <section data-bloque="solicitudes">
     <div class="mb-3 flex flex-wrap items-center justify-between gap-3 px-1">
@@ -519,6 +536,29 @@
      vacaciones la última vez?»— y hasta hoy el sistema no podía responderla.
      Lo de antes de este sistema y lo tramitado aquí van en la misma línea de
      tiempo, pero cada uno dice de dónde viene. -->
+<!-- ================= Papeles recién emitidos =================
+     Aparece justo después de registrar unas vacaciones. Es el momento en que
+     la persona todavía está frente a la pantalla: si no se le ofrece aquí,
+     el papel no se imprime y la firma manuscrita —que es lo que acredita que
+     pidió ella y no un tercero— no llega nunca al expediente. -->
+<dialog id="modal-papeles" class="w-[min(100vw-1.5rem,34rem)] rounded-2xl p-0">
+  <div class="max-h-[85dvh] overflow-y-auto">
+    <header class="border-b border-slate-200 px-5 py-4">
+      <h2 class="font-semibold">Su solicitud quedó registrada</h2>
+      <p class="mt-0.5 text-sm text-slate-500">
+        Falta un paso que no se puede hacer desde el sistema: la firma.
+      </p>
+    </header>
+    <div id="papeles-emitidos" class="divide-y divide-slate-100"></div>
+    <footer class="flex justify-end gap-2 border-t border-slate-200 px-5 py-3">
+      <button type="button" data-cerrar="modal-papeles"
+              class="rounded-xl px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">
+        Después</button>
+    </footer>
+  </div>
+</dialog>
+
+<!-- ================= Historial de vacaciones ================= -->
 <dialog id="modal-historial" class="w-[min(100vw-1.5rem,38rem)] rounded-2xl p-0">
   <div class="max-h-[85dvh] overflow-y-auto">
     <header class="sticky top-0 flex items-start justify-between gap-3 border-b border-slate-200 bg-white px-5 py-4">

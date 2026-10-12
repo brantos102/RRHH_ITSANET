@@ -95,6 +95,9 @@ async function cargar() {
   pintarCalendario();
   pintarPendientes();
   pintarAnulaciones();
+  // No se espera: el panel no puede quedarse en blanco porque la lista de
+  // documentos tarde. Enciende su propia sección cuando llega.
+  cargarPapeles();
   // Al final: los pintores de arriba encienden y apagan sus propias
   // secciones, y quien decide lo que se ve tiene que hablar el último.
   aplicarConfiguracionDelPanel(bloques);
@@ -585,6 +588,15 @@ function pintarPendientes() {
     const horas = s.hora_inicio ? ` · ${s.hora_inicio} a ${s.hora_fin}` : "";
 
     const banderas = [];
+    // Primero el que cambia QUIÉN decide: quien lee esta tarjeta está a punto
+    // de firmar en lugar de un jefe que no existe, y tiene que saberlo antes
+    // de pulsar. Las demás banderas hablan de la solicitud; esta, del
+    // expediente de la persona, y se arregla en la ficha, no aquí.
+    if (s.sin_jefe) {
+      banderas.push(["rose",
+        "Sin jefe asignado: usted decide la etapa de jefatura. " +
+        "Asígnele un jefe en su ficha para que las próximas no queden sueltas"]);
+    }
     if (s.es_adelanto) banderas.push(["amber", "Supera su saldo: días adelantados"]);
     if (s.tipo === "permiso" && !s.adjuntos) banderas.push(["rose", "Sin respaldo adjunto"]);
     if (!s.reemplazo) banderas.push(["slate", "Sin reemplazo asignado"]);
@@ -855,6 +867,134 @@ $("btn-detalle-periodos").addEventListener("click", () => {
   abrir("modal-saldo");
 });
 
+
+
+/* ---------------------------------------------------- papeles para firmar
+   Dos documentos distintos con reglas de emisión opuestas, y la pantalla
+   tiene que explicar la diferencia sin obligar a nadie a leer el reglamento:
+
+     Constancia de goce   el historial completo. Se firma UNA vez. Si hace
+                          falta otra, la autoriza Talento Humano.
+     Solicitud            lo pedido en esa sesión. Sale con cada solicitud y
+                          se puede reimprimir cuantas veces haga falta.
+
+   La firma manuscrita no es burocracia: es lo único que acredita que quien
+   pidió es la persona y no un tercero que encontró la sesión abierta. */
+const PAPELES = {
+  trazabilidad: {
+    nombre: "Constancia de goce de vacaciones",
+    que_es: "Su historial completo de vacaciones. Revíselo antes de firmar: " +
+            "si algo no cuadra, dígalo en Talento Humano antes de firmarlo.",
+    una_vez: true,
+  },
+  solicitud: {
+    nombre: "Solicitud y constancia de vacaciones",
+    que_es: "Lo que pidió en esta solicitud. Su firma a mano es lo que " +
+            "confirma en Talento Humano que la pidió usted.",
+    una_vez: false,
+  },
+};
+
+function filaDePapel(p, destacado = false) {
+  const d = PAPELES[p.tipo] || { nombre: p.tipo, que_es: "" };
+  const veces = Number(p.impresiones || 0);
+  return `
+    <div class="flex flex-wrap items-start justify-between gap-3 px-5 py-4
+                ${destacado ? "bg-slate-50" : ""}">
+      <div class="min-w-0 flex-1">
+        <p class="font-medium">${esc(d.nombre)}</p>
+        <p class="mt-0.5 text-sm text-slate-600">${esc(d.que_es)}</p>
+        <p class="mt-1 text-xs text-slate-400">
+          Folio ${esc(p.folio)} · emitido el ${fecha(p.emitido_en)}
+          ${p.es_reemision ? " · reemisión autorizada" : ""}
+          ${veces ? ` · impreso ${veces} ${veces === 1 ? "vez" : "veces"}` : ""}
+        </p>
+      </div>
+      <button type="button" data-imprimir="${esc(p.id)}"
+              class="shrink-0 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white
+                     hover:bg-slate-800">
+        ${veces ? "Volver a imprimir" : "Imprimir"}</button>
+    </div>`;
+}
+
+async function imprimirPapel(id, boton) {
+  const antes = boton.textContent;
+  boton.disabled = true;
+  boton.textContent = "Preparando…";
+  try {
+    await api.abrirPapel(id);
+  } catch (err) {
+    avisar(err.message, true);
+  } finally {
+    boton.disabled = false;
+    boton.textContent = antes;
+  }
+}
+
+document.addEventListener("click", (e) => {
+  const boton = e.target.closest("[data-imprimir]");
+  if (boton) imprimirPapel(boton.dataset.imprimir, boton);
+});
+
+async function cargarPapeles() {
+  let cuerpo;
+  try {
+    cuerpo = await api.misPapeles();
+  } catch {
+    // Un fallo aquí no puede tumbar el panel: son documentos para imprimir,
+    // no el saldo.
+    return;
+  }
+  const papeles = cuerpo.papeles || [];
+  const seccion = $("seccion-papeles");
+  if (!seccion) return;
+  seccion.classList.toggle("hidden", papeles.length === 0);
+  if (!papeles.length) return;
+
+  // Solo el vigente de cada tipo, y de las solicitudes las cinco últimas: la
+  // lista completa de alguien con veinte solicitudes no ayuda a nadie.
+  const traza = papeles.filter((p) => p.tipo === "trazabilidad").slice(0, 1);
+  const solicitudes = papeles.filter((p) => p.tipo === "solicitud").slice(0, 5);
+  $("lista-papeles").innerHTML =
+    [...traza, ...solicitudes].map((p) => filaDePapel(p)).join("") +
+    (cuerpo.trazabilidad_reemision === "autorizada"
+      ? `<p class="px-5 pt-3 text-xs text-slate-400">
+           La constancia de goce se emite una sola vez. Si necesita otra
+           —porque extravió la firmada o porque se corrigió un registro—,
+           Talento Humano la autoriza y queda con su propio folio.</p>`
+      : "");
+}
+
+/* Lo que se muestra al terminar de pedir vacaciones. El momento importa: es
+   cuando la persona sigue frente a la pantalla. */
+async function ofrecerPapeles(solicitudId) {
+  try {
+    const [cuerpo, dePedido] = await Promise.all([
+      api.misPapeles(),
+      api.papelDeLaSolicitud(solicitudId),
+    ]);
+    const papeles = cuerpo.papeles || [];
+    const traza = papeles.find((p) => p.tipo === "trazabilidad");
+    const suyo = papeles.find((p) => p.id === dePedido.id) || dePedido;
+
+    // La constancia de goce solo se ofrece la primera vez: si ya se firmó,
+    // volver a sacarla en cada solicitud enseña a ignorar el aviso.
+    const primeraVez = traza && Number(traza.impresiones || 0) === 0;
+    const mostrar = primeraVez ? [suyo, traza] : [suyo];
+
+    $("papeles-emitidos").innerHTML =
+      mostrar.map((p, i) => filaDePapel(p, i === 0)).join("") +
+      (primeraVez
+        ? `<p class="px-5 py-3 text-xs text-slate-500">
+             La constancia de goce se emite <b>una sola vez</b>, y esta es la
+             suya. Revísela antes de firmarla.</p>`
+        : "");
+    abrir("modal-papeles");
+  } catch {
+    // Si no se pudo, la solicitud ya quedó registrada igual y los documentos
+    // siguen en el panel. No se avisa de un fallo que no bloquea nada.
+  }
+}
 
 /* ------------------------------------------------------- historial de vacaciones
    «¿Cuándo tomé vacaciones la última vez?» es la pregunta que cualquiera se
@@ -1563,6 +1703,9 @@ $("form-solicitud").addEventListener("submit", async (e) => {
           ? "el archivo" : "los archivos"}: entregue el respaldo a Talento Humano.`
       : respuesta.mensaje);
     await cargar();
+    // El papel que hay que firmar, en el único momento en que la persona
+    // todavía está mirando la pantalla.
+    if (tipo === "vacacion") await ofrecerPapeles(respuesta.id ?? solicitudId);
   } catch (err) {
     error.innerHTML = esc(err.message);
     // Si la base sugiere otras fechas, se ofrecen con un clic
