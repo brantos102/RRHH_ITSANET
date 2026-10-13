@@ -40,6 +40,33 @@ POR_RESTRICCION = {
         "La cédula del familiar no es válida.",
 }
 
+# Lo mismo para las restricciones de UNICIDAD. «El registro ya existe» es
+# cierto y no sirve de nada: quien lo lee no sabe qué campo chocó, y si el
+# formulario tiene diez campos se queda probando a ciegas. Pasó corrigiendo
+# el correo de un colaborador, donde además el choque era con OTRA ficha que
+# no se veía en pantalla.
+POR_UNICIDAD = {
+    "users_email_key":
+        "Ese correo ya está registrado a nombre de otra persona.",
+    "users_cedula_key":
+        "Ya hay una ficha con esa cédula.",
+    "users_auth_user_id_key":
+        "Esa cuenta de acceso ya está vinculada a otra ficha.",
+    "informes_firmados_folio_key":
+        "Ya existe un documento con ese folio.",
+    "idx_trazabilidad_una_sola_vez":
+        "Esa persona ya tiene su constancia de goce. Para emitir otra hace falta "
+        "autorizarla desde Papeles firmados, dejando el motivo.",
+    "app_config_pkey":
+        "Ese parámetro ya existe.",
+    "panel_bloques_pkey":
+        "Ese bloque del panel ya existe.",
+    "tablero_bloques_pkey":
+        "Ese indicador del tablero ya existe.",
+    "jornada_unica_por_dia":
+        "Esa persona ya tiene una jornada registrada ese día.",
+}
+
 
 def traducir(exc: Exception) -> HTTPException:
     """Convierte un error de la base en HTTPException con mensaje legible."""
@@ -80,8 +107,13 @@ def traducir(exc: Exception) -> HTTPException:
                              detail={"mensaje": mensaje, "restriccion": nombre})
 
     if isinstance(exc, pg.UniqueViolation):
+        nombre = exc.diag.constraint_name or ""
+        mensaje = POR_UNICIDAD.get(nombre, "El registro ya existe.")
+        # El nombre de la restricción viaja también: quien atiende el
+        # incidente lo necesita, y sin él hay que ir al registro del servidor
+        # con la hora aproximada y buscar a mano.
         return HTTPException(status_code=status.HTTP_409_CONFLICT,
-                             detail={"mensaje": "El registro ya existe."})
+                             detail={"mensaje": mensaje, "restriccion": nombre})
 
     if isinstance(exc, pg.InsufficientPrivilege):
         return HTTPException(status_code=status.HTTP_403_FORBIDDEN,

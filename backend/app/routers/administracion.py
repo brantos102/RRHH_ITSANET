@@ -127,6 +127,56 @@ async def listar_usuarios(usuario: RRHH, q: str = "", incluir_inactivos: bool = 
     )
 
 
+async def _choque_de_ficha(exc: Exception, email: str | None = None,
+                           cedula: str | None = None) -> HTTPException:
+    """Un choque de unicidad en `users`, dicho con nombre y apellido.
+
+    «El registro ya existe» es cierto y no sirve: quien corrige el correo de
+    un colaborador se queda probando a ciegas, porque la ficha con la que
+    choca NO está en la pantalla —puede ser de otra área, o estar inactiva—.
+    Esto busca al que lo tiene y lo nombra.
+
+    Nombrarlo es seguro aquí: estas rutas son de Talento Humano y
+    Administración, que ya ven la lista completa del personal. No se expone
+    nada que quien pregunta no pudiera mirar por su cuenta.
+    """
+    import psycopg
+
+    if not isinstance(exc, psycopg.errors.UniqueViolation):
+        return traducir(exc)
+
+    restriccion = exc.diag.constraint_name or ""
+    if restriccion == "users_email_key" and email:
+        # `email` es citext: choca ignorando mayúsculas, así que la búsqueda
+        # tiene que hacerlo igual o diría «no encuentro a nadie».
+        duena = await obtener_uno(
+            """select nombre, cedula, activo, departamento
+                 from public.users where email = %s""", (email,))
+        if duena:
+            estado = "" if duena["activo"] else " (ficha inactiva)"
+            area = f", {duena['departamento']}" if duena["departamento"] else ""
+            return HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
+                "mensaje": (
+                    f"Ese correo ya está registrado a nombre de {duena['nombre']} "
+                    f"— cédula {duena['cedula']}{area}{estado}. "
+                    "Un correo no puede estar en dos fichas: corrija primero esa."),
+                "restriccion": restriccion,
+                "lo_tiene": {"nombre": duena["nombre"], "cedula": duena["cedula"],
+                             "activo": duena["activo"]}})
+
+    if restriccion == "users_cedula_key" and cedula:
+        duena = await obtener_uno(
+            "select nombre, activo from public.users where cedula = %s", (cedula,))
+        if duena:
+            estado = "" if duena["activo"] else " Esa ficha está inactiva: puede reactivarla."
+            return HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
+                "mensaje": (f"Ya hay una ficha con la cédula {cedula}, "
+                            f"a nombre de {duena['nombre']}.{estado}"),
+                "restriccion": restriccion})
+
+    return traducir(exc)
+
+
 @router.post("/admin/usuarios", status_code=status.HTTP_201_CREATED)
 async def crear_usuario(datos: NuevoUsuario, request: Request, usuario: RRHH) -> dict:
     try:
@@ -149,7 +199,7 @@ async def crear_usuario(datos: NuevoUsuario, request: Request, usuario: RRHH) ->
         else:
             await obtener_uno("select public.generar_periodos_vacaciones(%s) as ok", (creado["id"],))
     except Exception as exc:  # noqa: BLE001
-        raise traducir(exc) from exc
+        raise await _choque_de_ficha(exc, email=str(datos.email), cedula=datos.cedula) from exc
 
     await registrar(request, "usuario_creado", user_id=str(usuario["id"]), cedula=usuario["cedula"],
                     entidad="users", entidad_id=str(creado["id"]),
@@ -201,7 +251,7 @@ async def editar_usuario(user_id: uuid.UUID, cambios: CambioUsuario,
             {**campos, "id": user_id},
         )
     except Exception as exc:  # noqa: BLE001
-        raise traducir(exc) from exc
+        raise await _choque_de_ficha(exc, email=campos.get("email")) from exc
 
     if actualizado is None:
         raise HTTPException(status_code=404, detail={"mensaje": "No se encontró a esa persona."})
