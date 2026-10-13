@@ -1,0 +1,36 @@
+# Despliegue en Render. Las variables marcadas sync:false se piden al crear
+# el servicio y no quedan guardadas en el repositorio.
+services:
+  - type: web
+    name: rrhh-itsanet-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    region: ohio
+    plan: starter
+    healthCheckPath: /salud
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: EMAIL_BACKEND
+        value: smtp
+      - key: ENTORNO
+        value: produccion
+      - key: APP_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false

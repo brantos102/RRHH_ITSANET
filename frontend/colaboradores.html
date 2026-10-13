@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>Períodos de mis colaboradores</title>
+<link rel="icon" type="image/png" href="img/icono.png">
+<link rel="stylesheet" href="vendor/tailwind.css">
+<script src="config.js"></script>
+<!-- Ajustes de ESTA máquina, fuera del repositorio: el puerto del backend si
+     no es el 8000, una URL distinta. Si el archivo no existe no pasa nada
+     —el servidor de la interfaz devuelve vacío—. Vea config.local.js.ejemplo. -->
+<script src="config.local.js"></script>
+</head>
+<body class="min-h-dvh bg-slate-100 text-slate-900 antialiased">
+<div id="barra"></div>
+<main class="mx-auto max-w-5xl px-4 py-5 pb-24">
+  <section class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+      <div>
+        <h1 class="font-medium">Períodos de mis colaboradores</h1>
+        <p class="mt-0.5 text-sm text-slate-500">
+          Saldo, antigüedad y fines de semana pendientes de la gente a su cargo
+        </p>
+      </div>
+      <input type="search" id="buscar-colaborador" placeholder="Nombre, cédula o cargo"
+               class="w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900 sm:w-56">
+    </header>
+    <p id="colaboradores-vacio" class="hidden px-5 py-8 text-center text-sm text-slate-500"></p>
+    <div id="tabla" class="overflow-x-auto">
+      <p class="px-5 py-10 text-center text-sm text-slate-500">Cargando…</p>
+    </div>
+  </section>
+</main>
+<script type="module">
+import { api, sesion, esc, fecha } from "./js/api.js";
+import { montarNavegacion } from "./js/navegacion.js";
+import { montarBuscador } from "./js/buscador.js";
+
+if (!sesion.vigente) location.replace("index.html");
+if (!["jefe", "rrhh", "admin"].includes(sesion.perfil?.rol)) location.replace("dashboard.html");
+montarNavegacion(document.getElementById("barra"), { activo: "jefe" });
+
+const hoy = new Date();
+try {
+  const gente = await api.colaboradores();
+  /* La columna «Vence» solo existe si la caducidad existe.
+
+     El sistema llegó a mostrar «vence el 31 may 2030» a alguien que había
+     entrado cuatro meses antes. Esa fecha salía de aplicar el Art. 75 como
+     si obligara a extinguir días, y no obliga: permite acumular hasta tres
+     años. La empresa no extingue nada, así que la columna no tiene qué
+     decir, y una columna entera de guiones invita a preguntarse qué falta.
+     Se muestra solo cuando la regla está en vigor de verdad. */
+  const hayCaducidad = gente.some((p) => p.caducidad_activa);
+  document.getElementById("tabla").innerHTML = gente.length ? `
+    <table class="w-full text-left text-sm">
+      <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+        <tr><th class="px-3 py-2.5">Colaborador</th><th class="px-3 py-2.5">Cargo</th>
+            <th class="px-3 py-2.5">Ingreso</th><th class="px-3 py-2.5 text-right">Años</th>
+            <th class="px-3 py-2.5 text-right">Saldo</th>
+            <th class="px-3 py-2.5 text-right">Fines de semana</th>
+            ${hayCaducidad ? `<th class="px-3 py-2.5">Vence</th>` : ""}
+            <th class="px-3 py-2.5 text-center">En trámite</th></tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        ${gente.map((p) => {
+          const vence = p.proximo_vencimiento ? new Date(p.proximo_vencimiento + "T12:00") : null;
+          const urgente = vence && (vence - hoy) / 86400000 < 120;
+          return `<tr class="hover:bg-slate-50">
+            <td class="px-3 py-2.5">
+              <!-- El nombre lleva a su expediente: ficha, historial de
+                   vacaciones —incluido lo de la hoja de Talento Humano—,
+                   solicitudes y períodos, en una pantalla. Era la pregunta
+                   que no tenía respuesta: «¿cuándo tomó vacaciones Fulano?». -->
+              <a href="persona.html?id=${encodeURIComponent(p.id)}"
+                 class="font-medium text-slate-900 underline decoration-slate-300
+                        underline-offset-4 hover:decoration-slate-900">${esc(p.nombre)}</a>
+              <p class="text-xs text-slate-500">${esc(p.cedula)}</p>
+            </td>
+            <td class="px-3 py-2.5 text-slate-600">${esc(p.cargo || "—")}</td>
+            <td class="px-3 py-2.5 whitespace-nowrap text-slate-600">${fecha(p.fecha_ingreso)}</td>
+            <td class="px-3 py-2.5 text-right tabular-nums">${p.anios}</td>
+            <td class="px-3 py-2.5 text-right tabular-nums font-medium">${Number(p.saldo)}</td>
+            <td class="px-3 py-2.5 text-right tabular-nums">${p.fines_semana_pendientes}</td>
+            ${hayCaducidad ? `<td class="px-3 py-2.5 whitespace-nowrap">
+              ${vence ? `<span class="${urgente ? "font-medium text-rose-700" : "text-slate-600"}">
+                          ${fecha(p.proximo_vencimiento)}</span>` : "—"}
+            </td>` : ""}
+            <td class="px-3 py-2.5 text-center">
+              ${p.en_tramite ? `<span class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                                 ${p.en_tramite}</span>` : `<span class="text-slate-300">—</span>`}
+            </td></tr>`;
+        }).join("")}
+      </tbody>
+    </table>`
+    : `<p class="px-5 py-10 text-center text-sm text-slate-500">No tiene colaboradores a cargo.</p>`;
+  // Un jefe con veinte personas necesita encontrar a una sin recorrer la tabla.
+  montarBuscador({ campo: "buscar-colaborador", contenedor: "tabla",
+                   vacio: "colaboradores-vacio" });
+} catch (err) {
+  document.getElementById("tabla").innerHTML =
+    `<p class="px-5 py-10 text-center text-sm text-rose-700">${esc(err.message)}</p>`;
+}
+</script>
+</body>
+</html>

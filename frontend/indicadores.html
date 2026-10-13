@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>Indicadores</title>
+<link rel="icon" type="image/png" href="img/icono.png">
+<link rel="stylesheet" href="vendor/tailwind.css">
+<script src="config.js"></script>
+<script src="config.local.js"></script>
+</head>
+
+<body class="min-h-dvh bg-slate-100 text-slate-900 antialiased">
+<div id="barra"></div>
+
+<main class="mx-auto max-w-6xl px-4 py-5 pb-24">
+
+  <header class="mb-4 flex flex-wrap items-end justify-between gap-3">
+    <div>
+      <h1 class="text-lg font-semibold">Indicadores</h1>
+      <p class="mt-0.5 text-sm text-slate-500">
+        Se calculan al abrir la pantalla.
+        <span id="calculado-en" class="text-slate-400"></span>
+      </p>
+    </div>
+    <div class="flex gap-2">
+      <button id="btn-recalcular"
+              class="rounded-xl bg-white px-4 py-2 text-sm font-medium ring-1 ring-slate-300
+                     hover:bg-slate-50">Recalcular</button>
+      <button id="btn-configurar"
+              class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white
+                     hover:bg-slate-800">Configurar</button>
+    </div>
+  </header>
+
+  <!-- Nada de nombres: son agregados. Quién está fuera es el calendario del
+       equipo, que tiene sus propios permisos. -->
+  <div id="tablero" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <p class="rounded-2xl bg-white p-8 text-center text-sm text-slate-500 ring-1 ring-slate-200
+              sm:col-span-2 lg:col-span-3">Calculando…</p>
+  </div>
+</main>
+
+<!-- ================= Configurar el tablero ================= -->
+<dialog id="modal-configurar" class="w-[min(100vw-1.5rem,46rem)] rounded-2xl p-0">
+  <div class="max-h-[85dvh] overflow-y-auto">
+    <header class="sticky top-0 border-b border-slate-200 bg-white px-5 py-4">
+      <h2 class="font-semibold">Qué se ve en el tablero</h2>
+      <p class="mt-0.5 text-sm text-slate-500">
+        Encienda, apague y ordene. Apagar un indicador lo quita de la pantalla
+        y deja de calcularlo.
+      </p>
+    </header>
+    <div id="lista-config" class="divide-y divide-slate-100"></div>
+    <footer class="flex justify-end gap-2 border-t border-slate-200 px-5 py-3">
+      <button type="button" data-cerrar="modal-configurar"
+              class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white">
+        Listo</button>
+    </footer>
+  </div>
+</dialog>
+
+<div id="aviso" class="pointer-events-none fixed inset-x-0 bottom-6 z-50 hidden px-4">
+  <p id="aviso-texto"
+     class="mx-auto max-w-md rounded-2xl bg-slate-900 px-4 py-3 text-center text-sm text-white shadow-lg"></p>
+</div>
+
+<script type="module" src="js/indicadores.js"></script>
+</body>
+</html>

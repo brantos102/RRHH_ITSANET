@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  /* Una lista que se desplaza con la rueda pero no enseña la barra.
+     El menú lateral tenía una barra gris permanente a la derecha que no
+     hacía falta: con veinte opciones el desplazamiento se nota al usarlo,
+     no hace falta anunciarlo con un riel. La rueda, el gesto del panel
+     táctil y el teclado siguen funcionando igual. */
+  .sin-barra {
+    scrollbar-width: none;            /* Firefox */
+    -ms-overflow-style: none;         /* Edge antiguo */
+  }
+  .sin-barra::-webkit-scrollbar {     /* Chrome, Safari */
+    width: 0;
+    height: 0;
+  }
+
+  /* Un comentario flotante al pasar el cursor, sin depender de `title`:
+     el del navegador tarda un segundo largo en salir, no se puede dar
+     estilo y en el teléfono no existe.
+
+     Se muestra también al enfocar con el teclado, y el texto vive en el
+     atributo `data-ayuda` para que no ocupe sitio cuando está oculto. */
+  .con-ayuda { position: relative; }
+  .con-ayuda::after {
+    content: attr(data-ayuda);
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 0.5rem);
+    z-index: 50;
+    width: max-content;
+    max-width: 17rem;
+    transform: translateX(-50%) translateY(0.25rem);
+    padding: 0.5rem 0.625rem;
+    border-radius: 0.625rem;
+    background: #0f172a;
+    color: #f8fafc;
+    font-size: 0.75rem;
+    font-weight: 400;
+    line-height: 1.35;
+    text-align: left;
+    white-space: normal;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .13s ease, transform .13s ease;
+  }
+  .con-ayuda:hover::after,
+  .con-ayuda:focus-visible::after {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  /* Cuando no cabe arriba —las tarjetas de la primera fila del formulario—,
+     el comentario sale por debajo. */
+  .ayuda-abajo::after {
+    bottom: auto;
+    top: calc(100% + 0.5rem);
+    transform: translateX(-50%) translateY(-0.25rem);
+  }
+  .ayuda-abajo:hover::after,
+  .ayuda-abajo:focus-visible::after {
+    transform: translateX(-50%) translateY(0);
+  }
+  /* En pantallas sin cursor el comentario flotante no se puede invocar, así
+     que no se dibuja: allí la explicación va desplegable, no al pasar. */
+  @media (hover: none) {
+    .con-ayuda::after { content: none; }
+  }
+}
