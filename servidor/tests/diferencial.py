@@ -225,7 +225,43 @@ def json_normal(valor: Any) -> Any:
         if isinstance(v, uuid.UUID):
             return str(v)
         raise TypeError(type(v))
-    return json.loads(json.dumps(valor, default=conv))
+    return _instantes(json.loads(json.dumps(valor, default=conv)))
+
+
+def _instantes(valor: Any) -> Any:
+    """Una fecha-hora escrita en JSON, como instante: «…56.5388+00:00» de
+    PostgreSQL y «…51.538800-05:00» de Python son el mismo momento."""
+    import datetime as dt
+    import re
+    if isinstance(valor, dict):
+        return {k: _instantes(v) for k, v in valor.items()}
+    if isinstance(valor, list):
+        return [_instantes(v) for v in valor]
+    if isinstance(valor, str) and re.match(r"^\d{4}-\d\d-\d\d[T ]\d\d:\d\d", valor):
+        try:
+            return dt.datetime.fromisoformat(valor)
+        except ValueError:
+            return valor
+    return valor
+
+
+from contextlib import asynccontextmanager  # noqa: E402
+
+
+class _Deshacer(Exception):
+    pass
+
+
+@asynccontextmanager
+async def y_deshacer():
+    """Lo de adentro corre en MySQL dentro de una transacción que se deshace
+    al salir: la muestra queda como estaba para la siguiente prueba."""
+    try:
+        async with db.transaccion():
+            yield
+            raise _Deshacer
+    except _Deshacer:
+        pass
 
 
 @pytest.fixture(scope="module")
@@ -269,6 +305,8 @@ def muestra():
     pg = psycopg.connect(pg_url)
     from psycopg.rows import dict_row
     pg.row_factory = dict_row
+    pg.execute("set time zone 'America/Guayaquil'")
+    pg.commit()
     ajustes.mysql_url = url
     try:
         yield pg

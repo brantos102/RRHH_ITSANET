@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import decimal
 import json
 import re
 import uuid
@@ -76,11 +77,32 @@ _transaccion: ContextVar[aiomysql.Connection | None] = ContextVar("_transaccion"
 # globales de PyMySQL. Una primera versión de este archivo los asignaba a la
 # conexión, y no tenía ningún efecto. Se detectó leyendo el código de
 # aiomysql antes de dar el paso por bueno.
+def _en_json(valor: Any) -> Any:
+    """Lo que json no sabe escribir, como lo escribía jsonb de PostgreSQL.
+
+    Un Decimal va como NÚMERO, no como texto: con `default=str` un saldo de
+    15.25 quedaba guardado como "15.25", entre comillas, y quien lo leyera
+    después recibía un texto donde esperaba un número.
+    """
+    if isinstance(valor, decimal.Decimal):
+        return int(valor) if valor == valor.to_integral_value() and valor.as_tuple().exponent >= 0 \
+            else float(valor)
+    if isinstance(valor, (dt.date, dt.datetime, dt.time)):
+        return valor.isoformat()
+    if isinstance(valor, uuid.UUID):
+        return str(valor)
+    return str(valor)
+
+
+def a_json(valor: Any) -> str:
+    return json.dumps(valor, ensure_ascii=False, default=_en_json)
+
+
 def _a_mysql(valor: Any) -> Any:
     if isinstance(valor, uuid.UUID):
         return str(valor)
     if isinstance(valor, dict):
-        return json.dumps(valor, ensure_ascii=False, default=str)
+        return a_json(valor)
     if isinstance(valor, dt.datetime) and valor.tzinfo is not None:
         # Una fecha con zona —la de un token, la de datetime.now(timezone.utc)—
         # se guarda en hora de Ecuador. Guardarla tal cual escribiría la hora
@@ -91,7 +113,7 @@ def _a_mysql(valor: Any) -> Any:
         # elemento y sigue siendo tupla. Una lista es un dato JSON.
         if isinstance(valor, tuple):
             return tuple(_a_mysql(v) for v in valor)
-        return json.dumps(valor, ensure_ascii=False, default=str)
+        return a_json(valor)
     return valor
 
 

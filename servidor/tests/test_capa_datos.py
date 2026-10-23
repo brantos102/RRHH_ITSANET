@@ -146,3 +146,16 @@ async def test_insertar_devuelve_el_id_generado():
         assert segundo == primero + 1
     finally:
         await ejecutar(f"DROP TABLE {nombre}")
+
+
+async def test_un_decimal_en_json_se_guarda_como_numero(tabla):
+    """jsonb guardaba 15.25 como número; con default=str quedaba "15.25"."""
+    from decimal import Decimal
+    ident = uuid.uuid4()
+    await ejecutar(f"INSERT INTO {tabla} (id, datos) VALUES (%s, %s)",
+                   (ident, {"saldo": Decimal("15.25"), "dias": Decimal("3"), "desde": dt.date(2026, 1, 2)}))
+    crudo = await obtener_uno(f"SELECT JSON_TYPE(JSON_EXTRACT(datos, '$.saldo')) AS t, "
+                              f"CAST(datos AS CHAR) AS texto FROM {tabla} WHERE id = %s", (ident,))
+    assert crudo["t"] == "DOUBLE"
+    fila = await obtener_uno(f"SELECT datos FROM {tabla} WHERE id = %s", (ident,))
+    assert fila["datos"] == {"saldo": 15.25, "dias": 3, "desde": "2026-01-02"}
