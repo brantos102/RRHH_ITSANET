@@ -27,7 +27,6 @@ from ..errores import traducir
 from ..deps import usuario_actual
 from ..schemas import Perfil, RespuestaEnvio, Sesion, SolicitudToken, ValidacionToken
 from ..security import comparar_hash, emitir_token, generar_otp, hash_otp
-from ..supabase_admin import asegurar_auth_user
 
 log = logging.getLogger("rrhh.auth")
 router = APIRouter(prefix="/auth", tags=["Autenticación"])
@@ -246,8 +245,6 @@ async def validar_token(datos: ValidacionToken, request: Request) -> Sesion:
     if usuario is None:
         raise error_credenciales
 
-    auth_user_id = await asegurar_auth_user(str(usuario["id"]), usuario["email"], usuario["cedula"])
-
     # Los períodos se generan/actualizan al entrar: el saldo siempre está al día.
     await obtener_uno(
         "select public.generar_periodos_vacaciones(%s) as ok", (usuario["id"],)
@@ -265,7 +262,7 @@ async def validar_token(datos: ValidacionToken, request: Request) -> Sesion:
         (usuario["id"],),
     )
 
-    token, expira = emitir_token(auth_user_id, str(usuario["id"]), usuario["cedula"], usuario["rol"])
+    token, expira = emitir_token(str(usuario["id"]), usuario["cedula"], usuario["rol"])
 
     await registrar(request, "sesion_iniciada", user_id=str(usuario["id"]),
                     cedula=usuario["cedula"], detalle={"rol": usuario["rol"]})

@@ -108,9 +108,9 @@ def configurar(nivel: str = "INFO", a_archivo: bool = True) -> None:
             # a medias es mejor que un arranque fallido.
             raiz.warning("No se pudo escribir en %s (%s). Solo consola.", CARPETA, exc)
 
-    # uvicorn y psycopg hablan de más en INFO; se les baja el volumen para
+    # uvicorn y aiomysql hablan de más en INFO; se les baja el volumen para
     # que lo propio del sistema no quede sepultado.
-    for ruidoso in ("uvicorn.access", "httpx", "psycopg.pool"):
+    for ruidoso in ("uvicorn.access", "aiomysql"):
         logging.getLogger(ruidoso).setLevel(logging.WARNING)
 
 

@@ -44,8 +44,8 @@ async def test_preflight_rechaza_origen_ajeno(cliente):
 
 def _config(**extra) -> Settings:
     base = dict(
-        database_url="postgresql://x/y",
-        supabase_jwt_secret="secreto-de-prueba-suficientemente-largo-1234",
+        mysql_url="mysql://x@localhost/y",
+        jwt_secret="secreto-de-prueba-suficientemente-largo-1234",
     )
     return Settings(**{**base, **extra})  # type: ignore[arg-type]
 

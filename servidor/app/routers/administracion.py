@@ -16,7 +16,7 @@ from ..audit import registrar
 from ..cedula import es_cedula_valida, normalizar_cedula
 from ..db import obtener_todos, obtener_uno
 from ..deps import exigir_rol
-from ..errores import traducir
+from ..errores import es_unicidad, restriccion_de, traducir
 from ..exportar import Informe, entregar
 
 router = APIRouter(tags=["Administración"])
@@ -114,7 +114,7 @@ async def listar_usuarios(usuario: RRHH, q: str = "", incluir_inactivos: bool = 
                -- siendo el comodín solo, que coincide con toda la planilla:
                -- buscar «zzzz» devolvía las trescientas cincuenta personas.
                -- (Sin el signo de porcentaje en este comentario a propósito:
-               --  psycopg lo lee como marcador de parámetro y rompe la
+               --  el cliente de la base lo lee como marcador de parámetro y rompe la
                --  consulta aunque esté dentro de un comentario SQL.)
                or (%(cedula)s <> '' and u.cedula like %(cedula_patron)s))
         order by u.nombre
@@ -140,14 +140,13 @@ async def _choque_de_ficha(exc: Exception, email: str | None = None,
     Administración, que ya ven la lista completa del personal. No se expone
     nada que quien pregunta no pudiera mirar por su cuenta.
     """
-    import psycopg
-
-    if not isinstance(exc, psycopg.errors.UniqueViolation):
+    if not es_unicidad(exc):
         return traducir(exc)
 
-    restriccion = exc.diag.constraint_name or ""
+    restriccion = restriccion_de(exc)
     if restriccion == "users_email_key" and email:
-        # `email` es citext: choca ignorando mayúsculas, así que la búsqueda
+        # `email` choca ignorando mayúsculas (citext en PostgreSQL, la
+        # intercalación _ci en MySQL), así que la búsqueda
         # tiene que hacerlo igual o diría «no encuentro a nadie».
         duena = await obtener_uno(
             """select nombre, cedula, activo, departamento

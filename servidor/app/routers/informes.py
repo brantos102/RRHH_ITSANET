@@ -10,7 +10,6 @@ from datetime import date
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, Response
-from psycopg import sql
 
 from fastapi import Request
 

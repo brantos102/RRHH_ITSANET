@@ -1,12 +1,14 @@
-"""Pruebas contra una base PostgreSQL real (no simulada).
+"""Pruebas contra una base MySQL real (no simulada).
 
-Se apuntan a la base local levantada para desarrollo; en CI se apunta a una
-instancia efímera. El correo se intercepta para leer el código sin enviarlo.
+Se apuntan a una base local de pruebas, construida con las migraciones de
+mysql/migraciones; nunca a la de producción. El correo se intercepta para
+leer el código sin enviarlo.
 """
 from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -14,10 +16,12 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 os.environ.setdefault(
-    "DATABASE_URL",
-    "postgresql://postgres@/rrhh_v4?host=/var/lib/pgtest&port=55432",
+    "MYSQL_URL",
+    "mysql://root@localhost/rrhh_pruebas?unix_socket=/var/run/mysqld/mysqld.sock",
 )
-os.environ.setdefault("SUPABASE_JWT_SECRET", "secreto-de-prueba-suficientemente-largo-1234")
+os.environ.setdefault("JWT_SECRET", "secreto-de-prueba-suficientemente-largo-1234")
+# Los adjuntos de las pruebas van a una carpeta temporal, nunca a la real.
+os.environ.setdefault("ADJUNTOS_DIR", tempfile.mkdtemp(prefix="rrhh-adjuntos-prueba-"))
 os.environ.setdefault("EMAIL_BACKEND", "console")
 os.environ.setdefault("ENTORNO", "desarrollo")
 # El límite de envíos de código es por cédula y, multiplicado por cuatro, por
@@ -28,8 +32,6 @@ os.environ.setdefault("ENTORNO", "desarrollo")
 # 429 en el arranque de cada prueba. El límite se prueba aparte, leyendo este
 # mismo valor en vez de suponerlo.
 os.environ.setdefault("OTP_MAX_ENVIOS_HORA", "50")
-os.environ.setdefault("SUPABASE_URL", "")
-os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
 
 import httpx  # noqa: E402
 from app import correo  # noqa: E402

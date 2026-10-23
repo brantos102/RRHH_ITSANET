@@ -10,14 +10,13 @@ from typing import Annotated, Literal
 from fastapi import (APIRouter, BackgroundTasks, Depends, File, HTTPException, Request,
                      UploadFile, status)
 from pydantic import BaseModel, Field, field_validator
-from psycopg import errors as pg
 
 from .. import notificaciones
 from ..audit import registrar
 from ..db import conexion, obtener_todos, obtener_uno
 from ..deps import exigir_rol, usuario_actual
 from ..errores import traducir
-from ..storage import subir_adjunto
+from ..storage import nombre_seguro, subir_adjunto
 
 log = logging.getLogger("rrhh.solicitudes")
 router = APIRouter(tags=["Solicitudes"])
@@ -435,7 +434,7 @@ async def crear_solicitud(
                          adjunto.mime_type, adjunto.tamano_bytes, adjunto.hash_sha256,
                          usuario["id"]),
                     )
-    except (pg.Error, Exception) as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
     await registrar(request, "solicitud_enviada", user_id=str(usuario["id"]),
@@ -606,7 +605,7 @@ async def subir(
         raise HTTPException(status_code=422,
                             detail={"mensaje": "Solo se admiten imágenes (JPG, PNG, WebP, HEIC) o PDF."})
 
-    ruta = f"{usuario['id']}/{solicitud_id}/{uuid.uuid4().hex}-{archivo.filename[:60]}"
+    ruta = f"{usuario['id']}/{solicitud_id}/{uuid.uuid4().hex}-{nombre_seguro(archivo.filename)}"
     await subir_adjunto(ruta, contenido, archivo.content_type)
 
     await registrar(request, "adjunto_subido", user_id=str(usuario["id"]),

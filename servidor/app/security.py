@@ -1,4 +1,4 @@
-"""OTP, hashing y emisión de JWT compatibles con Supabase."""
+"""OTP, hashing y emisión de las sesiones (JWT)."""
 from __future__ import annotations
 
 import hashlib
@@ -35,26 +35,32 @@ def comparar_hash(a: str, b: str) -> bool:
 
 
 # --------------------------------------------------------------------- JWT
-def emitir_token(auth_user_id: str, user_id: str, cedula: str, rol: str) -> tuple[str, datetime]:
-    """Firma un JWT que Supabase acepta, para que RLS reconozca al usuario.
+AUDIENCIA = "rrhh-itsanet"
 
-    El claim `sub` debe ser el id de auth.users: `auth.uid()` lo lee y las
-    políticas lo resuelven contra `users.auth_user_id`.
+
+def emitir_token(user_id: str, cedula: str, rol: str) -> tuple[str, datetime]:
+    """Firma la sesión del colaborador.
+
+    `sub` es el id de la ficha (users.id). Con Supabase era el id de
+    auth.users, una tabla de Supabase que en MySQL no existe; el backend ya
+    era quien verificaba cada permiso, así que la identidad sale de la ficha.
+
+    La audiencia es propia del sistema: un token firmado para otra
+    aplicación con el mismo secreto no abre una sesión aquí.
     """
     settings = get_settings()
     ahora = datetime.now(timezone.utc)
     expira = ahora + timedelta(hours=settings.jwt_expira_horas)
 
     payload: dict[str, Any] = {
-        "sub": auth_user_id,
-        "aud": "authenticated",
-        "role": "authenticated",
+        "sub": user_id,
+        "aud": AUDIENCIA,
         "iat": int(ahora.timestamp()),
         "exp": int(expira.timestamp()),
-        "app_metadata": {"provider": "cedula_otp"},
-        "user_metadata": {"user_id": user_id, "cedula": cedula, "rol": rol},
+        "cedula": cedula,
+        "rol": rol,
     }
-    return jwt.encode(payload, settings.supabase_jwt_secret, algorithm="HS256"), expira
+    return jwt.encode(payload, settings.jwt_secret, algorithm="HS256"), expira
 
 
 def leer_token(token: str) -> dict[str, Any]:
@@ -62,9 +68,9 @@ def leer_token(token: str) -> dict[str, Any]:
     try:
         return jwt.decode(
             token,
-            settings.supabase_jwt_secret,
+            settings.jwt_secret,
             algorithms=["HS256"],
-            audience="authenticated",
+            audience=AUDIENCIA,
         )
     except jwt.ExpiredSignatureError:
         raise HTTPException(

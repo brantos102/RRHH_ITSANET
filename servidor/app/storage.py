@@ -1,107 +1,116 @@
-"""Subida de archivos a Supabase Storage (buckets privados)."""
+"""Adjuntos de las solicitudes en el disco del servidor.
+
+Con Supabase los archivos iban a un bucket privado. En el servidor
+corporativo van a una carpeta del propio servidor (ADJUNTOS_DIR), que tiene
+que estar FUERA de la carpeta que publica Apache: un certificado médico no
+puede quedar a una URL adivinable de distancia. Solo el backend los lee, y
+solo después de comprobar quién los pide.
+
+La ruta que se guarda en request_attachments.storage_path es relativa a esa
+carpeta y tiene la misma forma que tenía en el bucket
+(«<usuario>/<solicitud>/<archivo>»), así que las rutas trasladadas desde
+Supabase siguen valiendo con solo copiar los archivos debajo de ADJUNTOS_DIR.
+
+DOS PROTECCIONES QUE EL BUCKET NO NECESITABA Y EL DISCO SÍ:
+
+  El nombre del archivo lo elige quien lo sube. En un bucket «../../x» era
+  una clave rara; en un disco es una ruta que sale de la carpeta. Se limpia
+  el nombre y, además, toda ruta se resuelve y se comprueba que siga dentro
+  de ADJUNTOS_DIR antes de leer o escribir.
+
+  Se escribe en un archivo temporal y se renombra al final. Si el servidor
+  se cae a la mitad, no queda un certificado cortado con apariencia de
+  bueno: o está entero o no está.
+"""
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
+import re
+import tempfile
+from pathlib import Path
 
-import httpx
 from fastapi import HTTPException, status
 
 from .config import get_settings
 
 log = logging.getLogger("rrhh.storage")
-BUCKET_SOLICITUDES = "solicitudes"
+
+_NO_PERMITIDO = re.compile(r"[^A-Za-z0-9._-]+")
 
 
-async def subir(bucket: str, ruta: str, contenido: bytes, mime: str) -> str:
-    settings = get_settings()
+def nombre_seguro(nombre: str, largo: int = 60) -> str:
+    """El nombre que puso el colaborador, sin nada que pueda leerse como ruta.
 
-    if not (settings.supabase_url and settings.supabase_service_role_key):
-        log.warning("Storage no configurado: se omite la subida de %s", ruta)
-        return ruta  # entorno de desarrollo sin Supabase
-
-    async with httpx.AsyncClient(timeout=30) as cliente:
-        respuesta = await cliente.post(
-            f"{settings.supabase_url}/storage/v1/object/{bucket}/{ruta}",
-            headers={
-                "Authorization": f"Bearer {settings.supabase_service_role_key}",
-                "Content-Type": mime,
-                "x-upsert": "true",
-            },
-            content=contenido,
-        )
-    if respuesta.status_code not in (200, 201):
-        log.error("Storage respondió %s al subir a «%s»: %s",
-                  respuesta.status_code, bucket, respuesta.text[:300])
-        # Quien está adjuntando un certificado médico no puede crear un
-        # bucket ni revisar una clave, así que recibe un mensaje neutro. El
-        # que sí puede lee el registro, y antes se quedaba con el código de
-        # estado y un JSON de Supabase: aquí queda dicho qué hacer.
-        log.error("Qué significa: %s", por_que_fallo(respuesta.status_code, respuesta.text))
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"mensaje": "No se pudo guardar el archivo. Intente de nuevo."},
-        )
-    return ruta
-
-
-def por_que_fallo(codigo: int, cuerpo: str) -> str:
-    """Traduce la respuesta de Supabase Storage a lo que hay que hacer.
-
-    Los tres fallos que ocurren de verdad al instalar el sistema, y que
-    desde la pantalla son indistinguibles entre sí.
+    «Certificado médico (1).pdf» -> «Certificado_medico_1_.pdf». Las
+    tildes se pierden en el nombre en disco, no en la base: el nombre
+    original se guarda aparte, en request_attachments.nombre_archivo.
     """
-    texto = (cuerpo or "").lower()
+    import unicodedata
+    plano = unicodedata.normalize("NFKD", nombre or "").encode("ascii", "ignore").decode()
+    limpio = _NO_PERMITIDO.sub("_", Path(plano).name).strip("._") or "archivo"
+    return limpio[-largo:]
 
-    if "bucket not found" in texto or "bucket_not_found" in texto:
-        return ("El bucket no existe en este proyecto de Supabase. Créelo con:  "
-                "python scripts/probar_adjuntos.py --crear")
-    # «Invalid Compact JWS» es muy concreto: Storage intentó leer la clave como
-    # un JWT y lo que recibió no tiene esa forma. No es la clave equivocada:
-    # es que NO ES una clave de las que Storage acepta, o llegó cortada.
-    if "compact jws" in texto or "malformed" in texto or "jwt malformed" in texto:
-        return ("La clave no tiene forma de clave de Supabase: Storage intentó leerla y "
-                "no pudo. Las de este servicio empiezan por «eyJ» y son largas (unos "
-                "200 caracteres o más). Si la suya empieza por «sb_secret_» es del "
-                "formato nuevo y Storage todavía no la acepta: use la «service_role» "
-                "clásica (JWT) de Supabase › Project Settings › API Keys › Legacy API "
-                "keys. Y revise que no quedara cortada al pegarla en backend/.env.")
-    if codigo in (401, 403) or "invalid" in texto and "jwt" in texto \
-            or "unauthorized" in texto or "signature" in texto:
-        return ("Supabase rechazó la clave. SUPABASE_SERVICE_ROLE_KEY tiene que ser la "
-                "clave «service_role» del proyecto, no la «anon»: la anon no puede "
-                "escribir en un bucket privado. Está en Supabase › Project Settings › "
-                "API Keys.")
-    if "row-level security" in texto or "violates" in texto or "policy" in texto:
-        return ("Una política de Storage bloqueó la escritura. Con la clave service_role "
-                "no debería pasar: compruebe que SUPABASE_SERVICE_ROLE_KEY no sea la anon.")
-    if "payload too large" in texto or codigo == 413:
-        return ("El archivo supera el límite del bucket. Súbalo en Supabase › Storage › "
-                "el bucket › Configuration, o reduzca TAMANO_MAXIMO en el backend.")
-    if "mime" in texto or "content type" in texto:
-        return ("El bucket no admite ese tipo de archivo. Revise «Allowed MIME types» en "
-                "la configuración del bucket, o déjelo vacío para admitir todos.")
-    if codigo >= 500:
-        return "Supabase devolvió un error propio. Reintente; si persiste, revise su estado."
-    return ("No reconozco este fallo. Para ver la configuración completa y probarla:  "
-            "python scripts/probar_adjuntos.py")
+
+def _carpeta() -> Path:
+    return Path(get_settings().adjuntos_dir).resolve()
+
+
+def ruta_absoluta(ruta: str) -> Path:
+    """Dónde está en disco un storage_path. Nunca fuera de ADJUNTOS_DIR."""
+    base = _carpeta()
+    destino = (base / ruta).resolve()
+    if destino == base or base not in destino.parents:
+        # No se dice en la respuesta por qué: a quien intenta salir de la
+        # carpeta no se le explica cómo. Sí queda en el registro.
+        log.warning("Ruta de adjunto fuera de la carpeta, rechazada: %r", ruta)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={"mensaje": "Ruta de archivo no válida."})
+    return destino
+
+
+def _escribir(destino: Path, contenido: bytes) -> None:
+    destino.parent.mkdir(parents=True, exist_ok=True, mode=0o750)
+    fd, temporal = tempfile.mkstemp(dir=destino.parent, prefix=".subiendo-")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(contenido)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(temporal, 0o640)
+        os.replace(temporal, destino)
+    except BaseException:
+        Path(temporal).unlink(missing_ok=True)
+        raise
 
 
 async def subir_adjunto(ruta: str, contenido: bytes, mime: str) -> str:
-    return await subir(BUCKET_SOLICITUDES, ruta, contenido, mime)
+    """Guarda el archivo y devuelve la ruta con que se registra en la base."""
+    destino = ruta_absoluta(ruta)
+    try:
+        await asyncio.to_thread(_escribir, destino, contenido)
+    except OSError as exc:
+        # Quien adjunta un certificado no puede arreglar permisos de una
+        # carpeta: recibe un mensaje neutro. Quien sí puede lee el registro.
+        log.error("No se pudo guardar el adjunto en %s: %s", destino, exc)
+        log.error("Qué revisar: que ADJUNTOS_DIR (%s) exista, que el usuario del servicio "
+                  "pueda escribir en ella y que el disco tenga espacio.", _carpeta())
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"mensaje": "No se pudo guardar el archivo. Intente de nuevo."},
+        ) from exc
+    return ruta
 
 
-async def url_firmada(bucket: str, ruta: str, segundos: int = 300) -> str | None:
-    """Enlace temporal para que el navegador vea un archivo privado."""
-    settings = get_settings()
-    if not (settings.supabase_url and settings.supabase_service_role_key):
+async def leer_adjunto(ruta: str) -> bytes | None:
+    """El contenido de un adjunto, o None si no está en disco.
+
+    No comprueba QUIÉN lo pide: eso lo hace la ruta que lo use, antes de
+    llamar aquí, igual que con cualquier otro dato de una solicitud.
+    """
+    destino = ruta_absoluta(ruta)
+    try:
+        return await asyncio.to_thread(destino.read_bytes)
+    except FileNotFoundError:
         return None
-
-    async with httpx.AsyncClient(timeout=15) as cliente:
-        respuesta = await cliente.post(
-            f"{settings.supabase_url}/storage/v1/object/sign/{bucket}/{ruta}",
-            headers={"Authorization": f"Bearer {settings.supabase_service_role_key}"},
-            json={"expiresIn": segundos},
-        )
-    if respuesta.status_code != 200:
-        return None
-    return f"{settings.supabase_url}/storage/v1{respuesta.json()['signedURL']}"
