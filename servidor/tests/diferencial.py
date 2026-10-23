@@ -198,3 +198,82 @@ def cedula_de_prueba(n: int) -> str:
         p = int(d) * (2 if i % 2 == 0 else 1)
         suma += p - 9 if p > 9 else p
     return base + str((10 - suma % 10) % 10)
+
+
+# ----------------------------------------------------------- la muestra
+# Una base con ~70 personas inventadas y solicitudes en todos los estados
+# (mysql/pruebas/muestra_pg.py), en PostgreSQL y trasladada a MySQL con el
+# guion del corte. Con ella una regla se compara para TODA la muestra, no
+# para un caso armado a mano.
+PG_ADMIN = os.environ.get("PG_ADMIN_URL", "postgresql://postgres@/postgres?host=/var/lib/pgtest&port=55432")
+PG_PLANTILLA = os.environ.get("PG_PLANTILLA", "rrhh_v4")
+MUESTRA = "rrhh_muestra"
+MUESTRA_MY = "rrhh_prueba_muestra"
+
+
+def json_normal(valor: Any) -> Any:
+    """Lo que llegaría al navegador: el JSON que FastAPI arma de un dict de
+    Python, o el que PostgreSQL arma con jsonb. Así se comparan los dos."""
+    import datetime as dt
+    import json
+
+    def conv(v):
+        if isinstance(v, Decimal):
+            return float(v)
+        if isinstance(v, (dt.date, dt.datetime, dt.time)):
+            return v.isoformat()
+        if isinstance(v, uuid.UUID):
+            return str(v)
+        raise TypeError(type(v))
+    return json.loads(json.dumps(valor, default=conv))
+
+
+@pytest.fixture(scope="module")
+def muestra():
+    """(conexión a la muestra de PostgreSQL, nombre de la base MySQL).
+
+    Mientras dura el módulo, la aplicación apunta a la muestra de MySQL.
+    """
+    import sys
+    from pathlib import Path
+    from urllib.parse import urlparse
+
+    import pymysql
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mysql" / "pruebas"))
+    import muestra_pg
+    import trasladar
+    from app.config import get_settings
+
+    psycopg = pytest.importorskip("psycopg")
+    try:
+        muestra_pg.crear(PG_ADMIN, PG_PLANTILLA, MUESTRA)
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"Sin PostgreSQL de referencia para armar la muestra ({exc})")
+    pg_url = PG_ADMIN.replace("/postgres?", f"/{MUESTRA}?")
+    muestra_pg.llenar(pg_url)
+
+    ajustes = get_settings()
+    original = ajustes.mysql_url
+    u = urlparse(original)
+    url = original.replace(u.path, f"/{MUESTRA_MY}", 1)
+    raiz = pymysql.connect(unix_socket=None if u.hostname not in (None, "localhost") else
+                           dict(p.split("=") for p in u.query.split("&") if p).get("unix_socket"),
+                           host=u.hostname or "localhost", user=u.username or "root",
+                           password=u.password or "", charset="utf8mb4", autocommit=True)
+    raiz.cursor().execute(f"DROP DATABASE IF EXISTS `{MUESTRA_MY}`")
+    raiz.cursor().execute(f"CREATE DATABASE `{MUESTRA_MY}` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci")
+    import migrar
+    assert migrar.principal(aplicar=True, url=url) == 0
+    assert trasladar.principal(pg_url, aplicar=True, destino=url) == 0
+
+    pg = psycopg.connect(pg_url)
+    from psycopg.rows import dict_row
+    pg.row_factory = dict_row
+    ajustes.mysql_url = url
+    try:
+        yield pg
+    finally:
+        ajustes.mysql_url = original
+        pg.close()
+        raiz.cursor().execute(f"DROP DATABASE IF EXISTS `{MUESTRA_MY}`")
+        raiz.close()
