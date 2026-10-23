@@ -133,33 +133,44 @@ Tamaño actual: **15 MB** con toda la nómina y el histórico cargados.
 Proyección: no supera los 150 MB en diez años. El crecimiento real está en
 los adjuntos, estimado en **1,6 GB anuales**.
 
-### Plan en curso
+### Decisión tomada
 
-**Actualmente se trabaja en la migración del motor a MySQL.** El objetivo es
-alinear el sistema al estándar de la empresa y dejar de depender de un
-proveedor en la nube.
+**RI y TI resolvieron migrar a MySQL 8.0 en un servidor corporativo Linux,
+publicado mediante Apache.** El backend Python se conserva y queda detrás de
+Apache como proxy inverso. Se trasladan los datos actuales y todo lo
+tramitado en el sistema: solicitudes, aprobaciones y bitácora de auditoría.
 
-### Implicaciones técnicas que Infraestructura debe conocer
+### Cómo queda la protección de datos con MySQL
 
-Se exponen para que la validación de protección de datos se haga con la
-información completa:
+Una precisión respecto de versiones anteriores de este informe, verificada
+sobre el código:
 
-1. **MySQL no dispone de seguridad por fila.** Las 55 políticas que hoy
-   impiden, en el propio motor, que un colaborador consulte el expediente de
-   otro tendrían que reimplementarse en el código de la aplicación. El
-   control pasa de la base a la aplicación: sigue siendo posible, pero deja
-   de existir la última barrera si una consulta se escribe sin el filtro.
-2. **Volumen de reescritura**: 172 funciones, 39 vistas, 14 tipos
-   enumerados, 26 disparadores, 24 índices parciales y 11.665 líneas de SQL.
-   Los datos se migran sin dificultad; la lógica se reescribe.
-3. **Alternativa a considerar**: si el motivo principal es dejar de depender
-   del proveedor en la nube, trasladar el mismo PostgreSQL a un servidor
-   propio lo consigue sin reescribir lógica ni perder controles.
+**El control de acceso efectivo ya vive en la aplicación, no en la base.**
+El backend se conecta a la base con un único usuario técnico y no le
+transmite al motor la identidad del colaborador; el navegador no se conecta
+a la base, todo pasa por el backend. Cada ruta verifica en el servidor el
+perfil, la propiedad del dato y la región antes de responder.
 
-La decisión corresponde a la dirección del proyecto. Lo que se solicita de
-Infraestructura es que la tome **conociendo el efecto sobre los controles de
-protección de datos**, y que si se confirma MySQL se planifique la
-reimplementación de los 55 controles de acceso como parte del alcance.
+Las 55 políticas de seguridad por fila de PostgreSQL son una **segunda capa
+que hoy no se ejerce**: solo actuarían si alguien se conectara a la base con
+la identidad de un colaborador, cosa que el diseño no hace. MySQL no tiene
+ese mecanismo, así que esa capa latente no se traslada; **los controles que
+sí protegen los datos migran tal cual**, con sus pruebas automáticas.
+
+Lo que sí cambia y hay que cuidar:
+
+1. **El usuario de base del backend debe tener solo los permisos que usa**
+   (lectura y escritura sobre las tablas del sistema; sin `DROP`, sin
+   `GRANT`, sin acceso a otras bases). Con PostgreSQL esto lo resolvía
+   Supabase; en el servidor propio lo configura TI.
+2. **La base no debe aceptar conexiones desde la red**, solo desde el propio
+   servidor. Así nadie puede saltarse los controles de la aplicación
+   conectándose directamente.
+3. **Las reglas de negocio que hoy aplica PostgreSQL** —que una solicitud no
+   cambie de fechas después de aprobada, que no se solapen ausencias, que la
+   constancia de goce se emita una sola vez— se trasladan como disparadores
+   y restricciones de MySQL donde el motor lo permite, y a la aplicación
+   donde no. Cada una conserva su prueba automática.
 
 ---
 
@@ -176,8 +187,8 @@ reimplementación de los 55 controles de acceso como parte del alcance.
 5. **Cuentas de correo institucional** para los 225 colaboradores que no las
    tienen, o la validación del mecanismo alternativo de acceso.
 6. **Un segundo responsable técnico** designado, por continuidad.
-7. **Pronunciamiento sobre el motor de base de datos**, conforme a la
-   sección 6.
+7. **Un usuario de MySQL con permisos mínimos** para el backend, y la base
+   cerrada a conexiones de red, conforme a la sección 6.
 
 ---
 

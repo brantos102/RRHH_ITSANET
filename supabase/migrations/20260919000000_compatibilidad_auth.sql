@@ -34,6 +34,29 @@
 -- Idempotente.
 -- ---------------------------------------------------------------------------
 
+-- LOS ROLES. Las políticas de seguridad por fila y los permisos se otorgan
+-- «to authenticated» y «to anon», que son roles que Supabase crea. A
+-- diferencia de las tablas, los roles son de TODO el servidor, no de una
+-- base: por eso una prueba de reconstrucción hecha en un servidor que ya los
+-- tenía pasaba, y en un PostgreSQL recién instalado falla con
+--
+--     ERROR: role "authenticated" does not exist
+--
+-- Se crean sin permiso de inicio de sesión (nologin): existen para que las
+-- políticas puedan nombrarlos, no para que nadie entre con ellos.
+do $$
+begin
+  if not exists (select 1 from pg_roles where rolname = 'anon') then
+    create role anon nologin;
+  end if;
+  if not exists (select 1 from pg_roles where rolname = 'authenticated') then
+    create role authenticated nologin;
+  end if;
+  if not exists (select 1 from pg_roles where rolname = 'service_role') then
+    create role service_role nologin bypassrls;
+  end if;
+end $$;
+
 create schema if not exists auth;
 
 -- La tabla a la que apunta `users.auth_user_id`. Solo las dos columnas que
