@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # El .env vive junto al backend, y se busca por ruta absoluta: si se
 # resolviera contra la carpeta actual, arrancar desde la raíz del proyecto
-# (o desde cualquier otro sitio) daría «Field required: database_url» aunque
+# (o desde cualquier otro sitio) daría «Field required: mysql_url» aunque
 # el archivo estuviera ahí mismo. Las variables de entorno siguen mandando
 # sobre el archivo, que es lo que esperan Docker y los servicios de hosting.
 _CARPETA_BACKEND = Path(__file__).resolve().parents[1]
@@ -20,13 +20,20 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Base de datos
-    database_url: str
+    # Base de datos: MySQL 8.0 en el servidor corporativo.
+    #     mysql://rrhh_app:CLAVE@127.0.0.1:3306/rrhh
+    mysql_url: str
 
-    # Supabase
-    supabase_url: str = ""
-    supabase_service_role_key: str = ""
-    supabase_jwt_secret: str
+    # Secreto con el que se firman las sesiones (JWT). Cualquier texto largo
+    # y aleatorio; cambiarlo cierra todas las sesiones abiertas. Genérelo con
+    #     python -c "import secrets; print(secrets.token_urlsafe(48))"
+    jwt_secret: str
+
+    # Dónde se guardan los adjuntos de las solicitudes (certificados,
+    # respaldos). FUERA de la carpeta pública de Apache: los sirve el backend,
+    # que comprueba antes quién los pide. Si Apache los sirviera, cualquiera
+    # que adivinara una ruta vería el certificado médico de otra persona.
+    adjuntos_dir: str = "/var/lib/rrhh/adjuntos"
 
     # Sesión
     jwt_expira_horas: int = 8
