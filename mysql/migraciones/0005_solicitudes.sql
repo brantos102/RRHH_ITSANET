@@ -154,7 +154,7 @@ DROP TRIGGER IF EXISTS requests_bi_region $$
 CREATE TRIGGER requests_bi_region BEFORE INSERT ON requests FOR EACH ROW
 FOLLOWS requests_bi_reglas
 BEGIN
-  IF NEW.region IS NULL THEN
+  IF COALESCE(@migrando, 0) = 0 AND NEW.region IS NULL THEN
     SET NEW.region = (SELECT COALESCE(u.region, region_de_ciudad(u.ciudad))
                         FROM users u WHERE u.id = NEW.user_id);
   END IF;
@@ -256,21 +256,24 @@ DROP TRIGGER IF EXISTS requests_ai_registro $$
 CREATE TRIGGER requests_ai_registro AFTER INSERT ON requests FOR EACH ROW
 BEGIN
   DECLARE v_nombre VARCHAR(255);
-  INSERT INTO audit_logs (user_id, accion, entidad, entidad_id, detalle)
-  VALUES (NEW.user_id, 'request_creada', 'requests', NEW.id,
-          JSON_OBJECT('tipo', NEW.tipo, 'dias', NEW.dias_solicitados,
-                      'inicio', NEW.fecha_inicio, 'fin', NEW.fecha_fin,
-                      'es_adelanto', CAST(IF(NEW.es_adelanto, 'true', 'false') AS JSON)));
+  -- Lo trasladado ya trae su bitácora y sus avisos: no se fabrican otros.
+  IF COALESCE(@migrando, 0) = 0 THEN
+    INSERT INTO audit_logs (user_id, accion, entidad, entidad_id, detalle)
+    VALUES (NEW.user_id, 'request_creada', 'requests', NEW.id,
+            JSON_OBJECT('tipo', NEW.tipo, 'dias', NEW.dias_solicitados,
+                        'inicio', NEW.fecha_inicio, 'fin', NEW.fecha_fin,
+                        'es_adelanto', CAST(IF(NEW.es_adelanto, 'true', 'false') AS JSON)));
 
-  IF NEW.jefe_id IS NOT NULL THEN
-    SELECT nombre INTO v_nombre FROM users WHERE id = NEW.user_id;
-    INSERT INTO notifications (user_id, tipo, severidad, titulo, mensaje, entidad, entidad_id, accion_url)
-    VALUES (NEW.jefe_id, 'solicitud_pendiente', 'info',
-      CONCAT('Nueva solicitud de ', v_nombre),
-      CONCAT(v_nombre, ' solicitó ', NEW.tipo, ' del ', DATE_FORMAT(NEW.fecha_inicio, '%d/%m/%Y'),
-             ' al ', DATE_FORMAT(NEW.fecha_fin, '%d/%m/%Y'), ' (', NEW.dias_solicitados,
-             ' días). Requiere su aprobación.'),
-      'requests', NEW.id, '/dashboard.html#aprobaciones');
+    IF NEW.jefe_id IS NOT NULL THEN
+      SELECT nombre INTO v_nombre FROM users WHERE id = NEW.user_id;
+      INSERT INTO notifications (user_id, tipo, severidad, titulo, mensaje, entidad, entidad_id, accion_url)
+      VALUES (NEW.jefe_id, 'solicitud_pendiente', 'info',
+        CONCAT('Nueva solicitud de ', v_nombre),
+        CONCAT(v_nombre, ' solicitó ', NEW.tipo, ' del ', DATE_FORMAT(NEW.fecha_inicio, '%d/%m/%Y'),
+               ' al ', DATE_FORMAT(NEW.fecha_fin, '%d/%m/%Y'), ' (', NEW.dias_solicitados,
+               ' días). Requiere su aprobación.'),
+        'requests', NEW.id, '/dashboard.html#aprobaciones');
+    END IF;
   END IF;
 END $$
 

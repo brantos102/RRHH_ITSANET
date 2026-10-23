@@ -26,6 +26,14 @@
 -- bajas antiguas sin motivo). El traslado de datos fija @migrando = 1 para
 -- poder cargar esa historia tal como está. La aplicación nunca la fija.
 --
+-- Con @migrando = 1 tampoco se DEDUCE ni se GENERA nada al insertar: la
+-- región, los fines de semana cumplidos, el saldo de la ficha, la bitácora y
+-- los avisos de una solicitud ya vienen calculados de la base de origen y se
+-- copian tal cual. Si se recalcularan, un saldo que en Supabase estuviera
+-- desalineado aparecería «corregido» en silencio, y la bitácora tendría
+-- entradas que nadie hizo. Las validaciones —cédula, jefe propio, bitácora
+-- inmutable— siguen activas: un dato corrupto se rechaza también al trasladar.
+--
 -- Idempotente: cada objeto se borra antes de crearse.
 -- ---------------------------------------------------------------------------
 
@@ -108,7 +116,8 @@ BEGIN
   -- verdadero siempre que haya ciudad: la región se deduce de la ciudad
   -- AUNQUE el alta traiga una región escrita. Como `ciudad` vale 'Quito' por
   -- omisión, en la práctica la región de un alta sale siempre de la ciudad.
-  IF NEW.region IS NULL OR NEW.ciudad IS NOT NULL THEN
+  -- En el traslado la región ya viene deducida de la base de origen: se copia.
+  IF COALESCE(@migrando, 0) = 0 AND (NEW.region IS NULL OR NEW.ciudad IS NOT NULL) THEN
     SET NEW.region = COALESCE(
       (SELECT c.region FROM ciudades_region c
         WHERE c.ciudad = TRIM(COALESCE(NEW.ciudad, '')) LIMIT 1),
@@ -309,7 +318,7 @@ END $$
 DROP TRIGGER IF EXISTS vacation_periods_bi_fds $$
 CREATE TRIGGER vacation_periods_bi_fds BEFORE INSERT ON vacation_periods FOR EACH ROW
 BEGIN
-  IF NEW.devengado AND NEW.dias_consumidos >= NEW.dias_asignados
+  IF COALESCE(@migrando, 0) = 0 AND NEW.devengado AND NEW.dias_consumidos >= NEW.dias_asignados
      AND NEW.dias_asignados > 0
      AND NEW.fines_semana_consumidos < NEW.fines_semana_obligatorios THEN
     SET NEW.fines_semana_consumidos = NEW.fines_semana_obligatorios;
@@ -332,10 +341,12 @@ END $$
 DROP TRIGGER IF EXISTS vacation_periods_ai_saldo $$
 CREATE TRIGGER vacation_periods_ai_saldo AFTER INSERT ON vacation_periods FOR EACH ROW
 BEGIN
-  UPDATE users SET dias_vacaciones = (
-    SELECT COALESCE(SUM(p.dias_saldo), 0) FROM vacation_periods p
-     WHERE p.user_id = NEW.user_id AND NOT p.caducado)
-   WHERE id = NEW.user_id;
+  IF COALESCE(@migrando, 0) = 0 THEN
+    UPDATE users SET dias_vacaciones = (
+      SELECT COALESCE(SUM(p.dias_saldo), 0) FROM vacation_periods p
+       WHERE p.user_id = NEW.user_id AND NOT p.caducado)
+     WHERE id = NEW.user_id;
+  END IF;
 END $$
 
 DROP TRIGGER IF EXISTS vacation_periods_au_saldo $$
@@ -367,10 +378,12 @@ END $$
 DROP TRIGGER IF EXISTS mensajes_ai_tocar $$
 CREATE TRIGGER mensajes_ai_tocar AFTER INSERT ON mensajes FOR EACH ROW
 BEGIN
-  UPDATE conversaciones
+  IF COALESCE(@migrando, 0) = 0 THEN
+    UPDATE conversaciones
      SET updated_at = CURRENT_TIMESTAMP(6),
          estado = CASE WHEN estado = 'cerrada' THEN 'abierta' ELSE estado END
    WHERE id = NEW.conversacion_id;
+  END IF;
 END $$
 
 DELIMITER ;
