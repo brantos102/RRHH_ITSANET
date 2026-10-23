@@ -10,7 +10,9 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlparse
 
+import pymysql
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -37,6 +39,49 @@ import httpx  # noqa: E402
 from app import correo  # noqa: E402
 from app.db import ejecutar, obtener_uno  # noqa: E402
 from app.main import app  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mysql"))
+import migrar  # noqa: E402
+
+
+@pytest.fixture(scope="session", autouse=True)
+def base_de_pruebas_mysql():
+    """La base de pruebas, al día con las migraciones de mysql/migraciones.
+
+    Se crea si no existe y se le aplican las migraciones que le falten: las
+    pruebas corren siempre contra el mismo esquema que irá a producción.
+
+    Se niega a tocar una base cuyo nombre no diga «prueba». Las pruebas
+    borran y crean filas a voluntad; apuntarlas por error a la base real
+    sería borrar datos de personas reales.
+    """
+    url = os.environ["MYSQL_URL"]
+    nombre = urlparse(url).path.lstrip("/")
+    if "prueba" not in nombre:
+        pytest.exit(f"MYSQL_URL apunta a «{nombre}», que no es una base de pruebas. "
+                    "Las pruebas solo corren contra una base cuyo nombre diga «prueba».",
+                    returncode=2)
+    u = urlparse(url)
+    consulta = parse_qs(u.query)
+    raiz = pymysql.connect(host=u.hostname or "localhost", port=u.port or 3306,
+                           user=unquote(u.username or ""), password=unquote(u.password or ""),
+                           unix_socket=consulta.get("unix_socket", [None])[0],
+                           charset="utf8mb4", autocommit=True)
+    raiz.cursor().execute(f"CREATE DATABASE IF NOT EXISTS `{nombre}` "
+                          "CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci")
+    raiz.close()
+    if migrar.principal(aplicar=True, url=url) != 0:
+        pytest.exit("Las migraciones no se aplicaron en la base de pruebas.", returncode=2)
+
+
+@pytest.fixture(autouse=True)
+async def _pool_por_prueba():
+    """Cada prueba corre en su propio bucle de eventos, y un pool de aiomysql
+    pertenece al bucle que lo abrió: se cierra al final de cada prueba, en su
+    mismo bucle, para no dejar conexiones huérfanas."""
+    yield
+    from app.db import cerrar_pool
+    await cerrar_pool()
 
 CEDULA_PRUEBA = "1700000001"
 CEDULA_SIN_REGISTRO = "0900000001"

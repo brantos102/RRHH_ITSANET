@@ -38,6 +38,7 @@ el sistema sobre Supabase.
 """
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import json
 import re
@@ -61,6 +62,7 @@ _ZONA_SQL = "-05:00"
 _UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 _pool: aiomysql.Pool | None = None
+_pool_bucle: asyncio.AbstractEventLoop | None = None
 _transaccion: ContextVar[aiomysql.Connection | None] = ContextVar("_transaccion", default=None)
 
 
@@ -138,8 +140,21 @@ def _parametros(url: str) -> dict:
 
 
 async def abrir_pool() -> aiomysql.Pool:
-    global _pool
+    """El pool de conexiones, creado la primera vez que se pide.
+
+    Un pool de aiomysql pertenece al bucle de eventos que lo creó y no sirve
+    en otro. El servidor tiene un solo bucle, pero un guion que llama dos
+    veces a asyncio.run —y las pruebas, que abren uno por prueba— no: si el
+    bucle cambió, el pool viejo se abandona (sus conexiones murieron con su
+    bucle) y se abre otro.
+    """
+    global _pool, _pool_bucle
+    bucle = asyncio.get_running_loop()
+    if _pool is not None and _pool_bucle is not bucle:
+        # No se cierra: cerrarlo tocaría conexiones de otro bucle desde este.
+        _pool = None
     if _pool is None:
+        _pool_bucle = bucle
         settings = get_settings()
         _pool = await aiomysql.create_pool(
             minsize=1, maxsize=10,
