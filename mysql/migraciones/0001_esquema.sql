@@ -756,7 +756,6 @@ CREATE TABLE IF NOT EXISTS users (
   CONSTRAINT users_genero_valido CHECK (((genero IS NULL) OR (genero IN ('Masculino', 'Femenino', 'Otro')))),
   CONSTRAINT users_salida_posterior_ingreso CHECK (((fecha_salida IS NULL) OR (fecha_salida >= fecha_ingreso))),
   CONSTRAINT users_tipo_sangre_valido CHECK (((tipo_sangre IS NULL) OR (tipo_sangre IN ('A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-')))),
-  CONSTRAINT users_auth_user_id_fkey FOREIGN KEY (auth_user_id) REFERENCES auth.users(id) ON DELETE SET NULL,
   CONSTRAINT users_jefe_id_fkey FOREIGN KEY (jefe_id) REFERENCES users(id) ON DELETE SET NULL,
   CONSTRAINT users_region_fkey FOREIGN KEY (region) REFERENCES regiones(codigo),
   CONSTRAINT users_salida_registrada_por_fkey FOREIGN KEY (salida_registrada_por) REFERENCES users(id),

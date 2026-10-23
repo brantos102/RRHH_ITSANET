@@ -38,6 +38,25 @@ def test_estan_las_38_tablas(db):
     assert db.fetchone()["n"] == 38
 
 
+def test_ninguna_foranea_apunta_fuera_de_la_base(db):
+    """Una foránea hacia otra base se crea sin error con las comprobaciones
+    apagadas, y falla después con el primer dato. Pasó: la columna de
+    Supabase `auth_user_id` apuntaba a `auth.users`, que en MySQL es una
+    base que no existe, y habría tumbado el primer inicio de sesión."""
+    db.execute("""SELECT constraint_name, unique_constraint_schema
+                    FROM information_schema.referential_constraints
+                   WHERE constraint_schema = DATABASE()
+                     AND unique_constraint_schema <> DATABASE()""")
+    assert list(db.fetchall()) == []
+    db.execute("""SELECT constraint_name, referenced_table_name
+                    FROM information_schema.key_column_usage
+                   WHERE table_schema = DATABASE() AND referenced_table_name IS NOT NULL
+                     AND referenced_table_name NOT IN (
+                       SELECT table_name FROM information_schema.tables
+                        WHERE table_schema = DATABASE())""")
+    assert list(db.fetchall()) == []
+
+
 def test_toda_la_base_esta_en_utf8mb4(db):
     """Una sola tabla en otro juego de caracteres corrompe sus tildes."""
     db.execute("""SELECT table_name, table_collation FROM information_schema.tables
