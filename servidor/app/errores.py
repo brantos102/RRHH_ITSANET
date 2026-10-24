@@ -1,0 +1,198 @@
+"""Traducción de errores de la base y de las reglas de negocio a respuestas útiles.
+
+Las reglas de negocio tienen sus mensajes redactados en español para el
+usuario final. Aquí se dejan pasar esos mensajes y se convierte lo demás en
+un error genérico, sin filtrar detalles internos.
+
+Con MySQL las reglas viven en dos sitios, y las dos llegan aquí igual:
+
+  ReglaDeNegocio    la levantan las reglas que pasaron a Python. Lleva el
+                    mensaje y la pista que el formulario usa para ofrecer una
+                    salida (otro rango de fechas, el mínimo de días...). Es el
+                    equivalente del RAISE ... HINT de PostgreSQL: MySQL no
+                    tiene HINT y un SIGNAL se corta a 128 caracteres, por eso
+                    las reglas con mensajes largos o con pista viven en Python.
+  error de MySQL    los disparadores de la base (SIGNAL) y las restricciones.
+                    Se reconocen por el número de error.
+"""
+from __future__ import annotations
+
+import logging
+import re
+
+from fastapi import HTTPException, status
+
+log = logging.getLogger("rrhh.errores")
+
+# Mensaje por restricción, cuando el nombre del CHECK no le dice nada al usuario
+POR_RESTRICCION = {
+    "requests_justificacion_obligatoria":
+        "Los días solicitados superan su saldo: debe escribir una justificación de al menos 10 caracteres.",
+    "requests_descripcion_max":
+        "La descripción no puede superar los 200 caracteres.",
+    "requests_descripcion_obligatoria":
+        "Debe describir el motivo de su solicitud (mínimo 5 caracteres).",
+    "requests_permiso_justificado":
+        "Escriba la justificación del permiso (mínimo 10 caracteres): es lo único "
+        "con lo que su jefe y Talento Humano pueden decidir.",
+    "requests_permiso_categorizado":
+        "Debe seleccionar el tipo de permiso.",
+    "requests_rango_fechas":
+        "La fecha de fin no puede ser anterior a la de inicio.",
+    "requests_rango_horas":
+        "La hora de fin debe ser posterior a la de inicio.",
+    "request_attachments_mime_permitido":
+        "Solo se admiten imágenes (JPG, PNG, WebP, HEIC) o archivos PDF.",
+    "request_attachments_tamano_bytes_check":
+        "Cada archivo debe pesar menos de 10 MB.",
+    "users_cedula_valida":
+        "La cédula ingresada no es válida.",
+    "family_cedula_valida":
+        "La cédula del familiar no es válida.",
+}
+
+# Lo mismo para las restricciones de UNICIDAD. «El registro ya existe» es
+# cierto y no sirve de nada: quien lo lee no sabe qué campo chocó, y si el
+# formulario tiene diez campos se queda probando a ciegas. Pasó corrigiendo
+# el correo de un colaborador, donde además el choque era con OTRA ficha que
+# no se veía en pantalla.
+POR_UNICIDAD = {
+    "users_email_key":
+        "Ese correo ya está registrado a nombre de otra persona.",
+    "users_cedula_key":
+        "Ya hay una ficha con esa cédula.",
+    "users_auth_user_id_key":
+        "Esa cuenta de acceso ya está vinculada a otra ficha.",
+    "informes_firmados_folio_key":
+        "Ya existe un documento con ese folio.",
+    "idx_trazabilidad_una_sola_vez":
+        "Esa persona ya tiene su constancia de goce. Para emitir otra hace falta "
+        "autorizarla desde Papeles firmados, dejando el motivo.",
+    "app_config_pkey":
+        "Ese parámetro ya existe.",
+    "panel_bloques_pkey":
+        "Ese bloque del panel ya existe.",
+    "tablero_bloques_pkey":
+        "Ese indicador del tablero ya existe.",
+    "jornada_unica_por_dia":
+        "Esa persona ya tiene una jornada registrada ese día.",
+}
+
+
+class ReglaDeNegocio(Exception):
+    """Una regla de negocio que no se cumple, con el mensaje para la persona.
+
+    `pista` sigue el formato que tenía el HINT de PostgreSQL —«etiqueta|dato»—
+    para que el formulario no cambie.
+    """
+
+    def __init__(self, mensaje: str, pista: str | None = None):
+        super().__init__(mensaje)
+        self.mensaje = mensaje
+        self.pista = pista or ""
+
+
+# Números de error de MySQL que se distinguen.
+SEÑAL = 1644            # SIGNAL SQLSTATE '45000' de un disparador
+CHECK = 3819            # restricción CHECK (y los disparadores que la imitan)
+DUPLICADO = 1062        # restricción UNIQUE
+SIN_PERMISO = (1142, 1143, 1044)   # el usuario de la base no puede hacer eso
+
+_RESTRICCION_CHECK = re.compile(r"Check constraint '([^']+)' is violated")
+# MySQL 8 nombra la clave con su tabla delante: «for key 'users.users_email_key'»,
+# y a la clave primaria la llama PRIMARY en todas las tablas.
+_CLAVE_DUPLICADA = re.compile(r"for key '(?:([^'.]+)\.)?([^']+)'")
+
+
+def numero_de_error(exc: Exception) -> int | None:
+    """El número de error de MySQL, o None si no viene de MySQL."""
+    args = getattr(exc, "args", ())
+    if len(args) >= 2 and isinstance(args[0], int) and type(exc).__module__.startswith("pymysql"):
+        return args[0]
+    return None
+
+
+def _texto(exc: Exception) -> str:
+    args = getattr(exc, "args", ())
+    return str(args[1]) if len(args) >= 2 else str(exc)
+
+
+def restriccion_de(exc: Exception) -> str:
+    """El nombre de la restricción que falló, si es un CHECK o un UNIQUE."""
+    numero = numero_de_error(exc)
+    patron = {CHECK: _RESTRICCION_CHECK, DUPLICADO: _CLAVE_DUPLICADA}.get(numero)
+    if patron is None:
+        return ""
+    hallado = patron.search(_texto(exc))
+    if not hallado:
+        return ""
+    if numero == CHECK:
+        return hallado.group(1)
+    tabla, clave = hallado.groups()
+    # Se le da el nombre que tenía en PostgreSQL (app_config_pkey), que es
+    # con el que están escritos los mensajes y lo que conocen los registros.
+    return f"{tabla}_pkey" if clave == "PRIMARY" and tabla else clave
+
+
+def es_unicidad(exc: Exception) -> bool:
+    return numero_de_error(exc) == DUPLICADO
+
+
+def traducir(exc: Exception) -> HTTPException:
+    """Convierte un error de la base o de una regla en HTTPException con mensaje legible."""
+    numero = numero_de_error(exc)
+
+    # Reglas que rechazan a propósito: las de Python y los SIGNAL de MySQL.
+    if isinstance(exc, ReglaDeNegocio) or numero == SEÑAL:
+        if isinstance(exc, ReglaDeNegocio):
+            mensaje, pista = exc.mensaje.strip(), exc.pista
+        else:
+            mensaje, pista = _texto(exc).strip(), ""
+        detalle: dict = {"mensaje": mensaje}
+        # El HINT transporta datos que el formulario necesita para ofrecer una
+        # salida. Lleva etiqueta al inicio para no confundir un caso con otro:
+        # "rango|2099-07-13|2099-07-19"  -> corrección del fin de semana
+        # "bloque_minimo|7"              -> mínimo de días de vacaciones
+        # "solape|1234"                   -> la solicitud con la que choca
+        etiqueta, _, resto = pista.partition("|")
+        if etiqueta == "bloque_minimo" and resto:
+            detalle["bloque_minimo"] = resto
+        elif etiqueta == "anticipacion" and resto:
+            detalle["anticipacion_dias"] = resto
+        elif etiqueta == "solape":
+            # Con etiqueta propia y no por la rama de abajo: «solape|1234» tiene
+            # dos partes, así que el formato histórico lo tomaba por un par de
+            # fechas y el formulario ofrecía corregir el rango a «solape»–«1234».
+            if resto:
+                detalle["solapa_con_folio"] = resto
+        elif pista and "|" in pista:
+            # Formato histórico sin etiqueta: dos fechas.
+            partes = [p for p in pista.split("|") if p]
+            if etiqueta == "rango":
+                partes = partes[1:]
+            if len(partes) == 2:
+                detalle["rango_sugerido"] = {"inicio": partes[0], "fin": partes[1]}
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detalle)
+
+    if numero == CHECK:
+        nombre = restriccion_de(exc)
+        mensaje = POR_RESTRICCION.get(nombre, "Los datos enviados no cumplen una regla del sistema.")
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                             detail={"mensaje": mensaje, "restriccion": nombre})
+
+    if numero == DUPLICADO:
+        nombre = restriccion_de(exc)
+        mensaje = POR_UNICIDAD.get(nombre, "El registro ya existe.")
+        # El nombre de la restricción viaja también: quien atiende el
+        # incidente lo necesita, y sin él hay que ir al registro del servidor
+        # con la hora aproximada y buscar a mano.
+        return HTTPException(status_code=status.HTTP_409_CONFLICT,
+                             detail={"mensaje": mensaje, "restriccion": nombre})
+
+    if numero in SIN_PERMISO:
+        return HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                             detail={"mensaje": "No tiene permisos para esta operación."})
+
+    log.exception("Error de base no contemplado")
+    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                         detail={"mensaje": "Ocurrió un error inesperado. El incidente quedó registrado."})

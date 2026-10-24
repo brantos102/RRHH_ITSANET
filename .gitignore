@@ -1,0 +1,26 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.local
+.pytest_cache/
+*.log
+# Y los rotados: `*.log` no cubre `sistema.log.1`, y esos archivos
+# llevan la cédula de cada persona en cada línea (LOPDP).
+*.log.[0-9]*
+backend/logs/
+
+# Dependencias del compilador de estilos (no hacen falta para ejecutar)
+build/node_modules/
+
+# La carga generada lleva datos personales de la planilla (LOPDP): se
+# genera en cada máquina con scripts/importar_planilla.py y no se versiona.
+supabase/carga_inicial.sql
+
+# Informes generados: se regeneran con scripts/informe_devengo.py
+informe_devengo.pdf
+estructura_base_datos.pdf
+depuracion_base_datos.pdf
+
+# Ajustes de cada máquina (puerto del backend, URL). Ver config.local.js.ejemplo
+frontend/config.local.js

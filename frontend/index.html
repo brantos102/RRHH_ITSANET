@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>Ingreso · Permisos y Vacaciones</title>
+<link rel="icon" type="image/png" href="img/icono.png">
+<link rel="stylesheet" href="vendor/tailwind.css">
+<script src="config.js"></script>
+<!-- Ajustes de ESTA máquina, fuera del repositorio: el puerto del backend si
+     no es el 8000, una URL distinta. Si el archivo no existe no pasa nada
+     —el servidor de la interfaz devuelve vacío—. Vea config.local.js.ejemplo. -->
+<script src="config.local.js"></script>
+<style>
+  /* Oculta las flechas del input numérico en el campo del código */
+  input[type=number]::-webkit-outer-spin-button,
+  input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type=number] { -moz-appearance: textfield; }
+</style>
+</head>
+
+<body class="min-h-dvh bg-slate-100 text-slate-900 antialiased">
+<main class="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4 py-8">
+
+  <header class="mb-8 text-center">
+    <img src="img/logo.png" alt="ITSANET" class="mx-auto mb-5 h-12 w-auto">
+    <h1 id="titulo-empresa" class="text-xl font-semibold tracking-tight">Permisos y Vacaciones</h1>
+    <p class="mt-1 text-sm text-slate-500">Ingrese con su cédula de identidad</p>
+  </header>
+
+  <!-- Aviso de sesión expirada -->
+  <div id="aviso-expirada" class="mb-4 hidden rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200">
+    Su sesión expiró por seguridad. Vuelva a ingresar.
+  </div>
+
+  <section class="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+
+    <!-- Paso 1: cédula -->
+    <form id="paso-cedula" novalidate>
+      <label for="cedula" class="block text-sm font-medium text-slate-700">Cédula de identidad</label>
+      <input id="cedula" name="cedula" type="text" inputmode="numeric" autocomplete="username"
+             maxlength="10" placeholder="1712345678" required
+             class="mt-2 w-full rounded-xl border-0 bg-slate-50 px-4 py-3 text-lg tracking-wider
+                    ring-1 ring-slate-300 outline-none placeholder:text-slate-400
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+      <p id="error-cedula" class="mt-2 hidden text-sm text-rose-600" role="alert"></p>
+
+      <button type="submit" id="btn-enviar"
+              class="mt-5 w-full rounded-xl bg-slate-900 px-4 py-3 font-medium text-white
+                     transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900
+                     focus:ring-offset-2 disabled:opacity-50">
+        Enviar código a mi correo
+      </button>
+
+      <p class="mt-4 text-center text-xs leading-relaxed text-slate-500">
+        No usamos contraseñas. Le enviaremos un código de un solo uso
+        al correo institucional registrado en Talento Humano.
+      </p>
+    </form>
+
+    <!-- Alta: probar identidad ------------------------------------------- -->
+    <form id="paso-identidad" class="hidden" novalidate>
+      <button type="button" data-volver-acceso
+              class="mb-3 text-sm text-slate-500 hover:text-slate-900">← Volver</button>
+      <h2 class="font-semibold text-slate-900">Comprobemos que es usted</h2>
+      <p class="mt-1 text-sm leading-relaxed text-slate-600">
+        Su expediente ya está en el sistema —con su cargo, su jefe y su fecha
+        de ingreso—, pero <b>no tiene un correo</b> donde enviarle el código.
+      </p>
+      <p class="mt-2 text-sm leading-relaxed text-slate-600">
+        Como no hay a dónde escribirle, lo único que puede acreditar que es
+        usted son dos datos que ya constan en su expediente. <b>No se los
+        estamos pidiendo para registrarlos</b>: los tenemos, y los usamos
+        para compararlos.
+      </p>
+
+      <label for="nacimiento" class="mt-4 block text-sm font-medium text-slate-700">
+        Fecha de nacimiento
+      </label>
+      <input id="nacimiento" type="date" required
+             class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+
+      <label for="ingreso" class="mt-3 block text-sm font-medium text-slate-700">
+        Fecha de ingreso a la empresa
+      </label>
+      <input id="ingreso" type="date" required
+             class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+
+      <p id="error-identidad" class="mt-3 hidden text-sm text-rose-600" role="alert"></p>
+
+      <button type="submit" id="btn-identidad"
+              class="mt-5 w-full rounded-xl bg-slate-900 px-4 py-3 font-medium text-white
+                     hover:bg-slate-800 disabled:opacity-50">
+        Continuar
+      </button>
+      <p class="mt-4 text-center text-xs leading-relaxed text-slate-500">
+        ¿No recuerda alguna fecha? Comuníquese con Talento Humano.
+      </p>
+    </form>
+
+    <!-- Alta: datos de contacto -------------------------------------------- -->
+    <form id="paso-ficha" class="hidden" novalidate>
+      <h2 class="font-semibold text-slate-900">Sus datos de contacto</h2>
+      <p id="ficha-saludo" class="mt-1 text-sm text-slate-600"></p>
+
+      <label for="f-email" class="mt-4 block text-sm font-medium text-slate-700">
+        Correo electrónico <span class="text-rose-600">*</span>
+      </label>
+      <input id="f-email" type="email" required autocomplete="email"
+             placeholder="nombre@itsanet.com.ec"
+             class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+      <p class="mt-1 text-xs text-slate-500">
+        Ahí llegará su código cada vez que entre. Use el institucional si lo tiene.
+      </p>
+
+      <!-- Lo que el expediente ya tiene. No se vuelve a pedir: pedirle a
+           alguien todo lo que el sistema ya sabe es la forma más rápida de
+           que decida que el sistema no sabe nada. -->
+      <div id="f-ya-consta" class="mt-4 hidden rounded-xl bg-emerald-50 p-3 ring-1 ring-emerald-200">
+        <p class="text-sm font-medium text-emerald-900">Esto ya consta en su expediente</p>
+        <ul id="f-ya-consta-lista" class="mt-1.5 space-y-0.5 text-sm text-emerald-800"></ul>
+        <p class="mt-2 text-xs text-emerald-700">
+          No hace falta que lo escriba de nuevo. Podrá revisarlo y corregirlo
+          después, desde «Mi ficha personal».
+        </p>
+      </div>
+
+      <label id="f-telefono-label" for="f-telefono" class="mt-3 block text-sm font-medium text-slate-700">
+        Teléfono personal <span class="text-rose-600">*</span>
+      </label>
+      <input id="f-telefono" type="tel" inputmode="numeric" required autocomplete="tel"
+             placeholder="0991234567"
+             class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+
+      <fieldset id="f-emergencia" class="mt-4 rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200">
+        <legend class="px-1 text-sm font-medium text-slate-700">Contacto de emergencia</legend>
+        <p class="mb-2 text-xs text-slate-500">A quién avisamos si algo ocurre en la jornada.</p>
+        <input id="f-emer-nombre" type="text" required placeholder="Nombre completo"
+               class="w-full rounded-lg border-0 bg-white px-3 py-2 text-sm ring-1 ring-slate-300
+                      focus:ring-2 focus:ring-slate-900">
+        <div class="mt-2 grid grid-cols-2 gap-2">
+          <select id="f-emer-parentesco"
+                  class="rounded-lg border-0 bg-white px-3 py-2 text-sm ring-1 ring-slate-300
+                         focus:ring-2 focus:ring-slate-900">
+            <option value="">Parentesco…</option>
+            <option value="conyuge">Cónyuge</option>
+            <option value="conviviente">Conviviente</option>
+            <option value="hijo">Hijo o hija</option>
+            <option value="padre">Padre</option>
+            <option value="madre">Madre</option>
+            <option value="hermano">Hermano o hermana</option>
+            <option value="abuelo">Abuelo o abuela</option>
+            <option value="nieto">Nieto o nieta</option>
+            <option value="suegro">Suegro o suegra</option>
+            <option value="cunado">Cuñado o cuñada</option>
+            <option value="otro">Otro</option>
+          </select>
+          <input id="f-emer-telefono" type="tel" inputmode="numeric" required placeholder="Teléfono"
+                 class="rounded-lg border-0 bg-white px-3 py-2 text-sm ring-1 ring-slate-300
+                        focus:ring-2 focus:ring-slate-900">
+        </div>
+      </fieldset>
+
+      <label id="f-direccion-label" for="f-direccion" class="mt-3 block text-sm font-medium text-slate-700">
+        Dirección <span class="font-normal text-slate-500">(opcional)</span>
+      </label>
+      <input id="f-direccion" type="text" autocomplete="street-address"
+             class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+
+      <!-- Confirmar cargo y jefe ------------------------------------------
+           La planilla se cargó de una hoja de cálculo y nadie la contrastó
+           con quien la vive. Este es el único momento en que se tiene la
+           atención de las 351 personas, así que es aquí donde se pregunta. -->
+      <fieldset id="f-confirmar" class="mt-4 rounded-xl bg-amber-50 p-3 ring-1 ring-amber-200">
+        <legend class="px-1 text-sm font-medium text-amber-900">Confirme sus datos laborales</legend>
+        <p class="mb-3 text-xs text-amber-800">
+          Esto es lo que tenemos registrado. Si algo no corresponde, indíquelo:
+          Talento Humano lo confirma antes de que rija.
+        </p>
+
+        <div class="rounded-lg bg-white p-3 ring-1 ring-slate-200">
+          <p class="text-xs text-slate-500">Cargo</p>
+          <p id="f-cargo-actual" class="font-medium">—</p>
+          <div class="mt-2 flex gap-4 text-sm">
+            <label class="flex items-center gap-1.5">
+              <input type="radio" name="cargo-ok" value="si" checked
+                     class="text-slate-900 focus:ring-slate-900"> Es correcto
+            </label>
+            <label class="flex items-center gap-1.5">
+              <input type="radio" name="cargo-ok" value="no"
+                     class="text-slate-900 focus:ring-slate-900"> No corresponde
+            </label>
+          </div>
+          <input id="f-cargo-nuevo" type="text" maxlength="120"
+                 placeholder="¿Cuál es su cargo?"
+                 class="mt-2 hidden w-full rounded-lg border-0 bg-slate-50 px-3 py-2 text-sm
+                        ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </div>
+
+        <div class="mt-2 rounded-lg bg-white p-3 ring-1 ring-slate-200">
+          <p class="text-xs text-slate-500">Jefe inmediato</p>
+          <p id="f-jefe-actual" class="font-medium">—</p>
+          <div class="mt-2 flex gap-4 text-sm">
+            <label class="flex items-center gap-1.5">
+              <input type="radio" name="jefe-ok" value="si" checked
+                     class="text-slate-900 focus:ring-slate-900"> Es correcto
+            </label>
+            <label class="flex items-center gap-1.5">
+              <input type="radio" name="jefe-ok" value="no"
+                     class="text-slate-900 focus:ring-slate-900"> No corresponde
+            </label>
+          </div>
+          <select id="f-jefe-nuevo"
+                  class="mt-2 hidden w-full rounded-lg border-0 bg-slate-50 px-3 py-2 text-sm
+                         ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+            <option value="">Elija a su jefe…</option>
+          </select>
+        </div>
+      </fieldset>
+
+      <p class="mt-4 rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
+        Lo que usted declara aquí —su correo, su teléfono, su contacto de
+        emergencia— rige de inmediato. <b>Los datos delicados</b> —su cargo, su
+        jefe inmediato, su fecha de ingreso— <b>los verifica Talento Humano</b>
+        antes de que cualquier cambio tenga efecto, para dejar constancia de su
+        veracidad. Sus datos se tratan conforme a la Ley Orgánica de Protección
+        de Datos Personales.
+      </p>
+
+      <p id="error-ficha" class="mt-3 hidden text-sm text-rose-600" role="alert"></p>
+
+      <button type="submit" id="btn-ficha"
+              class="mt-5 w-full rounded-xl bg-slate-900 px-4 py-3 font-medium text-white
+                     hover:bg-slate-800 disabled:opacity-50">
+        Guardar y enviarme el código
+      </button>
+    </form>
+
+    <!-- Paso 2: código -->
+    <form id="paso-codigo" class="hidden" novalidate>
+      <button type="button" id="btn-volver"
+              class="mb-4 -ml-1 inline-flex items-center gap-1 rounded-lg px-1 py-1 text-sm
+                     text-slate-500 hover:text-slate-900">
+        ← Cambiar cédula
+      </button>
+
+      <p class="text-sm text-slate-600">
+        Enviamos un código de 6 dígitos a <strong id="correo-destino" class="text-slate-900"></strong>.
+      </p>
+
+      <label for="codigo" class="mt-5 block text-sm font-medium text-slate-700">Código de acceso</label>
+      <input id="codigo" name="codigo" type="text" inputmode="numeric" autocomplete="one-time-code"
+             maxlength="6" placeholder="000000" required
+             class="mt-2 w-full rounded-xl border-0 bg-slate-50 px-4 py-3 text-center text-3xl
+                    font-semibold tracking-[0.5em] ring-1 ring-slate-300 outline-none
+                    placeholder:tracking-[0.5em] placeholder:text-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+      <p id="error-codigo" class="mt-2 hidden text-sm text-rose-600" role="alert"></p>
+
+      <button type="submit" id="btn-validar"
+              class="mt-5 w-full rounded-xl bg-slate-900 px-4 py-3 font-medium text-white
+                     transition hover:bg-slate-800 disabled:opacity-50">
+        Ingresar
+      </button>
+
+      <p class="mt-4 text-center text-sm text-slate-500">
+        <span id="contador"></span>
+        <button type="button" id="btn-reenviar" class="hidden font-medium text-slate-900 underline">
+          Reenviar código
+        </button>
+      </p>
+    </form>
+  </section>
+
+  <p class="mt-6 text-center text-xs text-slate-400">
+    Sus datos se tratan conforme a la Ley Orgánica de Protección de Datos Personales.
+  </p>
+</main>
+
+<script type="module">
+import { api, sesion, validarCedula, ErrorApi, esc } from "./js/api.js";
+
+const $ = (id) => document.getElementById(id);
+const pasoCedula = $("paso-cedula"), pasoCodigo = $("paso-codigo");
+let cedulaActual = null, temporizador = null;
+
+if (window.RRHH_CONFIG?.EMPRESA) {
+  $("titulo-empresa").textContent = `${window.RRHH_CONFIG.SISTEMA} · ${window.RRHH_CONFIG.EMPRESA}`;
+  document.title = `Ingreso · ${window.RRHH_CONFIG.EMPRESA}`;
+}
+if (new URLSearchParams(location.search).has("expirada")) $("aviso-expirada").classList.remove("hidden");
+if (sesion.vigente) location.replace("dashboard.html");
+
+function mostrarError(campo, mensaje) {
+  const el = $(`error-${campo}`);
+  el.textContent = mensaje;
+  el.classList.toggle("hidden", !mensaje);
+}
+
+function cuentaRegresiva(segundos) {
+  clearInterval(temporizador);
+  $("btn-reenviar").classList.add("hidden");
+  const tic = () => {
+    if (segundos <= 0) {
+      clearInterval(temporizador);
+      $("contador").textContent = "";
+      $("btn-reenviar").classList.remove("hidden");
+      return;
+    }
+    $("contador").textContent = `Puede pedir otro código en ${segundos}s · `;
+    segundos--;
+  };
+  tic();
+  temporizador = setInterval(tic, 1000);
+}
+
+/* ---- Paso 1 ---- */
+$("cedula").addEventListener("input", (e) => {
+  e.target.value = e.target.value.replace(/\D/g, "").slice(0, 10);
+  mostrarError("cedula", "");
+});
+
+pasoCedula.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const cedula = $("cedula").value.trim();
+
+  if (!validarCedula(cedula)) {
+    mostrarError("cedula", "La cédula ingresada no es válida. Revise los dígitos.");
+    $("cedula").focus();
+    return;
+  }
+
+  $("btn-enviar").disabled = true;
+  $("btn-enviar").textContent = "Enviando…";
+  try {
+    /* Antes de pedir el código: ¿esta persona tiene correo registrado? Buena
+       parte de la planilla llegó sin correo, y sin esto se quedaría esperando
+       un mensaje que no puede llegar a ninguna parte. La respuesta es la
+       misma —falso— si la cédula no existe, así que no revela nada. */
+    const { necesita } = await api.necesitaFicha(cedula);
+    if (necesita) {
+      cedulaActual = cedula;
+      pasoCedula.classList.add("hidden");
+      $("paso-identidad").classList.remove("hidden");
+      $("nacimiento").focus();
+      return;
+    }
+
+    const r = await api.solicitarToken(cedula);
+    cedulaActual = cedula;
+    $("correo-destino").textContent = r.correo || "su correo institucional";
+    pasoCedula.classList.add("hidden");
+    pasoCodigo.classList.remove("hidden");
+    $("codigo").focus();
+    cuentaRegresiva(45);
+  } catch (err) {
+    mostrarError("cedula", err instanceof ErrorApi ? err.message : "No se pudo enviar el código.");
+  } finally {
+    $("btn-enviar").disabled = false;
+    $("btn-enviar").textContent = "Enviar código a mi correo";
+  }
+});
+
+/* ---- Alta guiada: identidad y ficha ---- */
+let tokenAlta = null;
+
+document.querySelectorAll("[data-volver-acceso]").forEach((b) =>
+  b.addEventListener("click", () => {
+    $("paso-identidad").classList.add("hidden");
+    $("paso-ficha").classList.add("hidden");
+    pasoCedula.classList.remove("hidden");
+    $("cedula").focus();
+  })
+);
+
+$("paso-identidad").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  mostrarError("identidad", "");
+  const nacimiento = $("nacimiento").value, ingreso = $("ingreso").value;
+  if (!nacimiento || !ingreso) {
+    return mostrarError("identidad", "Complete las dos fechas.");
+  }
+
+  $("btn-identidad").disabled = true;
+  $("btn-identidad").textContent = "Comprobando…";
+  try {
+    const r = await api.probarIdentidad(cedulaActual, nacimiento, ingreso);
+    tokenAlta = r.token;
+    $("ficha-saludo").textContent =
+      `${r.nombre}, registre dónde ubicarlo. Le enviaremos su código al correo que indique.`;
+
+    /* Lo que ya consta NO se vuelve a pedir: se muestra y se oculta el
+       campo. Pedirle a alguien cuyo expediente está completo todo lo que el
+       sistema ya sabe es la forma más rápida de que decida que el sistema
+       no sabe nada —y esa persona existe: tiene cargo, jefe y teléfono—. */
+    const consta = r.ya_consta || {};
+    const puestos = [];
+    const ocultar = (campo, etiqueta, valor, titulo) => {
+      if (!valor) return;
+      puestos.push(`<li>· <b>${titulo}:</b> ${esc(String(valor))}</li>`);
+      $(campo).closest("fieldset") === null
+        ? ($(campo).classList.add("hidden"), $(etiqueta)?.classList.add("hidden"))
+        : $(campo).closest("fieldset").classList.add("hidden");
+      $(campo).required = false;
+    };
+    ocultar("f-telefono", "f-telefono-label", consta.telefono, "Teléfono");
+    ocultar("f-direccion", "f-direccion-label", consta.direccion, "Dirección");
+    if (consta.emergencia) {
+      puestos.push(`<li>· <b>Contacto de emergencia:</b> ${esc(consta.emergencia)}</li>`);
+      $("f-emergencia").classList.add("hidden");
+      ["f-emer-nombre", "f-emer-telefono"].forEach((id) => { $(id).required = false; });
+    }
+    $("f-ya-consta").classList.toggle("hidden", !puestos.length);
+    $("f-ya-consta-lista").innerHTML = puestos.join("");
+    $("f-cargo-actual").textContent =
+      [r.cargo, r.departamento].filter(Boolean).join(" · ") || "Sin cargo registrado";
+    $("f-jefe-actual").textContent = r.jefe || "Sin jefe registrado";
+    // Sin cargo o sin jefe no hay nada que confirmar: se pregunta cuál es.
+    if (!r.cargo) marcarIncorrecto("cargo-ok");
+    if (!r.jefe) marcarIncorrecto("jefe-ok");
+    cargarJefaturas();
+    $("paso-identidad").classList.add("hidden");
+    $("paso-ficha").classList.remove("hidden");
+    $("f-email").focus();
+  } catch (err) {
+    mostrarError("identidad", err instanceof ErrorApi ? err.message
+      : "No se pudo comprobar. Intente de nuevo.");
+  } finally {
+    $("btn-identidad").disabled = false;
+    $("btn-identidad").textContent = "Continuar";
+  }
+});
+
+/* ---- Confirmación de cargo y jefe ---- */
+const elegido = (grupo) =>
+  document.querySelector(`input[name="${grupo}"]:checked`)?.value || "si";
+
+function marcarIncorrecto(grupo) {
+  const opcion = document.querySelector(`input[name="${grupo}"][value="no"]`);
+  if (opcion) { opcion.checked = true; opcion.dispatchEvent(new Event("change", { bubbles: true })); }
+}
+
+[["cargo-ok", "f-cargo-nuevo"], ["jefe-ok", "f-jefe-nuevo"]].forEach(([grupo, campo]) =>
+  document.querySelectorAll(`input[name="${grupo}"]`).forEach((opcion) =>
+    opcion.addEventListener("change", () =>
+      $(campo).classList.toggle("hidden", elegido(grupo) === "si"))));
+
+async function cargarJefaturas() {
+  const lista = $("f-jefe-nuevo");
+  if (lista.options.length > 1) return;          // ya cargada
+  try {
+    const jefaturas = await api.jefaturasDelAlta(tokenAlta);
+    lista.insertAdjacentHTML("beforeend", jefaturas.map((j) =>
+      `<option value="${j.id}">${[j.nombre, j.cargo].filter(Boolean).join(" · ")}</option>`
+    ).join(""));
+  } catch {
+    // Sin lista, la persona igual completa el resto: no se le corta el paso
+    // por un dato que Talento Humano puede corregir después.
+    lista.insertAdjacentHTML("beforeend",
+      '<option value="" disabled>No se pudo cargar la lista</option>');
+  }
+}
+
+["f-telefono", "f-emer-telefono"].forEach((id) =>
+  $(id).addEventListener("input", (e) => {
+    e.target.value = e.target.value.replace(/\D/g, "").slice(0, 13);
+  })
+);
+
+$("paso-ficha").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  mostrarError("ficha", "");
+
+  const email = $("f-email").value.trim();
+  const telefono = $("f-telefono").value.trim();
+  const emerNombre = $("f-emer-nombre").value.trim();
+  const emerTelefono = $("f-emer-telefono").value.trim();
+
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    return mostrarError("ficha", "Escriba un correo válido: ahí llegará su código.");
+  }
+  // Solo se exige lo que se preguntó: lo que ya constaba se ocultó arriba y
+  // el servidor lo conserva. Que al final no quede sin teléfono ni sin
+  // contacto lo comprueba la base, contra el expediente y no contra esta
+  // pantalla, que es justo lo que permite no repreguntar.
+  const piden = (id) => !$(id).closest("fieldset, label, div")?.classList.contains("hidden")
+                         && $(id).required;
+  if (piden("f-telefono") && telefono.length < 7) {
+    return mostrarError("ficha", "El teléfono personal es obligatorio.");
+  }
+  if (piden("f-emer-nombre") && (emerNombre.length < 3 || emerTelefono.length < 7)) {
+    return mostrarError("ficha", "Complete el contacto de emergencia: nombre y teléfono.");
+  }
+
+  $("btn-ficha").disabled = true;
+  $("btn-ficha").textContent = "Guardando…";
+  try {
+    const cargoOk = elegido("cargo-ok") === "si";
+    const jefeOk = elegido("jefe-ok") === "si";
+    if (!cargoOk && !$("f-cargo-nuevo").value.trim()) {
+      return mostrarError("ficha", "Escriba cuál es su cargo.");
+    }
+    if (!jefeOk && !$("f-jefe-nuevo").value) {
+      return mostrarError("ficha", "Elija quién es su jefe inmediato.");
+    }
+
+    const respuesta = await api.completarFicha({
+      token: tokenAlta, email,
+      // Nulo y no cadena vacía: lo que no se preguntó no viaja, y el
+      // servidor conserva lo que ya tenía en vez de borrarlo.
+      telefono: telefono || null,
+      emergencia_nombre: emerNombre || null,
+      emergencia_parentesco: $("f-emer-parentesco").value.trim() || null,
+      emergencia_telefono: emerTelefono || null,
+      direccion: $("f-direccion").value.trim() || null,
+      cargo_correcto: cargoOk,
+      cargo_propuesto: cargoOk ? null : $("f-cargo-nuevo").value.trim(),
+      jefe_correcto: jefeOk,
+      jefe_propuesto_id: jefeOk ? null : $("f-jefe-nuevo").value,
+    });
+    if (respuesta.avisos?.length) console.warn(respuesta.avisos.join(" "));
+    // Con el correo ya registrado, el camino normal funciona.
+    const r = await api.solicitarToken(cedulaActual);
+    $("correo-destino").textContent = r.correo || email;
+    $("paso-ficha").classList.add("hidden");
+    pasoCodigo.classList.remove("hidden");
+    $("codigo").focus();
+    cuentaRegresiva(45);
+  } catch (err) {
+    mostrarError("ficha", err instanceof ErrorApi ? err.message
+      : "No se pudieron guardar sus datos.");
+  } finally {
+    $("btn-ficha").disabled = false;
+    $("btn-ficha").textContent = "Guardar y enviarme el código";
+  }
+});
+
+/* ---- Paso 2 ---- */
+$("btn-volver").addEventListener("click", () => {
+  clearInterval(temporizador);
+  pasoCodigo.classList.add("hidden");
+  pasoCedula.classList.remove("hidden");
+  $("codigo").value = "";
+  mostrarError("codigo", "");
+  $("cedula").focus();
+});
+
+$("codigo").addEventListener("input", (e) => {
+  e.target.value = e.target.value.replace(/\D/g, "").slice(0, 6);
+  mostrarError("codigo", "");
+  if (e.target.value.length === 6) pasoCodigo.requestSubmit();
+});
+
+pasoCodigo.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const codigo = $("codigo").value.trim();
+  if (codigo.length < 6) return mostrarError("codigo", "El código tiene 6 dígitos.");
+
+  $("btn-validar").disabled = true;
+  $("btn-validar").textContent = "Verificando…";
+  try {
+    sesion.guardar(await api.validarToken(cedulaActual, codigo));
+    location.href = "dashboard.html";
+  } catch (err) {
+    mostrarError("codigo", err.message);
+    $("codigo").value = "";
+    $("codigo").focus();
+  } finally {
+    $("btn-validar").disabled = false;
+    $("btn-validar").textContent = "Ingresar";
+  }
+});
+
+$("btn-reenviar").addEventListener("click", async () => {
+  try {
+    await api.solicitarToken(cedulaActual);
+    cuentaRegresiva(45);
+    mostrarError("codigo", "");
+  } catch (err) {
+    mostrarError("codigo", err.message);
+  }
+});
+</script>
+</body>
+</html>
