@@ -1,7 +1,11 @@
 """Traslado de los datos de Supabase (PostgreSQL) a MySQL, el día del corte.
 
-    python mysql/trasladar.py --origen "postgresql://..."             # revisa, no toca nada
-    python mysql/trasladar.py --origen "postgresql://..." --aplicar   # traslada
+    python mysql/trasladar.py              # revisa, no toca nada
+    python mysql/trasladar.py --aplicar    # traslada
+
+El origen se lee de la variable PG_ORIGEN_URL (o de --origen). La variable es
+preferible: lo que va en la línea de comandos lo puede ver cualquier usuario
+del servidor mientras el proceso corre, y la cadena lleva la clave.
 
 El destino es MYSQL_URL (o servidor/.env), con todas las migraciones de
 mysql/migraciones ya aplicadas y SIN datos de personas: el traslado se niega
@@ -352,7 +356,16 @@ def principal(origen: str, aplicar: bool, destino: str | None = None) -> int:
 
     print(f"\n{GRIS}Origen:  {_sin_clave(origen)}{FIN}")
     print(f"{GRIS}Destino: {conexion.describir(destino)}{FIN}\n")
-    pg = psycopg.connect(origen)
+    # prepare_threshold=None: el pooler de Supabase en modo transacción no
+    # admite sentencias preparadas, y psycopg las prepara solo a partir de la
+    # quinta vez que repite una consulta (aquí, una por tabla).
+    pg = psycopg.connect(origen, prepare_threshold=None)
+    # Una sola foto de la base para todo el traslado: lo que se copia y lo que
+    # después se compara son los mismos datos aunque alguien siga usando el
+    # sistema mientras tanto. Y solo lectura: el traslado no puede escribir
+    # en Supabase ni por error.
+    pg.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
+    pg.read_only = True
     pg.execute("set time zone 'UTC'")
     my = migrar.conectar(destino)
     cur = my.cursor()
@@ -378,7 +391,7 @@ def principal(origen: str, aplicar: bool, destino: str | None = None) -> int:
     print(f"Listo para trasladar {total} filas de {len(tipos)} tablas.")
     if not aplicar:
         print(f"\n{GRIS}Esto no tocó nada. Para trasladar:{FIN}\n"
-              f"    python mysql/trasladar.py --origen \"...\" --aplicar")
+              f"    python mysql/trasladar.py --aplicar")
         return 0
 
     print()
@@ -416,7 +429,12 @@ def _sin_clave(url: str) -> str:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--origen", required=True, help="URL de PostgreSQL (Supabase)")
+    ap.add_argument("--origen", help="URL de PostgreSQL (Supabase). Mejor por la variable "
+                    "PG_ORIGEN_URL: en la línea de comandos la ven los demás usuarios del servidor")
     ap.add_argument("--aplicar", action="store_true", help="trasladar de verdad")
     args = ap.parse_args()
-    sys.exit(principal(args.origen, args.aplicar))
+    import os
+    origen = args.origen or os.environ.get("PG_ORIGEN_URL")
+    if not origen:
+        ap.error("falta el origen: defina PG_ORIGEN_URL o use --origen")
+    sys.exit(principal(origen, args.aplicar))
