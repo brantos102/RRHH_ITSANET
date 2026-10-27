@@ -54,10 +54,11 @@ HOJA_NUEVA = "REGISTRO DE VACACIONE"
 HOJA_ANTIGUA = "registro de vacaciones"
 HOJA_MAESTRO = "FECHA DE INGRESO"
 
-# Feriados nacionales de Ecuador que el sistema tiene cargados (2026). Sirven
+# Feriados nacionales de Ecuador que el sistema tiene cargados (2026), los
+# mismos de mysql/migraciones/0007_feriados.sql. Sirven
 # para señalar las vacaciones que los incluyen, no para cambiar ningún saldo.
 FERIADOS = {dt.date(2026, 1, 1), dt.date(2026, 2, 16), dt.date(2026, 2, 17), dt.date(2026, 4, 3),
-            dt.date(2026, 5, 1), dt.date(2026, 5, 25), dt.date(2026, 8, 10), dt.date(2026, 10, 9),
+            dt.date(2026, 5, 1), dt.date(2026, 5, 24), dt.date(2026, 8, 10), dt.date(2026, 10, 9),
             dt.date(2026, 11, 2), dt.date(2026, 11, 3), dt.date(2026, 12, 25)}
 
 GRAVEDAD = {"ALTA": 1, "MEDIA": 2, "BAJA": 3}

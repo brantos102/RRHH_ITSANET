@@ -22,8 +22,9 @@ from .. import correo, notificaciones
 from ..audit import ip_del_cliente, registrar
 from ..cedula import normalizar_cedula
 from ..config import get_settings
-from ..db import conexion, obtener_todos, obtener_uno
+from ..db import ejecutar, nuevo_id, obtener_todos, obtener_uno, transaccion
 from ..errores import traducir
+from ..reglas import acceso, ficha, periodos, personal, saldo
 from ..deps import usuario_actual
 from ..schemas import Perfil, RespuestaEnvio, Sesion, SolicitudToken, ValidacionToken
 from ..security import comparar_hash, emitir_token, generar_otp, hash_otp
@@ -67,8 +68,7 @@ async def solicitar_token(datos: SolicitudToken, request: Request) -> RespuestaE
     #
     # Lo que la regla sigue frenando es lo que debe frenar: pedir códigos una
     # y otra vez sin usar ninguno, que es exactamente la forma del abuso.
-    conteo = await obtener_uno(
-        "select * from public.codigos_sin_usar(%s, %s)", (datos.cedula, ip))
+    conteo = await acceso.codigos_sin_usar(datos.cedula, ip)
     if conteo and conteo["por_cedula"] >= settings.otp_max_envios_hora:
         await registrar(request, "otp_limite_cedula", cedula=datos.cedula)
         raise HTTPException(
@@ -85,7 +85,7 @@ async def solicitar_token(datos: SolicitudToken, request: Request) -> RespuestaE
         )
 
     usuario = await obtener_uno(
-        "select id, nombre, email, activo from public.users where cedula = %s",
+        "SELECT id, nombre, email, activo FROM users WHERE cedula = %s",
         (datos.cedula,),
     )
 
@@ -112,24 +112,18 @@ async def solicitar_token(datos: SolicitudToken, request: Request) -> RespuestaE
     # Un solo código vigente a la vez: se anulan los anteriores. ANULADO, no
     # consumido: nadie entró con ellos, y confundir las dos cosas es lo que
     # hacía que pedir un código de nuevo contara como haber entrado.
-    await obtener_uno(
-        """
-        update public.auth_otp set anulado_en = now()
-         where cedula = %s and consumido_en is null and anulado_en is null
-           and expira_en > now()
-        returning id
-        """,
+    await ejecutar(
+        """UPDATE auth_otp SET anulado_en = NOW(6)
+            WHERE cedula = %s AND consumido_en IS NULL AND anulado_en IS NULL
+              AND expira_en > NOW(6)""",
         (datos.cedula,),
     )
 
-    await obtener_uno(
-        """
-        insert into public.auth_otp
-            (cedula, user_id, email, code_hash, max_intentos, expira_en, ip, user_agent)
-        values (%(cedula)s, %(user_id)s, %(email)s, %(hash)s, %(max_intentos)s,
-                now() + make_interval(mins => %(minutos)s), %(ip)s, %(agente)s)
-        returning id
-        """,
+    await ejecutar(
+        """INSERT INTO auth_otp
+             (cedula, user_id, email, code_hash, max_intentos, expira_en, ip, user_agent)
+           VALUES (%(cedula)s, %(user_id)s, %(email)s, %(hash)s, %(max_intentos)s,
+                   NOW(6) + INTERVAL %(minutos)s MINUTE, %(ip)s, %(agente)s)""",
         {
             "cedula": datos.cedula,
             "user_id": usuario["id"],
@@ -180,12 +174,10 @@ async def validar_token(datos: ValidacionToken, request: Request) -> Sesion:
     )
 
     registro = await obtener_uno(
-        """
-        select id, user_id, code_hash, intentos, max_intentos, expira_en
-        from public.auth_otp
-        where cedula = %s and consumido_en is null and anulado_en is null
-        order by created_at desc limit 1
-        """,
+        """SELECT id, user_id, code_hash, intentos, max_intentos, expira_en
+             FROM auth_otp
+            WHERE cedula = %s AND consumido_en IS NULL AND anulado_en IS NULL
+            ORDER BY created_at DESC LIMIT 1""",
         (datos.cedula,),
     )
 
@@ -195,10 +187,7 @@ async def validar_token(datos: ValidacionToken, request: Request) -> Sesion:
 
     if registro["intentos"] >= registro["max_intentos"]:
         # Anulado: se agotaron los intentos de teclearlo, nadie entró con él.
-        await obtener_uno(
-            "update public.auth_otp set anulado_en = now() where id = %s returning id",
-            (registro["id"],),
-        )
+        await ejecutar("UPDATE auth_otp SET anulado_en = NOW(6) WHERE id = %s", (registro["id"],))
         await registrar(request, "otp_intentos_agotados", cedula=datos.cedula,
                         user_id=str(registro["user_id"]))
         raise HTTPException(
@@ -207,10 +196,7 @@ async def validar_token(datos: ValidacionToken, request: Request) -> Sesion:
         )
 
     # El intento se cuenta ANTES de comparar: un fallo del servidor no regala intentos.
-    await obtener_uno(
-        "update public.auth_otp set intentos = intentos + 1 where id = %s returning id",
-        (registro["id"],),
-    )
+    await ejecutar("UPDATE auth_otp SET intentos = intentos + 1 WHERE id = %s", (registro["id"],))
 
     from datetime import datetime, timezone
 
@@ -225,19 +211,16 @@ async def validar_token(datos: ValidacionToken, request: Request) -> Sesion:
         raise error_credenciales
 
     # --- Código correcto ---
-    await obtener_uno(
-        "update public.auth_otp set consumido_en = now() where id = %s returning id",
-        (registro["id"],),
-    )
+    await ejecutar("UPDATE auth_otp SET consumido_en = NOW(6) WHERE id = %s", (registro["id"],))
 
     usuario = await obtener_uno(
         """
         select u.id, u.cedula, u.nombre, u.email, u.rol, u.telefono, u.cargo,
                u.departamento, u.fecha_ingreso, u.dias_vacaciones, u.logros,
-               public.anios_cumplidos(u.fecha_ingreso) as anios_servicio,
+               anios_cumplidos(u.fecha_ingreso) as anios_servicio,
                j.nombre as jefe_nombre
-        from public.users u
-        left join public.users j on j.id = u.jefe_id
+        from users u
+        left join users j on j.id = u.jefe_id
         where u.id = %s and u.activo
         """,
         (registro["user_id"],),
@@ -246,17 +229,15 @@ async def validar_token(datos: ValidacionToken, request: Request) -> Sesion:
         raise error_credenciales
 
     # Los períodos se generan/actualizan al entrar: el saldo siempre está al día.
-    await obtener_uno(
-        "select public.generar_periodos_vacaciones(%s) as ok", (usuario["id"],)
-    )
+    await periodos.generar_periodos_vacaciones(usuario["id"])
     usuario = await obtener_uno(
         """
         select u.id, u.cedula, u.nombre, u.email, u.rol, u.telefono, u.cargo,
                u.departamento, u.fecha_ingreso, u.dias_vacaciones, u.logros,
-               public.anios_cumplidos(u.fecha_ingreso) as anios_servicio,
+               anios_cumplidos(u.fecha_ingreso) as anios_servicio,
                j.nombre as jefe_nombre
-        from public.users u
-        left join public.users j on j.id = u.jefe_id
+        from users u
+        left join users j on j.id = u.jefe_id
         where u.id = %s
         """,
         (usuario["id"],),
@@ -311,10 +292,7 @@ async def perfil(usuario: Annotated[dict, Depends(usuario_actual)]) -> Perfil:
 @router.get("/mi-saldo")
 async def mi_saldo(usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
     """Desglose del saldo con la explicación y los artículos que lo sustentan."""
-    fila = await obtener_uno(
-        "select public.explicar_saldo(%s) as detalle", (usuario["id"],)
-    )
-    return fila["detalle"] if fila else {}
+    return await saldo.explicar_saldo(usuario["id"])
 
 
 @router.get("/mis-notificaciones")
@@ -324,10 +302,10 @@ async def mis_notificaciones(usuario: Annotated[dict, Depends(usuario_actual)]) 
         select n.id, n.tipo, n.severidad, n.titulo, n.mensaje, n.accion_url,
                n.leida_en, n.created_at,
                l.norma, l.articulo, l.titulo as articulo_titulo, l.texto as articulo_texto
-        from public.notifications n
-        left join public.v_legal_colaborador l on l.codigo = n.legal_ref
+        from notifications n
+        left join v_legal_colaborador l on l.codigo = n.legal_ref
         where n.user_id = %s
-        order by n.leida_en nulls first, n.created_at desc
+        order by n.leida_en is not null, n.leida_en, n.created_at desc
         limit 50
         """,
         (usuario["id"],),
@@ -344,13 +322,11 @@ async def marcar_notificaciones_leidas(
     control de acceso, porque el backend entra con credenciales de servicio y
     no pasa por las políticas de la base.
     """
-    filas = await obtener_todos(
-        """update public.notifications set leida_en = now()
-            where user_id = %s and leida_en is null
-        returning id""",
+    marcadas = await ejecutar(
+        "UPDATE notifications SET leida_en = NOW(6) WHERE user_id = %s AND leida_en IS NULL",
         (usuario["id"],),
     )
-    return {"marcadas": len(filas)}
+    return {"marcadas": marcadas}
 
 
 # `response_model=None` explícito: con `from __future__ import annotations`
@@ -444,9 +420,7 @@ async def necesita_ficha(datos: SolicitudToken, request: Request) -> dict:
     Responde lo mismo —falso— tanto si la cédula no existe como si ya tiene
     correo: quien pregunta no aprende nada que no supiera.
     """
-    fila = await obtener_uno(
-        "select public.puede_completar_ficha(%s) as puede", (datos.cedula,)
-    )
+    fila = await obtener_uno("SELECT puede_completar_ficha(%s) AS puede", (datos.cedula,))
     return {"necesita": bool(fila and fila["puede"])}
 
 
@@ -457,9 +431,9 @@ async def probar_identidad(datos: PruebaIdentidad, request: Request) -> dict:
     ip = ip_del_cliente(request)
 
     intentos = await obtener_uno(
-        """select count(*) as n from public.audit_logs
-            where accion = 'alta_identidad_fallida' and ip = %s
-              and created_at > now() - interval '1 hour'""",
+        """SELECT COUNT(*) AS n FROM audit_logs
+            WHERE accion = 'alta_identidad_fallida' AND ip = %s
+              AND created_at > NOW(6) - INTERVAL 1 HOUR""",
         (ip,),
     )
     if intentos and intentos["n"] >= 10:
@@ -471,13 +445,13 @@ async def probar_identidad(datos: PruebaIdentidad, request: Request) -> dict:
     usuario = await obtener_uno(
         """select u.id, u.nombre, u.cargo, u.departamento, u.fecha_ingreso,
                   j.nombre as jefe_nombre,
-                  nullif(btrim(coalesce(u.telefono, '')), '') as telefono,
-                  nullif(btrim(coalesce(u.direccion, '')), '') as direccion,
+                  nullif(trim(coalesce(u.telefono, '')), '') as telefono,
+                  nullif(trim(coalesce(u.direccion, '')), '') as direccion,
                   u.tipo_sangre,
-                  (select c.nombre from public.emergency_contacts c
+                  (select c.nombre from emergency_contacts c
                     where c.user_id = u.id and c.es_principal limit 1) as emergencia
-             from public.users u
-             left join public.users j on j.id = u.jefe_id
+             from users u
+             left join users j on j.id = u.jefe_id
             where u.cedula = %(cedula)s and u.activo
               and u.correo_pendiente and not u.ficha_completa
               and u.fecha_nacimiento = %(nacimiento)s
@@ -494,11 +468,10 @@ async def probar_identidad(datos: PruebaIdentidad, request: Request) -> dict:
                                "Verifíquelos o comuníquese con Talento Humano."},
         )
 
-    alta = await obtener_uno(
-        """insert into public.altas_pendientes (user_id, cedula, ip)
-           values (%s, %s, %s) returning token, expira_en""",
-        (usuario["id"], datos.cedula, ip),
-    )
+    token_alta = nuevo_id()
+    await ejecutar("INSERT INTO altas_pendientes (token, user_id, cedula, ip) VALUES (%s, %s, %s, %s)",
+                   (token_alta, usuario["id"], datos.cedula, ip))
+    alta = {"token": token_alta}
     await registrar(request, "alta_identidad_probada", user_id=str(usuario["id"]),
                     cedula=datos.cedula)
 
@@ -536,8 +509,8 @@ async def jefaturas_para_el_alta(token: uuid.UUID) -> list[dict]:
     aun así no ve ni cédulas ni correos de terceros (LOPDP, Art. 10).
     """
     alta = await obtener_uno(
-        """select 1 as x from public.altas_pendientes
-            where token = %s and usado_en is null and expira_en > now()""",
+        """SELECT 1 AS x FROM altas_pendientes
+            WHERE token = %s AND usado_en IS NULL AND expira_en > NOW(6)""",
         (str(token),),
     )
     if alta is None:
@@ -546,7 +519,7 @@ async def jefaturas_para_el_alta(token: uuid.UUID) -> list[dict]:
             detail={"mensaje": "El permiso para completar sus datos venció."},
         )
     filas = await obtener_todos(
-        "select id, nombre, cargo, departamento from public.v_jefaturas"
+        "SELECT id, nombre, cargo, departamento FROM v_jefaturas"
     )
     return [{**f, "id": str(f["id"])} for f in filas]
 
@@ -563,15 +536,14 @@ async def confirmar_correo(datos: ConfirmacionCorreo, request: Request,
     realmente la abre.
     """
     anterior = await obtener_uno(
-        """select u.email::text as email, u.nombre
-             from public.confirmaciones_correo c
-             join public.users u on u.id = c.user_id
+        """select u.email, u.nombre
+             from confirmaciones_correo c
+             join users u on u.id = c.user_id
             where c.token = %s and c.confirmado_en is null""",
         (str(datos.token),),
     )
 
-    fila = await obtener_uno("select public.confirmar_correo(%s) as r", (str(datos.token),))
-    resultado = fila["r"] if fila else {"confirmado": False, "motivo": "Enlace no válido."}
+    resultado = await ficha.confirmar_correo(datos.token)
 
     if not resultado.get("confirmado"):
         await registrar(request, "correo_confirmacion_fallida")
@@ -607,10 +579,10 @@ async def completar_ficha(
     ip = ip_del_cliente(request)
     alta = await obtener_uno(
         """select a.id, a.user_id, a.cedula, u.nombre, u.region
-             from public.altas_pendientes a
-             join public.users u on u.id = a.user_id
-            where a.token = %s and a.usado_en is null and a.expira_en > now()""",
-        (datos.token,),
+             from altas_pendientes a
+             join users u on u.id = a.user_id
+            where a.token = %s and a.usado_en is null and a.expira_en > NOW(6)""",
+        (str(datos.token),),
     )
     if alta is None:
         raise HTTPException(
@@ -623,10 +595,10 @@ async def completar_ficha(
     # no llegó tiene que constar ya. Se comprueba contra el expediente, no
     # contra el formulario, que es lo que permite no repreguntar.
     ya = await obtener_uno(
-        """select nullif(btrim(coalesce(u.telefono, '')), '') as telefono,
-                  (select 1 from public.emergency_contacts c
+        """select nullif(trim(coalesce(u.telefono, '')), '') as telefono,
+                  (select 1 from emergency_contacts c
                     where c.user_id = u.id and c.es_principal limit 1) as emergencia
-             from public.users u where u.id = %s""",
+             from users u where u.id = %s""",
         (alta["user_id"],),
     ) or {}
     faltan = []
@@ -642,7 +614,7 @@ async def completar_ficha(
         )
 
     ocupado = await obtener_uno(
-        "select 1 as x from public.users where email = %s and id <> %s",
+        "SELECT 1 AS x FROM users WHERE email = %s AND id <> %s",
         (datos.email, alta["user_id"]),
     )
     if ocupado:
@@ -653,59 +625,42 @@ async def completar_ficha(
         )
 
     try:
-        async with conexion() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """
-                    update public.users set
-                      email = %(email)s, correo_pendiente = false,
-                      telefono = coalesce(%(telefono)s, telefono),
-                      direccion = coalesce(%(direccion)s, direccion),
-                      tipo_sangre = coalesce(%(sangre)s, tipo_sangre),
-                      ficha_completa = true, ficha_completada_en = now()
-                    where id = %(id)s
-                    """,
-                    {"email": datos.email, "telefono": datos.telefono,
-                     "direccion": datos.direccion, "sangre": datos.tipo_sangre,
-                     "id": alta["user_id"]},
+        async with transaccion():
+            await ejecutar(
+                """UPDATE users SET
+                     email = %(email)s, correo_pendiente = FALSE,
+                     telefono = COALESCE(%(telefono)s, telefono),
+                     direccion = COALESCE(%(direccion)s, direccion),
+                     tipo_sangre = COALESCE(%(sangre)s, tipo_sangre),
+                     ficha_completa = TRUE, ficha_completada_en = NOW(6)
+                   WHERE id = %(id)s""",
+                {"email": datos.email, "telefono": datos.telefono,
+                 "direccion": datos.direccion, "sangre": datos.tipo_sangre,
+                 "id": alta["user_id"]},
+            )
+            # Se actualiza si ya había uno principal, en vez de insertar a
+            # ciegas: Talento Humano puede reabrir un alta, y el segundo
+            # intento chocaba con el índice único de «un principal por
+            # persona» y moría con un «El registro ya existe» que no le dice
+            # nada a nadie. Solo si la persona declaró uno nuevo: pisar con
+            # nulos el que ya constaba borraría un dato para avisar a su familia.
+            if datos.emergencia_nombre and datos.emergencia_telefono:
+                await ejecutar(
+                    """INSERT INTO emergency_contacts
+                         (user_id, nombre, parentesco, telefono, es_principal)
+                       VALUES (%s, %s, %s, %s, TRUE)
+                       ON DUPLICATE KEY UPDATE nombre = VALUES(nombre),
+                         parentesco = VALUES(parentesco), telefono = VALUES(telefono)""",
+                    (alta["user_id"], datos.emergencia_nombre.strip(),
+                     datos.emergencia_parentesco or "otro", datos.emergencia_telefono),
                 )
-                # Se actualiza si ya había uno principal, en vez de insertar a
-                # ciegas. Talento Humano puede reabrir un alta —porque la
-                # persona se equivocó de correo, por ejemplo— y entonces el
-                # segundo intento chocaba con el índice único y moría con un
-                # «El registro ya existe» que no le dice nada a nadie, después
-                # de haber guardado ya el correo y el teléfono.
-                # Solo si la persona declaró uno nuevo: quien ya lo tenía
-                # en su expediente no lo volvió a escribir, y pisarlo con
-                # nulos borraría un dato que sirve para avisar a su familia.
-                if datos.emergencia_nombre and datos.emergencia_telefono:
-                    await cur.execute(
-                        """
-                        insert into public.emergency_contacts
-                            (user_id, nombre, parentesco, telefono, es_principal)
-                        values (%s, %s, %s::parentesco, %s, true)
-                        on conflict (user_id) where es_principal do update
-                          set nombre = excluded.nombre,
-                              parentesco = excluded.parentesco,
-                              telefono = excluded.telefono
-                        """,
-                        (alta["user_id"], datos.emergencia_nombre.strip(),
-                         datos.emergencia_parentesco or "otro", datos.emergencia_telefono),
-                    )
-                if datos.cargo_correcto:
-                    await cur.execute(
-                        "update public.users set cargo_confirmado_en = now() where id = %s",
-                        (alta["user_id"],),
-                    )
-                if datos.jefe_correcto:
-                    await cur.execute(
-                        "update public.users set jefe_confirmado_en = now() where id = %s",
-                        (alta["user_id"],),
-                    )
-                await cur.execute(
-                    "update public.altas_pendientes set usado_en = now() where id = %s",
-                    (alta["id"],),
-                )
+            if datos.cargo_correcto:
+                await ejecutar("UPDATE users SET cargo_confirmado_en = NOW(6) WHERE id = %s",
+                               (alta["user_id"],))
+            if datos.jefe_correcto:
+                await ejecutar("UPDATE users SET jefe_confirmado_en = NOW(6) WHERE id = %s",
+                               (alta["user_id"],))
+            await ejecutar("UPDATE altas_pendientes SET usado_en = NOW(6) WHERE id = %s", (alta["id"],))
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
@@ -718,11 +673,9 @@ async def completar_ficha(
 
     if datos.cargo_correcto is False and (datos.cargo_propuesto or "").strip():
         try:
-            await obtener_uno(
-                "select public.solicitar_cambio_ficha(%s, 'cargo', %s, %s) as id",
-                (alta["user_id"], datos.cargo_propuesto.strip(),
-                 "Corrección declarada al completar la ficha"),
-            )
+            await ficha.solicitar_cambio_ficha(
+                alta["user_id"], "cargo", datos.cargo_propuesto.strip(),
+                "Corrección declarada al completar la ficha")
             pedidos.append(("Cargo que indica", datos.cargo_propuesto.strip()))
         except Exception:  # noqa: BLE001
             avisos.append("No se pudo registrar la corrección del cargo. "
@@ -730,18 +683,16 @@ async def completar_ficha(
 
     if datos.jefe_correcto is False and datos.jefe_propuesto_id:
         jefe = await obtener_uno(
-            "select nombre from public.v_jefaturas where id = %s",
+            "SELECT nombre FROM v_jefaturas WHERE id = %s",
             (str(datos.jefe_propuesto_id),),
         )
         if jefe is None:
             avisos.append("La jefatura señalada no está en la lista vigente.")
         else:
             try:
-                await obtener_uno(
-                    "select public.solicitar_cambio_ficha(%s, 'jefe_id', %s, %s) as id",
-                    (alta["user_id"], str(datos.jefe_propuesto_id),
-                     "Corrección declarada al completar la ficha"),
-                )
+                await ficha.solicitar_cambio_ficha(
+                    alta["user_id"], "jefe_id", str(datos.jefe_propuesto_id),
+                    "Corrección declarada al completar la ficha")
                 pedidos.append(("Jefe que indica", jefe["nombre"]))
             except Exception:  # noqa: BLE001
                 avisos.append("No se pudo registrar la corrección del jefe. "
@@ -753,10 +704,8 @@ async def completar_ficha(
 
     # Talento Humano de su región se entera: un correo que alguien declara de
     # sí mismo merece una mirada, aunque el sistema ya lo verifique de vuelta.
-    destinos = await obtener_todos(
-        "select email, nombre from public.rrhh_de_region(%s)",
-        (alta.get("region") or "sierra",),
-    )
+    destinos = [{"email": d["email"], "nombre": d["nombre"]}
+                for d in await personal.rrhh_de_region(alta.get("region") or "sierra")]
     if destinos:
         tareas.add_task(notificaciones.avisar_alta_completada, destinos,
                         alta["nombre"], alta["cedula"], datos.email)
