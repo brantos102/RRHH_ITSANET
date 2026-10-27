@@ -57,6 +57,34 @@ prefiere otro:
 CERT=/ruta/certificado.pem LLAVE=/ruta/llave.key bash despliegue/instalar.sh
 ```
 
+## Cargar los datos reales del registro de vacaciones
+
+El Excel de Talento Humano se copia al servidor, a `~/bryan/rrhh_datos/` (nunca
+al repositorio). Desde VS Code: arrastrarlo a esa carpeta en el explorador de
+archivos remoto.
+
+```bash
+cd ~/bryan/RRHH_ITSANET
+X=~/bryan/rrhh_datos/REGISTRO_DE_VACACIONES_4.xlsx
+
+.venv/bin/python mysql/cargar_registro.py "$X"               # revisa; no escribe
+.venv/bin/python mysql/cargar_registro.py "$X" --aplicar     # personas activas y saldos
+.venv/bin/python scripts/cargar_historial.py "$X" --aplicar  # cada vacación de la hoja
+```
+
+- Entran las personas **ACTIVAS** con cédula identificable; el saldo es el
+  DISPONIBLE de la hoja, más lo devengado entre la fecha de la hoja y el día
+  de la carga.
+- Lo que no entra (sin cédula, cédula repetida, PASIVO…) queda listado en
+  `REGISTRO_…_NO_CARGADOS.csv`, junto al Excel.
+- La hoja **no trae correos**: nadie puede recibir el código de acceso hasta
+  que Talento Humano lo registre. Se genera `personas_completar.csv`; se
+  completan correo, rol y `jefe_cedula` de quien corresponda, y se carga con
+  `mysql/cargar_personas.py`. Las filas con el correo en blanco se omiten, y
+  con «saldo» vacío el saldo cargado se conserva.
+- Para borrar todo lo cargado y empezar de nuevo:
+  `.venv/bin/python mysql/cargar_registro.py "$X" --quitar --aplicar`
+
 ## Cargar personas para probar
 
 Las personas se cargan desde un CSV que se prepara **en el servidor, fuera del

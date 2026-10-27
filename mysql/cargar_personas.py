@@ -12,6 +12,7 @@ por punto y coma o por coma (el orden no importa; las de [ ] son opcionales):
     cedula; nombre; email; rol; fecha_ingreso; [jefe_cedula]; [saldo];
     [cargo]; [departamento]; [ciudad]; [telefono]; [fecha_nacimiento]
 
+  email          la fila con el correo en blanco se omite (aún no se completó)
   rol            empleado, jefe, rrhh, guardia o admin
   fechas         2021-09-01 o 01/09/2021
   jefe_cedula    la cédula de su jefe inmediato (en el mismo archivo o ya cargado)
@@ -74,8 +75,14 @@ def leer(archivo: Path) -> tuple[list[dict], list[str]]:
         raise SystemExit(f"{ROJO}Al archivo le faltan columnas: {', '.join(faltan)}{FIN}")
 
     filas, problemas, vistas = [], [], set()
+    sin_correo = 0
     for n, crudo in enumerate(lector, start=2):
         v = {c: (crudo.get(columnas[c]) or "").strip() for c in (*OBLIGATORIAS, *OPCIONALES) if c in columnas}
+        # Una fila con el correo todavía en blanco no es un error: es alguien
+        # que Talento Humano aún no completó (personas_completar.csv). Se omite.
+        if not v["email"]:
+            sin_correo += 1
+            continue
         error = []
         cedula = normalizar_cedula(v["cedula"]).zfill(10)   # el Excel suele comerse el 0 inicial
         if not es_cedula_valida(cedula):
@@ -111,6 +118,8 @@ def leer(archivo: Path) -> tuple[list[dict], list[str]]:
                       "rol": rol, "fecha_ingreso": ingreso, "fecha_nacimiento": nacimiento,
                       "saldo": saldo, "jefe_cedula": jefe,
                       **{c: v.get(c) or None for c in ("cargo", "departamento", "ciudad", "telefono")}})
+    if sin_correo:
+        print(f"{GRIS}{sin_correo} fila(s) con el correo en blanco: se omiten hasta que se complete.{FIN}")
     return filas, problemas
 
 
