@@ -29,10 +29,10 @@ async def buzones_como_estaban():
     """
     claves = ("rrhh_correo_sierra", "rrhh_correo_costa")
     antes = {c["clave"]: c["valor"] for c in await obtener_todos(
-        "select clave, valor from public.app_config where clave = any(%s)", (list(claves),))}
+        "select clave, valor from app_config where clave = any(%s)", (list(claves),))}
     yield
     for clave, valor in antes.items():
-        await ejecutar("update public.app_config set valor = %s where clave = %s",
+        await ejecutar("update app_config set valor = %s where clave = %s",
                        (valor, clave))
 
 
@@ -40,15 +40,15 @@ async def buzones_como_estaban():
 async def otro_de_rrhh():
     """Una segunda persona en Talento Humano, en la Sierra."""
     fila = await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso, region)
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso, region)
            values (%s, 'API Talento Dos', 'talento2@api.test', 'rrhh',
-                   current_date - 1500, 'sierra')
+                   current_date() - interval 1500 day, 'sierra')
            on conflict (cedula) do update set rol = 'rrhh', region = 'sierra'
            returning id""",
         (CEDULA_OTRO_RRHH,),
     )
     yield str(fila["id"])
-    await ejecutar("delete from public.users where cedula = %s", (CEDULA_OTRO_RRHH,))
+    await ejecutar("delete from users where cedula = %s", (CEDULA_OTRO_RRHH,))
 
 
 # ------------------------------------------------------------- la lista
@@ -81,7 +81,7 @@ async def test_se_guarda_el_correo_del_departamento(cliente, rrhh_auth):
                                   "costa": "th.gye@itsanet.com.ec"})
     assert r.status_code == 200, r.text
     fila = await obtener_uno(
-        "select public.rrhh_correo_de_region('costa') as buzon")
+        "select rrhh_correo_de_region('costa') as buzon")
     assert fila["buzon"] == "th.gye@itsanet.com.ec"
 
 
@@ -89,7 +89,7 @@ async def test_se_puede_dejar_sin_buzon(cliente, rrhh_auth):
     """En blanco los avisos van solo a los correos personales, como antes."""
     await cliente.patch("/admin/talento-humano/correos", headers=rrhh_auth,
                         json={"sierra": "th.uio@itsanet.com.ec", "costa": ""})
-    fila = await obtener_uno("select public.rrhh_correo_de_region('costa') as buzon")
+    fila = await obtener_uno("select rrhh_correo_de_region('costa') as buzon")
     assert fila["buzon"] is None
 
 
@@ -112,18 +112,18 @@ async def test_integrar_a_alguien_al_departamento(cliente, rrhh_auth, empleado):
                            json={"persona_id": empleado["id"], "region": "costa"})
     assert r.status_code == 201, r.text
     fila = await obtener_uno(
-        "select rol::text as rol, region from public.users where id = %s", (empleado["id"],))
+        "select rol as rol, region from users where id = %s", (empleado["id"],))
     assert fila["rol"] == "rrhh"
     assert fila["region"] == "costa"
 
 
 async def test_a_un_administrador_no_se_le_baja_el_rol(cliente, rrhh_auth, empleado):
     """Integrarlo no debe quitarle atribuciones sin avisar."""
-    await ejecutar("update public.users set rol = 'admin' where id = %s", (empleado["id"],))
+    await ejecutar("update users set rol = 'admin' where id = %s", (empleado["id"],))
     r = await cliente.post("/admin/talento-humano", headers=rrhh_auth,
                            json={"persona_id": empleado["id"], "region": "sierra"})
     assert r.status_code == 201, r.text
-    fila = await obtener_uno("select rol::text as rol from public.users where id = %s",
+    fila = await obtener_uno("select rol as rol from users where id = %s",
                              (empleado["id"],))
     assert fila["rol"] == "admin"
 
@@ -134,7 +134,7 @@ async def test_retirar_a_alguien_le_quita_el_acceso_a_los_expedientes(
     r = await cliente.post(f"/admin/talento-humano/{otro_de_rrhh}/retirar",
                            headers=rrhh_auth, json={"rol_destino": "empleado"})
     assert r.status_code == 200, r.text
-    fila = await obtener_uno("select rol::text as rol from public.users where id = %s",
+    fila = await obtener_uno("select rol as rol from users where id = %s",
                              (otro_de_rrhh,))
     assert fila["rol"] == "empleado"
 
@@ -142,18 +142,18 @@ async def test_retirar_a_alguien_le_quita_el_acceso_a_los_expedientes(
 async def test_no_se_deja_una_region_sin_nadie(cliente, rrhh_auth, otro_de_rrhh):
     """Sin nadie en la región, sus solicitudes no le llegan a ninguna persona."""
     # Se deja a «API Talento Dos» como la única de la Costa.
-    await ejecutar("update public.users set region = 'costa' where id = %s", (otro_de_rrhh,))
+    await ejecutar("update users set region = 'costa' where id = %s", (otro_de_rrhh,))
     r = await cliente.post(f"/admin/talento-humano/{otro_de_rrhh}/retirar",
                            headers=rrhh_auth, json={"rol_destino": "empleado"})
     assert r.status_code >= 400
     assert "única persona" in r.text or "unica persona" in r.text
-    fila = await obtener_uno("select rol::text as rol from public.users where id = %s",
+    fila = await obtener_uno("select rol as rol from users where id = %s",
                              (otro_de_rrhh,))
     assert fila["rol"] == "rrhh", "la retiró pese a dejar la región vacía"
 
 
 async def test_nadie_se_retira_a_si_mismo(cliente, rrhh_auth):
-    yo = await obtener_uno("select id from public.users where cedula = %s", (CEDULA_RRHH_R,))
+    yo = await obtener_uno("select id from users where cedula = %s", (CEDULA_RRHH_R,))
     r = await cliente.post(f"/admin/talento-humano/{yo['id']}/retirar",
                            headers=rrhh_auth, json={"rol_destino": "empleado"})
     assert r.status_code >= 400

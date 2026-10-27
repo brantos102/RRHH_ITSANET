@@ -36,11 +36,11 @@ async def _leyes_como_de_fabrica():
     siguiente, y el fallo aparecería en la prueba equivocada.
     """
     antes = {f["codigo"]: (f["visibilidad"], f["resumen"]) for f in await obtener_todos(
-        "select codigo, visibilidad, resumen from public.legal_references")}
+        "select codigo, visibilidad, resumen from legal_references")}
     yield
     for codigo, (visibilidad, resumen) in antes.items():
         await ejecutar(
-            """update public.legal_references
+            """update legal_references
                   set visibilidad = %s, resumen = %s,
                       visibilidad_en = null, visibilidad_por = null
                 where codigo = %s""",
@@ -48,7 +48,7 @@ async def _leyes_como_de_fabrica():
 
 
 async def _modo(codigo: str, visibilidad: str) -> None:
-    await ejecutar("update public.legal_references set visibilidad = %s where codigo = %s",
+    await ejecutar("update legal_references set visibilidad = %s where codigo = %s",
                    (visibilidad, codigo))
 
 
@@ -64,7 +64,7 @@ async def test_de_fabrica_se_ve_el_texto_completo_de_los_cuatro(cliente, auth):
 
 async def test_todos_los_articulos_arrancan_en_completo():
     fila = await obtener_uno(
-        "select count(*) as n from public.legal_references where visibilidad <> 'completo'")
+        "select count(*) as n from legal_references where visibilidad <> 'completo'")
     assert fila["n"] == 0
 
 
@@ -124,7 +124,7 @@ async def test_resumen_reemplaza_el_texto_y_lo_dice(cliente, auth):
 async def test_el_resumen_del_75_y_del_76_vienen_escritos():
     """Para no tener que redactarlos en la reunión con Talento Humano."""
     filas = await obtener_todos(
-        "select codigo, resumen from public.legal_references where codigo = any(%s)",
+        "select codigo, resumen from legal_references where codigo = any(%s)",
         (["CT_ART_69", "CT_ART_73", "CT_ART_74", "CT_ART_75", "CT_ART_76"],))
     for f in filas:
         assert (f["resumen"] or "").strip(), f["codigo"]
@@ -133,7 +133,7 @@ async def test_el_resumen_del_75_y_del_76_vienen_escritos():
 async def test_el_resumen_del_76_dice_el_derecho_y_su_limite():
     """Citar el 76 suelto es lo que arma la discusión: se paga, pero al liquidar."""
     f = await obtener_uno(
-        "select resumen from public.legal_references where codigo = 'CT_ART_76'")
+        "select resumen from legal_references where codigo = 'CT_ART_76'")
     assert "se pagan" in f["resumen"]
     assert "liquidar" in f["resumen"]
 
@@ -142,7 +142,7 @@ async def test_resumen_sin_escribir_lo_rechaza_la_base():
     """Elegir resumen y dejarlo en blanco dejaría el artículo vacío."""
     with pytest.raises(Exception) as err:
         await ejecutar(
-            """update public.legal_references
+            """update legal_references
                   set visibilidad = 'resumen', resumen = null where codigo = 'CT_ART_73'""")
     assert "legal_resumen_si_resume" in str(err.value)
 
@@ -195,7 +195,7 @@ async def test_rrhh_no_puede_cambiarlo_solo_administracion(cliente, rrhh_auth):
                             json={"visibilidad": "oculto"})
     assert r.status_code == 403
     f = await obtener_uno(
-        "select visibilidad from public.legal_references where codigo = 'CT_ART_75'")
+        "select visibilidad from legal_references where codigo = 'CT_ART_75'")
     assert f["visibilidad"] == "completo"
 
 
@@ -212,15 +212,15 @@ async def test_administracion_cambia_el_modo_y_queda_en_la_bitacora(cliente, adm
 
     f = await obtener_uno(
         """select l.visibilidad, l.visibilidad_en, q.nombre
-             from public.legal_references l
-             left join public.users q on q.id = l.visibilidad_por
+             from legal_references l
+             left join users q on q.id = l.visibilidad_por
             where l.codigo = 'CT_ART_75'""")
     assert f["visibilidad"] == "resumen"
     assert f["visibilidad_en"] is not None
     assert f["nombre"] == "Admin Panel"
 
     reg = await obtener_uno(
-        """select detalle from public.audit_logs
+        """select detalle from audit_logs
             where accion = 'base_legal_modificada' and entidad_id = 'CT_ART_75'
             order by created_at desc limit 1""")
     assert reg["detalle"]["antes"]["visibilidad"] == "completo"
@@ -233,14 +233,14 @@ async def test_se_puede_escribir_el_resumen_sin_activarlo(cliente, admin_auth):
                             json={"resumen": "Las fechas se acuerdan con su jefe."})
     assert r.status_code == 200
     f = await obtener_uno(
-        "select visibilidad, resumen from public.legal_references where codigo = 'CT_ART_73'")
+        "select visibilidad, resumen from legal_references where codigo = 'CT_ART_73'")
     assert f["visibilidad"] == "completo"
     assert f["resumen"] == "Las fechas se acuerdan con su jefe."
 
 
 async def test_resumen_en_blanco_se_explica_en_castellano(cliente, admin_auth):
     await ejecutar(
-        "update public.legal_references set resumen = null where codigo = 'CT_ART_73'")
+        "update legal_references set resumen = null where codigo = 'CT_ART_73'")
     r = await cliente.patch("/admin/base-legal/CT_ART_73", headers=admin_auth,
                             json={"visibilidad": "resumen"})
     assert r.status_code == 422

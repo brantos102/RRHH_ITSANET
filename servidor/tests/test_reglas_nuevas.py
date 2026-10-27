@@ -20,7 +20,7 @@ CEDULA_JEFE_R = "0900000001"
 async def lunes_sin_feriados(semanas: int = 8) -> date:
     feriados = {
         f["fecha"] for f in await obtener_todos(
-            "select fecha from public.feriados where activo and fecha >= current_date")
+            "select fecha from feriados where activo and fecha >= current_date()")
     }
     base = date.today() + timedelta(weeks=semanas)
     candidato = base - timedelta(days=base.weekday())
@@ -37,7 +37,7 @@ async def auth(cliente, codigos, empleado):
     r = await cliente.post("/auth/validar-token",
                            json={"cedula": CEDULA_PRUEBA, "codigo": codigos[0]})
     await ejecutar(
-        """update public.vacation_periods set fines_semana_consumidos = fines_semana_obligatorios
+        """update vacation_periods set fines_semana_consumidos = fines_semana_obligatorios
            where user_id = %s and not caducado""",
         (empleado["id"],),
     )
@@ -47,8 +47,8 @@ async def auth(cliente, codigos, empleado):
 @pytest.fixture
 async def rrhh_auth(cliente, codigos, empleado):
     await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s, 'API Talento', 'talento@api.test', 'rrhh', current_date - 2000)
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
+           values (%s, 'API Talento', 'talento@api.test', 'rrhh', current_date() - interval 2000 day)
            on conflict (cedula) do update set rol = 'rrhh' returning id""",
         (CEDULA_RRHH_R,),
     )
@@ -61,12 +61,12 @@ async def rrhh_auth(cliente, codigos, empleado):
 @pytest.fixture
 async def jefe_auth(cliente, codigos, empleado):
     jefe = await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s, 'API Jefatura', 'jefatura2@api.test', 'jefe', current_date - 2000)
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
+           values (%s, 'API Jefatura', 'jefatura2@api.test', 'jefe', current_date() - interval 2000 day)
            on conflict (cedula) do update set rol = 'jefe' returning id""",
         (CEDULA_JEFE_R,),
     )
-    await ejecutar("update public.users set jefe_id = %s where id = %s",
+    await ejecutar("update users set jefe_id = %s where id = %s",
                    (jefe["id"], empleado["id"]))
     await cliente.post("/auth/solicitar-token", json={"cedula": CEDULA_JEFE_R})
     r = await cliente.post("/auth/validar-token",
@@ -171,7 +171,7 @@ async def test_talento_humano_extiende_una_ausencia_y_queda_constancia(
     assert r.json()["fecha_fin"] == str(nuevo_fin)
 
     fila = await obtener_uno(
-        "select fecha_fin, ajustada_en, ajustada_por from public.requests where id = %s",
+        "select fecha_fin, ajustada_en, ajustada_por from requests where id = %s",
         (creada["id"],))
     assert str(fila["fecha_fin"]) == str(nuevo_fin)
     assert fila["ajustada_en"] is not None
@@ -208,7 +208,7 @@ async def test_el_ajuste_corrige_el_saldo_de_vacaciones(
         cliente, auth, jefe_auth, rrhh_auth, empleado):
     """Extender tres días no puede dejar el saldo como estaba."""
     creada = await _aprobada(cliente, auth, jefe_auth, rrhh_auth)
-    antes = (await obtener_uno("select dias_vacaciones from public.users where id = %s",
+    antes = (await obtener_uno("select dias_vacaciones from users where id = %s",
                                (empleado["id"],)))["dias_vacaciones"]
 
     await cliente.post(f"/aprobaciones/{creada['id']}/ajustar", headers=rrhh_auth, json={
@@ -218,7 +218,7 @@ async def test_el_ajuste_corrige_el_saldo_de_vacaciones(
         "resolucion": "Se amplia la ausencia en tres dias con el certificado correspondiente",
     })
 
-    despues = (await obtener_uno("select dias_vacaciones from public.users where id = %s",
+    despues = (await obtener_uno("select dias_vacaciones from users where id = %s",
                                  (empleado["id"],)))["dias_vacaciones"]
     assert float(despues) == float(antes) - 3, "los 3 días extra deben salir del saldo"
 
@@ -248,8 +248,8 @@ async def test_un_feriado_dentro_del_rango_no_invalida_la_semana(cliente, auth):
     imposible tomar la semana de Navidad o la de Carnaval.
     """
     feriado = await obtener_uno(
-        """select fecha from public.feriados
-            where activo and fecha > current_date + 30
+        """select fecha from feriados
+            where activo and fecha > current_date() + interval 30 day
               and extract(isodow from fecha) between 1 and 5
             order by fecha limit 1"""
     )

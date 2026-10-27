@@ -22,9 +22,11 @@ from pydantic import BaseModel, Field
 from .. import notificaciones, qr
 from ..audit import registrar
 from ..config import get_settings
-from ..db import obtener_todos, obtener_uno
+from ..db import ejecutar, obtener_todos, obtener_uno
 from ..deps import exigir_rol, usuario_actual
 from ..errores import traducir
+from ..reglas import personal
+from ..reglas import solicitudes as reglas_solicitudes
 
 log = logging.getLogger("rrhh.aprobaciones")
 router = APIRouter(tags=["Aprobaciones"])
@@ -40,12 +42,12 @@ SQL_SOLICITUD = """
            u.dias_vacaciones as saldo_actual,
            pt.nombre as categoria, pt.requiere_adjunto,
            j.nombre as jefe_nombre,
-           (select count(*) from public.request_attachments a where a.request_id = r.id) as adjuntos
-    from public.requests r
-    join public.users u on u.id = r.user_id
-    left join public.users j on j.id = r.jefe_id
-    left join public.permission_types pt on pt.id = r.permission_type_id
-    left join public.users rp on rp.id = r.reemplazo_id
+           (select count(*) from request_attachments a where a.request_id = r.id) as adjuntos
+    from requests r
+    join users u on u.id = r.user_id
+    left join users j on j.id = r.jefe_id
+    left join permission_types pt on pt.id = r.permission_type_id
+    left join users rp on rp.id = r.reemplazo_id
     where r.id = %s
 """
 
@@ -132,14 +134,13 @@ async def _aplicar(solicitud: dict, rol: str, decision: Decision,
         if decision.accion == "aprobar":
             # El reemplazo solo lo fija el jefe; si no manda uno, se conserva
             # el que ya hubiera (una segunda vuelta no debe borrarlo).
-            actualizada = await obtener_uno(
+            cambiadas = await ejecutar(
                 f"""
-                update public.requests
+                update requests
                    set estado = %(estado)s, {columna_quien} = %(quien)s,
                        reemplazo_id = case when %(fija_reemplazo)s
                                            then %(reemplazo)s else reemplazo_id end
                  where id = %(id)s and estado = %(esperado)s
-                returning id, estado, qr_hash
                 """,
                 {"estado": nuevo, "quien": decidido_por, "id": solicitud["id"],
                  "esperado": _estado_esperado(rol),
@@ -147,12 +148,11 @@ async def _aplicar(solicitud: dict, rol: str, decision: Decision,
                  "reemplazo": decision.reemplazo_id},
             )
         else:
-            actualizada = await obtener_uno(
+            cambiadas = await ejecutar(
                 """
-                update public.requests
+                update requests
                    set estado = 'rechazado', rechazado_por = %(quien)s, motivo_rechazo = %(motivo)s
                  where id = %(id)s and estado = %(esperado)s
-                returning id, estado, qr_hash
                 """,
                 {"quien": decidido_por, "motivo": decision.motivo.strip(),
                  "id": solicitud["id"], "esperado": _estado_esperado(rol)},
@@ -160,6 +160,12 @@ async def _aplicar(solicitud: dict, rol: str, decision: Decision,
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
+    # Sin RETURNING en MySQL: ninguna fila tocada = el estado ya no era el
+    # esperado. Si se tocó, se lee cómo quedó (el disparador emite el QR).
+    actualizada = None
+    if cambiadas:
+        actualizada = await obtener_uno("SELECT id, estado, qr_hash FROM requests WHERE id = %s",
+                                        (solicitud["id"],))
     if actualizada is None:
         # Otra persona decidió entre que se cargó la página y se pulsó el botón
         raise HTTPException(
@@ -169,24 +175,22 @@ async def _aplicar(solicitud: dict, rol: str, decision: Decision,
 
     completa = await obtener_uno(SQL_SOLICITUD, (solicitud["id"],))
     empleado = {"email": completa["email"], "nombre": completa["empleado"]}
-    quien = (await obtener_uno("select nombre from public.users where id = %s", (decidido_por,)) or {}).get(
+    quien = (await obtener_uno("select nombre from users where id = %s", (decidido_por,)) or {}).get(
         "nombre", "Talento Humano"
     )
 
     if actualizada["estado"] == "pendiente_rrhh":
         # Al grupo de la región, no a un buzón concreto: si alguien está de
         # vacaciones, la solicitud igual se resuelve.
-        personal_rrhh = await obtener_todos(
-            "select email, nombre from public.rrhh_de_region(%s)",
-            (completa.get("region") or "sierra",),
-        )
+        personal_rrhh = [{"email": d["email"], "nombre": d["nombre"]}
+                         for d in await personal.rrhh_de_region(completa.get("region") or "sierra")]
         tareas.add_task(notificaciones.avisar_a_rrhh, personal_rrhh, completa, quien)
 
     elif actualizada["estado"] == "pendiente_jefe":
         # Solo ocurre en la ruta invertida: Talento Humano ya autorizó la
         # excepción y ahora el jefe decide si puede cubrir el puesto.
         jefe = await obtener_uno(
-            "select email, nombre from public.users where id = %s and activo",
+            "select email, nombre from users where id = %s and activo",
             (completa["jefe_id"],),
         )
         if jefe:
@@ -269,12 +273,12 @@ async def pendientes(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[
                -- por uno que no contesta, y quien resuelve tiene que poder
                -- distinguirlo antes de firmar.
                r.jefe_id is null as sin_jefe,
-               (select count(*) from public.request_attachments a where a.request_id = r.id) as adjuntos
-        from public.requests r
-        join public.users u on u.id = r.user_id
-        left join public.users j on j.id = r.jefe_id
-        left join public.permission_types pt on pt.id = r.permission_type_id
-        left join public.users rp on rp.id = r.reemplazo_id
+               (select count(*) from request_attachments a where a.request_id = r.id) as adjuntos
+        from requests r
+        join users u on u.id = r.user_id
+        left join users j on j.id = r.jefe_id
+        left join permission_types pt on pt.id = r.permission_type_id
+        left join users rp on rp.id = r.reemplazo_id
         where {filtro}
         order by r.created_at
         """,
@@ -347,9 +351,9 @@ async def _por_token(token: uuid.UUID, rol: str) -> dict:
     columna = "jefe_token" if rol == "jefe" else "rrhh_token"
     solicitud = await obtener_uno(
         f"""
-        select r.id from public.requests r
+        select r.id from requests r
         where r.{columna} = %s
-          and r.created_at > now() - make_interval(days => %s)
+          and r.created_at > now(6) - interval %s day
         """,
         (token, get_settings().aprobacion_link_dias),
     )
@@ -394,7 +398,7 @@ async def decidir_por_enlace(
     decidido_por = str(solicitud["jefe_id"]) if rol == "jefe" else None
     if rol == "rrhh":
         encargado = await obtener_uno(
-            "select id from public.users where rol in ('rrhh','admin') and activo order by rol limit 1"
+            "select id from users where rol in ('rrhh','admin') and activo order by rol limit 1"
         )
         decidido_por = str(encargado["id"]) if encargado else None
 
@@ -418,13 +422,13 @@ async def anulaciones_pendientes(
 
     filas = await obtener_todos(
         """
-        select r.id, r.folio, r.tipo::text, pt.nombre as categoria,
+        select r.id, r.folio, r.tipo, pt.nombre as categoria,
                r.fecha_inicio, r.fecha_fin, r.dias_solicitados, r.descripcion,
                r.anulacion_motivo, r.anulacion_solicitada_en, r.qr_usado_en,
                u.nombre as empleado, u.cedula, u.departamento
-        from public.requests r
-        join public.users u on u.id = r.user_id
-        left join public.permission_types pt on pt.id = r.permission_type_id
+        from requests r
+        join users u on u.id = r.user_id
+        left join permission_types pt on pt.id = r.permission_type_id
         where r.estado = 'pendiente_anulacion'
         order by r.anulacion_solicitada_en
         """
@@ -453,18 +457,19 @@ async def resolver_anulacion(
 
     nuevo = "cancelado" if decision.accion == "aprobar" else "aprobado"
     try:
-        fila = await obtener_uno(
+        cambiadas = await ejecutar(
             """
-            update public.requests
+            update requests
                set estado = %(estado)s,
                    anulacion_resuelta_por = %(quien)s,
                    anulacion_rechazada_motivo = %(motivo)s
              where id = %(id)s and estado = 'pendiente_anulacion'
-            returning id, folio, estado::text, dias_solicitados
             """,
             {"estado": nuevo, "quien": usuario["id"], "id": solicitud_id,
              "motivo": (decision.motivo or "").strip() or None},
         )
+        fila = (await obtener_uno("SELECT id, folio, estado, dias_solicitados FROM requests WHERE id = %s",
+                                  (solicitud_id,)) if cambiadas else None)
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
@@ -490,7 +495,7 @@ async def resolver_anulacion(
 async def qr_png(solicitud_id: uuid.UUID, usuario: Annotated[dict, Depends(usuario_actual)]) -> Response:
     """Imagen del QR. Solo el dueño de la solicitud, Talento Humano o garita."""
     solicitud = await obtener_uno(
-        "select user_id, estado, qr_hash from public.requests where id = %s", (solicitud_id,)
+        "select user_id, estado, qr_hash from requests where id = %s", (solicitud_id,)
     )
     if solicitud is None or solicitud["qr_hash"] is None:
         raise HTTPException(status_code=404, detail={"mensaje": "Esta solicitud no tiene código QR."})
@@ -523,7 +528,7 @@ async def candidatos_reemplazo(
     """
     solicitud = await obtener_uno(
         """select r.user_id, r.jefe_id, r.fecha_inicio, r.fecha_fin, u.departamento
-             from public.requests r join public.users u on u.id = r.user_id
+             from requests r join users u on u.id = r.user_id
             where r.id = %s""",
         (solicitud_id,),
     )
@@ -539,12 +544,12 @@ async def candidatos_reemplazo(
         """
         select u.id, u.nombre, u.cargo,
                exists (
-                 select 1 from public.requests o
+                 select 1 from requests o
                   where o.user_id = u.id
                     and o.estado in ('pendiente_jefe', 'pendiente_rrhh', 'aprobado')
                     and o.fecha_inicio <= %(fin)s and o.fecha_fin >= %(inicio)s
                ) as tambien_ausente
-        from public.users u
+        from users u
         where u.activo and u.id <> %(solicitante)s
           and (u.jefe_id = %(jefe)s or u.departamento = %(depto)s)
         order by tambien_ausente, u.nombre
@@ -580,20 +585,15 @@ async def ajustar_ausencia(
 ) -> dict:
     """Talento Humano extiende o corrige una ausencia ya aprobada.
 
-    La base mueve fechas, días, saldo y constancia en una sola transacción
-    (`ajustar_ausencia`): un reposo que se alarga no puede dejar el saldo a
-    medias. El ajuste nunca borra el original: queda en `request_adjustments`
+    Fechas, días, saldo y constancia se mueven en una sola transacción
+    (reglas.solicitudes.ajustar_ausencia): un reposo que se alarga no puede
+    dejar el saldo a medias. El ajuste nunca borra el original: queda en `request_adjustments`
     con autor, momento y la explicación de por qué se hizo.
     """
     try:
-        # `from`, no `select (fn(...)).*`: esa forma expande el registro
-        # llamando a la función una vez por columna —46 veces, y 46 ajustes
-        # registrados—. En `from` se evalúa una sola vez.
-        fila = await obtener_uno(
-            """select * from public.ajustar_ausencia(%s, %s, %s, %s, %s, %s)""",
-            (solicitud_id, datos.fecha_inicio, datos.fecha_fin,
-             datos.motivo, datos.resolucion, usuario["id"]),
-        )
+        fila = await reglas_solicitudes.ajustar_ausencia(
+            solicitud_id, datos.fecha_inicio, datos.fecha_fin,
+            datos.motivo, datos.resolucion, usuario["id"])
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
@@ -609,7 +609,7 @@ async def ajustar_ausencia(
     # está cubierto, el otro para no contar con alguien que no vendrá.
     destinos = [{"email": completa["email"], "nombre": completa["empleado"]}]
     jefe = await obtener_uno(
-        "select email, nombre from public.users where id = %s and activo",
+        "select email, nombre from users where id = %s and activo",
         (completa["jefe_id"],),
     )
     if jefe:
@@ -634,7 +634,7 @@ async def ajustes_de(
 ) -> list[dict]:
     """Historial de ajustes. Lo ve el interesado, su jefe y Talento Humano."""
     solicitud = await obtener_uno(
-        "select user_id, jefe_id from public.requests where id = %s", (solicitud_id,)
+        "select user_id, jefe_id from requests where id = %s", (solicitud_id,)
     )
     if solicitud is None:
         raise HTTPException(status_code=404, detail={"mensaje": "La solicitud no existe."})
@@ -650,8 +650,8 @@ async def ajustes_de(
                a.fecha_inicio_nueva, a.fecha_fin_nueva,
                a.dias_ant, a.dias_nuevos, a.motivo, a.resolucion,
                a.created_at, u.nombre as ajustado_por
-        from public.request_adjustments a
-        join public.users u on u.id = a.ajustado_por
+        from request_adjustments a
+        join users u on u.id = a.ajustado_por
         where a.request_id = %s
         order by a.created_at desc
         """,

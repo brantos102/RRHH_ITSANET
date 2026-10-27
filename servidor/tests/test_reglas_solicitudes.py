@@ -28,12 +28,12 @@ CALCULADAS = ["dias_solicitados", "saldo_al_solicitar", "jefe_id", "estado", "fi
 
 def _intentos(pg, n: int, semilla: int = 7):
     azar = random.Random(semilla)
-    hoy = pg.execute("select current_date as d").fetchone()["d"]
+    hoy = pg.execute("select current_date() as d").fetchone()["d"]
     personas = [f["id"] for f in pg.execute(
-        "select id from public.users where rol <> 'guardia' order by cedula").fetchall()]
-    tipos = pg.execute("select id, admite_horas from public.permission_types order by id").fetchall()
+        "select id from users where rol <> 'guardia' order by cedula").fetchall()]
+    tipos = pg.execute("select id, admite_horas from permission_types order by id").fetchall()
     vivas = pg.execute("""select user_id, fecha_inicio, fecha_fin, hora_inicio, hora_fin
-                            from public.requests where estado in
+                            from requests where estado in
                             ('pendiente_jefe','pendiente_rrhh','pendiente_anulacion','aprobado')""").fetchall()
     for k in range(n):
         caso: dict = {"id": uuid.uuid4(), "descripcion": "Intento de la prueba diferencial"}
@@ -74,10 +74,10 @@ def _en_pg(pg, caso) -> tuple[dict | None, tuple | None]:
     presentes = [c for c in cols if c in caso]
     pg.execute("savepoint intento")
     try:
-        pg.execute(f"insert into public.requests ({', '.join(presentes)}) "
+        pg.execute(f"insert into requests ({', '.join(presentes)}) "
                    f"values ({', '.join(['%s'] * len(presentes))})", tuple(caso[c] for c in presentes))
         if caso["adjunto"]:
-            pg.execute("""insert into public.request_attachments
+            pg.execute("""insert into request_attachments
                             (request_id, storage_path, nombre_archivo, mime_type, tamano_bytes)
                           values (%s, 'x/y/z.pdf', 'respaldo.pdf', 'application/pdf', 1000)""", (caso["id"],))
         # El requisito del adjunto se comprueba al confirmar; aquí se fuerza.
@@ -94,19 +94,19 @@ def _en_pg(pg, caso) -> tuple[dict | None, tuple | None]:
 
 
 def _foto_pg(pg, caso):
-    r = pg.execute(f"select {', '.join(CALCULADAS)} from public.requests where id = %s", (caso["id"],)).fetchone()
+    r = pg.execute(f"select {', '.join(CALCULADAS)} from requests where id = %s", (caso["id"],)).fetchone()
     return {
         "fila": json_normal(r),
         "periodos": json_normal(pg.execute(
-            """select periodo, dias_asignados, dias_consumidos, devengado from public.vacation_periods
+            """select periodo, dias_asignados, dias_consumidos, devengado from vacation_periods
                 where user_id = %s order by periodo""", (caso["user_id"],)).fetchall()),
         "informes": sorted(f["tipo"] for f in pg.execute(
-            "select tipo from public.informes_firmados where user_id = %s", (caso["user_id"],)).fetchall()),
+            "select tipo from informes_firmados where user_id = %s", (caso["user_id"],)).fetchall()),
         "avisos": sorted(json_normal(pg.execute(
-            """select user_id, tipo, severidad, titulo, mensaje from public.notifications
+            """select user_id, tipo, severidad, titulo, mensaje from notifications
                 where entidad_id = %s""", (str(caso["id"]),)).fetchall()), key=str),
         "bitacora": json_normal(pg.execute(
-            "select accion, detalle from public.audit_logs where entidad_id = %s", (str(caso["id"]),)).fetchall()),
+            "select accion, detalle from audit_logs where entidad_id = %s", (str(caso["id"]),)).fetchall()),
     }
 
 
@@ -167,10 +167,10 @@ async def test_cada_intento_termina_igual_en_las_dos_bases(muestra):
 
 @pytest.mark.parametrize("tipo", ["vacacion", "permiso"])
 async def test_previsualizar_igual(muestra, tipo):
-    tipos = [f["id"] for f in muestra.execute("select id from public.permission_types order by id").fetchall()]
+    tipos = [f["id"] for f in muestra.execute("select id from permission_types order by id").fetchall()]
     for caso in list(_intentos(muestra, 120, semilla=11)):
         pt = caso.get("permission_type_id") or (tipos[0] if tipo == "permiso" else None)
-        en_pg = muestra.execute("select public.previsualizar_solicitud(%s, %s, %s, %s, %s) as p",
+        en_pg = muestra.execute("select previsualizar_solicitud(%s, %s, %s, %s, %s) as p",
                                 (caso["user_id"], tipo, caso["fecha_inicio"], caso["fecha_fin"], pt)).fetchone()["p"]
         en_my = await solicitudes.previsualizar_solicitud(caso["user_id"], tipo, caso["fecha_inicio"],
                                                           caso["fecha_fin"], pt)
@@ -185,14 +185,14 @@ async def test_previsualizar_igual(muestra, tipo):
 ])
 async def test_dos_permisos_por_horas_el_mismo_dia(muestra, segundo, choca):
     """Salir a las 12:00 de uno y entrar a las 12:00 del otro no es un choque."""
-    persona = muestra.execute("""select u.id from public.users u where u.activo and u.rol = 'empleado'
-                                   and not exists (select 1 from public.requests r where r.user_id = u.id)
+    persona = muestra.execute("""select u.id from users u where u.activo and u.rol = 'empleado'
+                                   and not exists (select 1 from requests r where r.user_id = u.id)
                                  order by cedula limit 1""").fetchone()["id"]
-    tipo = muestra.execute("""select id from public.permission_types
+    tipo = muestra.execute("""select id from permission_types
                                where admite_horas and not requiere_justificacion and activo
                                  and (max_horas is null or max_horas >= 3)
                                order by id limit 1""").fetchone()["id"]
-    dia = muestra.execute("select current_date + 20 as d").fetchone()["d"]
+    dia = muestra.execute("select current_date() + interval 20 day as d").fetchone()["d"]
     while dia.weekday() >= 5:
         dia += dt.timedelta(days=1)
     base = {"user_id": persona, "tipo": "permiso", "permission_type_id": tipo, "fecha_inicio": dia,
@@ -204,9 +204,9 @@ async def test_dos_permisos_por_horas_el_mismo_dia(muestra, segundo, choca):
     muestra.execute("savepoint dos")
     try:
         cols = [c for c in primero if c != "adjunto"]
-        muestra.execute(f"insert into public.requests ({', '.join(cols)}) values ({', '.join(['%s'] * len(cols))})",
+        muestra.execute(f"insert into requests ({', '.join(cols)}) values ({', '.join(['%s'] * len(cols))})",
                         tuple(primero[c] for c in cols))
-        folio_pg = muestra.execute("select folio from public.requests where id = %s",
+        folio_pg = muestra.execute("select folio from requests where id = %s",
                                    (primero["id"],)).fetchone()["folio"]
         _, err_pg = _en_pg(muestra, otro)
     finally:

@@ -31,7 +31,7 @@ async def _tipo_por_horas(horas_necesarias: float = 3) -> dict:
     la regla que se quiere comprobar.
     """
     return await obtener_uno(
-        """select id, codigo, nombre, max_horas from public.permission_types
+        """select id, codigo, nombre, max_horas from permission_types
            where admite_horas and not requiere_adjunto and activo
              and (max_horas is null or max_horas >= %s)
            order by id limit 1""",
@@ -142,7 +142,7 @@ async def test_lo_cancelado_libera_las_fechas(cliente, auth):
 
     primera = await cliente.post("/solicitudes", headers=auth, json=cuerpo)
     assert primera.status_code == 201, primera.text
-    await ejecutar("update public.requests set estado = 'cancelado' where id = %s",
+    await ejecutar("update requests set estado = 'cancelado' where id = %s",
                    (primera.json()["id"],))
 
     otra_vez = await cliente.post("/solicitudes", headers=auth, json=cuerpo)
@@ -294,7 +294,7 @@ async def test_el_ajuste_mantiene_vigente_el_qr_hasta_el_nuevo_fin(
     assert r.status_code == 200, r.text
 
     fila = await obtener_uno(
-        "select fecha_fin, qr_expira_en from public.requests where id = %s", (creada["id"],))
+        "select fecha_fin, qr_expira_en from requests where id = %s", (creada["id"],))
     assert fila["fecha_fin"] == nuevo_fin
     assert fila["qr_expira_en"] is not None, "el QR debe seguir vigente tras extender"
     assert fila["qr_expira_en"].date() > nuevo_fin - timedelta(days=1)

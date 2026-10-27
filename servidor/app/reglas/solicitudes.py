@@ -354,3 +354,70 @@ async def previsualizar_solicitud(user_id, tipo: str, inicio: dt.date, fin: dt.d
         "avisos": avisos,
         "desglose": await desglose_dias(tipo, inicio, fin),
     }
+
+
+async def ajustar_ausencia(request_id, inicio: dt.date, fin: dt.date, motivo: str | None,
+                           resolucion: str | None, por) -> dict[str, Any]:
+    """Talento Humano extiende o corrige una ausencia ya aprobada.
+
+    Mueve fechas, días, saldo y deja la constancia en una sola transacción:
+    un reposo que se alarga no puede dejar el saldo a medias. El original no
+    se borra: queda en request_adjustments con autor, momento y motivo.
+    """
+    async with transaccion():
+        sol = await obtener_uno("SELECT * FROM requests WHERE id = %s FOR UPDATE", (request_id,))
+        if sol is None:
+            raise ReglaDeNegocio("La solicitud no existe")
+        if sol["estado"] != "aprobado":
+            raise ReglaDeNegocio(f"Solo se ajusta una ausencia ya aprobada (esta está en {sol['estado']})")
+        if fin < inicio:
+            raise ReglaDeNegocio("La fecha de fin no puede ser anterior a la de inicio")
+        if len((motivo or "").strip(" ")) < 15 or len((resolucion or "").strip(" ")) < 15:
+            raise ReglaDeNegocio("El ajuste exige explicar el caso y la resolución "
+                                 "(mínimo 15 caracteres cada uno)")
+
+        # Extender una ausencia puede meterla encima de otra de la misma
+        # persona. Se excluye la propia, que se pisa consigo misma.
+        choque = await ausencia_solapada(sol["user_id"], inicio, fin, _hora(sol["hora_inicio"]),
+                                         _hora(sol["hora_fin"]), sol["id"])
+        if choque is not None:
+            folio = str(choque["folio"]) if choque["folio"] is not None else "sin folio"
+            raise ReglaDeNegocio(
+                f"El nuevo rango se cruza con otra ausencia de la misma persona: del "
+                f"{choque['fecha_inicio']:%d/%m/%Y} al {choque['fecha_fin']:%d/%m/%Y} "
+                f"(solicitud Nº {folio}). Resuelva esa antes de extender esta.",
+                pista="solape|" + (str(choque["folio"]) if choque["folio"] is not None else ""))
+
+        dias = (await obtener_uno("SELECT calcular_dias(%s, %s, %s) AS d",
+                                  (sol["tipo"], inicio, fin)))["d"]
+
+        # El saldo solo se mueve en vacaciones; un permiso no lo toca.
+        if sol["tipo"] == "vacacion" and dias != sol["dias_solicitados"]:
+            await ejecutar("CALL reversar_vacaciones(%s, %s, %s, %s, %s)",
+                           (sol["user_id"], sol["dias_solicitados"], sol["id"], sol["fines_semana"], por))
+            await ejecutar("CALL consumir_vacaciones(%s, %s, %s, %s, %s)",
+                           (sol["user_id"], dias, sol["id"], sol["fines_semana"], por))
+
+        await ejecutar(
+            """INSERT INTO request_adjustments
+                 (request_id, fecha_inicio_ant, fecha_fin_ant, fecha_inicio_nueva, fecha_fin_nueva,
+                  dias_ant, dias_nuevos, motivo, resolucion, ajustado_por)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            (sol["id"], sol["fecha_inicio"], sol["fecha_fin"], inicio, fin, sol["dias_solicitados"],
+             dias, (motivo or "").strip(" "), (resolucion or "").strip(" "), por))
+
+        # @ajuste_en_curso deja mover las fechas de algo aprobado (el
+        # disparador lo impide en cualquier otro caso). Vive en la conexión:
+        # se apaga antes de soltarla, para que no la herede otra petición.
+        await ejecutar("SET @ajuste_en_curso = 1")
+        try:
+            await ejecutar(
+                """UPDATE requests
+                      SET fecha_inicio = %s, fecha_fin = %s,
+                          qr_expira_en = TIMESTAMP(%s + INTERVAL 1 DAY),
+                          ajustada_en = NOW(6), ajustada_por = %s
+                    WHERE id = %s""",
+                (inicio, fin, fin, por, sol["id"]))
+        finally:
+            await ejecutar("SET @ajuste_en_curso = NULL")
+        return await obtener_uno("SELECT * FROM requests WHERE id = %s", (sol["id"],))

@@ -30,11 +30,11 @@ async def _tablero_de_fabrica():
     """Cada prueba parte del tablero recién instalado."""
     antes = {f["clave"]: (f["visible"], f["orden"], f["titulo"], json.dumps(f["ajustes"]))
              for f in await obtener_todos(
-                 "select clave, visible, orden, titulo, ajustes from public.tablero_bloques")}
+                 "select clave, visible, orden, titulo, ajustes from tablero_bloques")}
     yield
     for clave, (visible, orden, titulo, ajustes) in antes.items():
         await ejecutar(
-            """update public.tablero_bloques
+            """update tablero_bloques
                   set visible = %s, orden = %s, titulo = %s, ajustes = %s,
                       actualizado_en = null, actualizado_por = null
                 where clave = %s""",
@@ -62,7 +62,7 @@ async def test_cada_cifra_viene_con_la_hora_en_que_se_calculo(cliente, rrhh_auth
 async def test_los_activos_son_los_activos(cliente, rrhh_auth):
     cuerpo = (await cliente.get("/tablero", headers=rrhh_auth)).json()
     activos = {b["clave"]: b for b in cuerpo["bloques"]}["activos"]
-    real = await obtener_uno("select count(*) as n from public.users where activo")
+    real = await obtener_uno("select count(*) as n from users where activo")
     assert activos["cifra"] == real["n"]
 
 
@@ -72,17 +72,17 @@ async def test_sin_jefe_cuenta_a_los_que_no_tienen_jefe(cliente, rrhh_auth, jefe
     d = {b["clave"]: b for b in
          (await cliente.get("/tablero", headers=rrhh_auth)).json()["bloques"]}["sin_jefe"]
     real = await obtener_uno(
-        "select count(*) as n from public.users where activo and jefe_id is null")
+        "select count(*) as n from users where activo and jefe_id is null")
     assert d["cifra"] == real["n"]
 
-    await ejecutar("update public.users set jefe_id = null where id = %s", (empleado["id"],))
+    await ejecutar("update users set jefe_id = null where id = %s", (empleado["id"],))
     try:
         de_nuevo = {b["clave"]: b for b in
                     (await cliente.get("/tablero", headers=rrhh_auth)).json()["bloques"]}["sin_jefe"]
         assert de_nuevo["cifra"] == real["n"] + 1
     finally:
         await ejecutar(
-            """update public.users set jefe_id = (select id from public.users where cedula = %s)
+            """update users set jefe_id = (select id from users where cedula = %s)
                 where id = %s""", (CEDULA_JEFE_R, empleado["id"]))
 
 
@@ -96,19 +96,19 @@ async def test_los_de_hoy_cuentan_hoy(cliente, auth, jefe_auth, rrhh_auth, emple
     # anticipación— ni cambiar las fechas de una ya aprobada, y ambas reglas
     # están bien donde están: lo que se mide aquí es el conteo, no ellas.
     fila = await obtener_uno(
-        """insert into public.requests
+        """insert into requests
              (user_id, tipo, fecha_inicio, fecha_fin, descripcion)
-           values (%s, 'vacacion', current_date + 60, current_date + 67,
+           values (%s, 'vacacion', current_date() + interval 60 day, current_date() + interval 67 day,
                    'Ausencia de control del tablero')
            returning id""", (empleado["id"],))
     await ejecutar(
-        """update public.requests
-              set fecha_inicio = current_date, fecha_fin = current_date + 7
+        """update requests
+              set fecha_inicio = current_date(), fecha_fin = current_date() + interval 7 day
             where id = %s""", (fila["id"],))
     # Las dos etapas, en orden: la máquina de estados no admite saltos, y hace
     # bien en no admitirlos.
     for etapa in ("pendiente_rrhh", "aprobado"):
-        await ejecutar("update public.requests set estado = %s where id = %s",
+        await ejecutar("update requests set estado = %s where id = %s",
                        (etapa, fila["id"]))
     try:
         d = {b["clave"]: b for b in
@@ -119,7 +119,7 @@ async def test_los_de_hoy_cuentan_hoy(cliente, auth, jefe_auth, rrhh_auth, emple
         # pantalla lo leía como vacío e imprimía «de — activos».
         assert d["detalle"]["de"] > 0
     finally:
-        await ejecutar("delete from public.requests where id = %s", (fila["id"],))
+        await ejecutar("delete from requests where id = %s", (fila["id"],))
 
 
 async def test_el_crecimiento_trae_un_renglon_por_mes(cliente, rrhh_auth):
@@ -141,7 +141,7 @@ async def test_el_tablero_no_lleva_nombres_ni_cedulas(cliente, rrhh_auth, emplea
     """La comprobación que justifica todo el diseño del tablero."""
     crudo = (await cliente.get("/tablero", headers=rrhh_auth)).text
     persona = await obtener_uno(
-        "select nombre, cedula, email from public.users where id = %s", (empleado["id"],))
+        "select nombre, cedula, email from users where id = %s", (empleado["id"],))
     for dato in (persona["nombre"], persona["cedula"], persona["email"]):
         if dato:
             assert dato not in crudo, f"el tablero está filtrando «{dato}»"
@@ -165,7 +165,7 @@ async def test_apagarlo_tambien_deja_de_calcularlo(cliente, rrhh_auth):
     """Apagar un bloque lo quita de la pantalla Y deja de costarlo."""
     await cliente.patch("/admin/tablero/crecimiento", headers=rrhh_auth,
                         json={"visible": False})
-    filas = await obtener_todos("select clave from public.tablero_indicadores()")
+    filas = await obtener_todos("select clave from tablero_indicadores()")
     assert "crecimiento" not in {f["clave"] for f in filas}
 
 
@@ -221,7 +221,7 @@ async def test_el_cambio_queda_en_la_bitacora(cliente, rrhh_auth):
     await cliente.patch("/admin/tablero/pasivo", headers=rrhh_auth,
                         json={"ajustes": {"umbral_persona": 45}})
     reg = await obtener_uno(
-        """select detalle from public.audit_logs
+        """select detalle from audit_logs
             where accion = 'tablero_modificado' and entidad_id = 'pasivo'
             order by created_at desc limit 1""")
     assert reg["detalle"]["ahora"]["ajustes"]["umbral_persona"] == 45

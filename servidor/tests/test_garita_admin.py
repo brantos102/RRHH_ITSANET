@@ -16,7 +16,7 @@ CEDULA_VISITA = "1713175071"
 
 async def lunes_limpio(semanas: int = 6) -> date:
     feriados = {f["fecha"] for f in await obtener_todos(
-        "select fecha from public.feriados where activo and fecha >= current_date")}
+        "select fecha from feriados where activo and fecha >= current_date()")}
     base = date.today() + timedelta(weeks=semanas)
     c = base - timedelta(days=base.weekday())
     for _ in range(60):
@@ -29,15 +29,15 @@ async def lunes_limpio(semanas: int = 6) -> date:
 @pytest.fixture
 async def equipo(empleado):
     await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s,'API Guardia','guardia@api.test','guardia', current_date - 500) returning id""",
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
+           values (%s,'API Guardia','guardia@api.test','guardia', current_date() - interval 500 day) returning id""",
         (CEDULA_GUARDIA,))
     rrhh = await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s,'API RRHH','rrhh@api.test','rrhh', current_date - 900) returning id""",
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
+           values (%s,'API RRHH','rrhh@api.test','rrhh', current_date() - interval 900 day) returning id""",
         (CEDULA_RRHH,))
     await ejecutar(
-        """update public.vacation_periods set fines_semana_consumidos = fines_semana_obligatorios
+        """update vacation_periods set fines_semana_consumidos = fines_semana_obligatorios
            where user_id = %s and not caducado""", (empleado["id"],))
     return {"rrhh": str(rrhh["id"])}
 
@@ -62,11 +62,11 @@ async def aprobada(cliente, codigos, equipo, empleado):
     # Vigente hoy, que es lo que la garita valida. Se ajusta ANTES de aprobar:
     # el sistema no deja mover fechas de una solicitud ya aprobada.
     await ejecutar(
-        "update public.requests set fecha_inicio=current_date, fecha_fin=current_date+2 where id=%s",
+        "update requests set fecha_inicio=current_date(), fecha_fin=current_date() + interval 2 day where id=%s",
         (solicitud_id,))
-    await ejecutar("update public.requests set estado='pendiente_rrhh' where id=%s", (solicitud_id,))
-    await ejecutar("update public.requests set estado='aprobado' where id=%s", (solicitud_id,))
-    fila = await obtener_uno("select qr_hash, folio from public.requests where id=%s", (solicitud_id,))
+    await ejecutar("update requests set estado='pendiente_rrhh' where id=%s", (solicitud_id,))
+    await ejecutar("update requests set estado='aprobado' where id=%s", (solicitud_id,))
+    fila = await obtener_uno("select qr_hash, folio from requests where id=%s", (solicitud_id,))
     return {"id": solicitud_id, "qr": str(fila["qr_hash"]), "folio": fila["folio"]}
 
 
@@ -92,7 +92,7 @@ async def test_qr_inexistente_se_deniega_y_queda_registrado(cliente, codigos, eq
     assert r.json()["autorizado"] is False
 
     fila = await obtener_uno(
-        "select count(*) as n from public.access_logs where tipo_acceso='acceso_denegado'")
+        "select count(*) as n from access_logs where tipo_acceso='acceso_denegado'")
     assert fila["n"] >= 1, "un intento denegado debe quedar en la bitácora"
 
 
@@ -107,14 +107,14 @@ async def test_fuera_de_fecha_se_deniega(cliente, codigos, aprobada, empleado):
     # Toda solicitud nace pendiente: el trigger lo impone aunque se inserte
     # directamente. Hay que recorrer el flujo para llegar a «aprobado».
     creada = await obtener_uno(
-        """insert into public.requests (user_id, tipo, fecha_inicio, fecha_fin, descripcion)
-           values (%s, 'vacacion', current_date + 20, current_date + 27,
+        """insert into requests (user_id, tipo, fecha_inicio, fecha_fin, descripcion)
+           values (%s, 'vacacion', current_date() + interval 20 day, current_date() + interval 27 day,
                    'Autorizacion de fecha futura')
            returning id""",
         (empleado["id"],))
-    await ejecutar("update public.requests set estado='pendiente_rrhh' where id=%s", (creada["id"],))
-    await ejecutar("update public.requests set estado='aprobado' where id=%s", (creada["id"],))
-    futura = await obtener_uno("select qr_hash from public.requests where id=%s", (creada["id"],))
+    await ejecutar("update requests set estado='pendiente_rrhh' where id=%s", (creada["id"],))
+    await ejecutar("update requests set estado='aprobado' where id=%s", (creada["id"],))
+    futura = await obtener_uno("select qr_hash from requests where id=%s", (creada["id"],))
 
     g = await _entrar(cliente, codigos, CEDULA_GUARDIA)
     r = await cliente.post("/garita/validar-qr", headers=g, json={"codigo": str(futura["qr_hash"])})
@@ -177,7 +177,7 @@ async def test_solo_rrhh_resuelve_anulaciones(cliente, codigos, aprobada):
 
 
 async def test_autorizar_anulacion_devuelve_los_dias(cliente, codigos, aprobada, empleado):
-    antes = (await obtener_uno("select dias_vacaciones from public.users where id=%s",
+    antes = (await obtener_uno("select dias_vacaciones from users where id=%s",
                                (empleado["id"],)))["dias_vacaciones"]
     emp = await _entrar(cliente, codigos, CEDULA_PRUEBA)
     await cliente.post(f"/solicitudes/{aprobada['id']}/cancelar", headers=emp,
@@ -188,7 +188,7 @@ async def test_autorizar_anulacion_devuelve_los_dias(cliente, codigos, aprobada,
                            json={"accion": "aprobar"})
     assert r.status_code == 200 and r.json()["estado"] == "cancelado"
 
-    despues = (await obtener_uno("select dias_vacaciones from public.users where id=%s",
+    despues = (await obtener_uno("select dias_vacaciones from users where id=%s",
                                  (empleado["id"],)))["dias_vacaciones"]
     assert despues > antes, "autorizar la anulación devuelve los días"
 
@@ -270,9 +270,9 @@ async def test_crear_usuario_con_saldo_de_planilla(cliente, codigos, equipo):
     assert r.status_code == 201, r.text
 
     fila = await obtener_uno(
-        "select dias_vacaciones from public.users where cedula = '1200000006'")
+        "select dias_vacaciones from users where cedula = '1200000006'")
     assert float(fila["dias_vacaciones"]) == 7.5
-    await ejecutar("delete from public.users where cedula = '1200000006'")
+    await ejecutar("delete from users where cedula = '1200000006'")
 
 
 async def test_cedula_invalida_al_crear_usuario(cliente, codigos, equipo):
@@ -307,10 +307,10 @@ async def test_feriado_se_desactiva_no_se_borra(cliente, codigos, equipo):
                        json={"fecha": fecha_prueba, "nombre": "Feriado de prueba"})
     await cliente.delete(f"/admin/feriados/{fecha_prueba}", headers=rrhh)
 
-    fila = await obtener_uno("select activo from public.feriados where fecha = %s", (fecha_prueba,))
+    fila = await obtener_uno("select activo from feriados where fecha = %s", (fecha_prueba,))
     assert fila is not None, "no debe borrarse: los cálculos pasados deben seguir cuadrando"
     assert fila["activo"] is False
-    await ejecutar("delete from public.feriados where fecha = %s", (fecha_prueba,))
+    await ejecutar("delete from feriados where fecha = %s", (fecha_prueba,))
 
 
 async def test_antiguedades_calcula_los_dias_por_anio(cliente, codigos, equipo):
@@ -327,4 +327,4 @@ async def test_la_bitacora_registra_quien_administra(cliente, codigos, equipo):
                        json={"fecha": "2099-07-20", "nombre": "Otro feriado"})
     registros = (await cliente.get("/admin/bitacora?limite=20", headers=rrhh)).json()
     assert any(r["accion"] == "feriado_registrado" and r["quien"] == "API RRHH" for r in registros)
-    await ejecutar("delete from public.feriados where fecha = '2099-07-20'")
+    await ejecutar("delete from feriados where fecha = '2099-07-20'")

@@ -37,10 +37,10 @@ async def _sin_papeles_de_antes(empleado):
     sobrevive de la prueba anterior hace fallar a la siguiente por el motivo
     equivocado.
     """
-    await ejecutar("delete from public.informes_firmados where user_id = %s",
+    await ejecutar("delete from informes_firmados where user_id = %s",
                    (empleado["id"],))
     yield
-    await ejecutar("delete from public.informes_firmados where user_id = %s",
+    await ejecutar("delete from informes_firmados where user_id = %s",
                    (empleado["id"],))
 
 
@@ -57,9 +57,9 @@ async def _pedir_vacaciones(cliente, auth, dias: int = 7) -> dict:
 async def _papeles(empleado, tipo: str | None = None) -> list[dict]:
     extra = "and tipo = %s" if tipo else ""
     return await obtener_todos(
-        f"""select id, tipo::text as tipo, folio, request_id, datos, impresiones,
+        f"""select id, tipo as tipo, folio, request_id, datos, impresiones,
                    autorizado_por, autorizacion_motivo
-              from public.informes_firmados
+              from informes_firmados
              where user_id = %s {extra}
              order by emitido_en""",
         (empleado["id"], tipo) if tipo else (empleado["id"],))
@@ -127,8 +127,8 @@ async def test_la_base_impide_dos_trazabilidades_sin_autorizar(cliente, auth, em
     await _pedir_vacaciones(cliente, auth)
     with pytest.raises(Exception) as err:
         await ejecutar(
-            """insert into public.informes_firmados (user_id, tipo, folio, datos)
-               values (%s, 'trazabilidad', 'TRZ-MANO-1', '{}'::jsonb)""",
+            """insert into informes_firmados (user_id, tipo, folio, datos)
+               values (%s, 'trazabilidad', 'TRZ-MANO-1', '{}')""",
             (empleado["id"],))
     assert "idx_trazabilidad_una_sola_vez" in str(err.value)
 
@@ -136,9 +136,9 @@ async def test_la_base_impide_dos_trazabilidades_sin_autorizar(cliente, auth, em
 async def test_una_reemision_sin_motivo_no_entra(empleado):
     with pytest.raises(Exception) as err:
         await ejecutar(
-            """insert into public.informes_firmados
+            """insert into informes_firmados
                  (user_id, tipo, folio, autorizado_por, autorizado_en, datos)
-               values (%s, 'trazabilidad', 'TRZ-MANO-2', %s, now(), '{}'::jsonb)""",
+               values (%s, 'trazabilidad', 'TRZ-MANO-2', %s, now(6), '{}')""",
             (empleado["id"], empleado["id"]))
     assert "informe_autorizacion_completa" in str(err.value)
 
@@ -146,8 +146,8 @@ async def test_una_reemision_sin_motivo_no_entra(empleado):
 async def test_el_de_trazabilidad_no_admite_solicitud_y_al_contrario(empleado):
     with pytest.raises(Exception) as err:
         await ejecutar(
-            """insert into public.informes_firmados (user_id, tipo, folio, datos)
-               values (%s, 'solicitud', 'SOL-MANO-1', '{}'::jsonb)""",
+            """insert into informes_firmados (user_id, tipo, folio, datos)
+               values (%s, 'solicitud', 'SOL-MANO-1', '{}')""",
             (empleado["id"],))
     assert "informe_solicitud_con_solicitud" in str(err.value)
 
@@ -162,7 +162,7 @@ async def test_la_trazabilidad_guarda_lo_que_decia_y_no_lo_que_dira(
 
     # Talento Humano carga un registro histórico que antes no estaba.
     await ejecutar(
-        """insert into public.vacaciones_historicas
+        """insert into vacaciones_historicas
              (user_id, fecha_inicio, fecha_fin, dias, fila_origen)
            values (%s, date '2019-03-04', date '2019-03-15', 10, 9001)""",
         (empleado["id"],))
@@ -172,11 +172,11 @@ async def test_la_trazabilidad_guarda_lo_que_decia_y_no_lo_que_dira(
             "el papel firmado no cambia porque cambie la base"
         # Y lo que diría hoy un papel nuevo sí lo incluye.
         fila = await obtener_uno(
-            "select public.datos_informe_trazabilidad(%s) as d", (empleado["id"],))
+            "select datos_informe_trazabilidad(%s) as d", (empleado["id"],))
         assert fila["d"]["totales"]["veces"] == antes + 1
     finally:
         await ejecutar(
-            "delete from public.vacaciones_historicas where fila_origen = 9001")
+            "delete from vacaciones_historicas where fila_origen = 9001")
 
 
 async def test_el_de_la_solicitud_si_se_actualiza_al_reimprimirlo(
@@ -190,7 +190,7 @@ async def test_el_de_la_solicitud_si_se_actualiza_al_reimprimirlo(
     for etapa in (jefe_auth, rrhh_auth):
         await cliente.post(f"/aprobaciones/{pedida['id']}/decidir", headers=etapa,
                            json={"accion": "aprobar"})
-    await obtener_uno("select public.informe_solicitud_asegurar(%s)", (pedida["id"],))
+    await obtener_uno("select informe_solicitud_asegurar(%s)", (pedida["id"],))
 
     de_nuevo = (await _papeles(empleado, "solicitud"))[0]
     assert de_nuevo["folio"] == papel["folio"], "mismo documento, no uno nuevo"
@@ -237,7 +237,7 @@ async def test_cada_impresion_queda_contada(cliente, auth, empleado):
     for _ in range(3):
         await cliente.get(f"/papeles/{papel['id']}.html", headers=auth)
     fila = await obtener_uno(
-        "select impresiones, ultima_impresion from public.informes_firmados where id = %s",
+        "select impresiones, ultima_impresion from informes_firmados where id = %s",
         (papel["id"],))
     assert fila["impresiones"] == 3
     assert fila["ultima_impresion"] is not None
@@ -249,7 +249,7 @@ async def test_la_impresion_queda_en_la_bitacora(cliente, auth, empleado):
     papel = (await _papeles(empleado, "trazabilidad"))[0]
     await cliente.get(f"/papeles/{papel['id']}.html", headers=auth)
     reg = await obtener_uno(
-        """select detalle from public.audit_logs
+        """select detalle from audit_logs
             where accion = 'papel_impreso' and entidad_id = %s
             order by created_at desc limit 1""", (str(papel["id"]),))
     assert reg is not None

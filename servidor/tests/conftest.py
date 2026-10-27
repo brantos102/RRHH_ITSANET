@@ -37,7 +37,7 @@ os.environ.setdefault("OTP_MAX_ENVIOS_HORA", "50")
 
 import httpx  # noqa: E402
 from app import correo  # noqa: E402
-from app.db import ejecutar, obtener_uno  # noqa: E402
+from app.db import ejecutar, lista, nuevo_id, obtener_uno, transaccion  # noqa: E402
 from app.main import app  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mysql"))
@@ -72,6 +72,19 @@ def base_de_pruebas_mysql():
     raiz.close()
     if migrar.principal(aplicar=True, url=url) != 0:
         pytest.exit("Las migraciones no se aplicaron en la base de pruebas.", returncode=2)
+
+    # El personal de prueba de siempre (supabase/seed.sql), si no está.
+    import asyncio
+
+    from app.db import cerrar_pool
+    from semilla import sembrar
+
+    async def _sembrar():
+        try:
+            await sembrar()
+        finally:
+            await cerrar_pool()
+    asyncio.run(_sembrar())
 
 
 @pytest.fixture(autouse=True)
@@ -111,63 +124,107 @@ async def cliente(empleado):
 async def empleado():
     """Crea un empleado de prueba y limpia todo lo que la prueba genere."""
     await _limpiar()
-    fila = await obtener_uno(
-        """
-        insert into public.users (cedula, nombre, email, rol, fecha_ingreso, telefono)
-        values (%s, 'API Empleado', %s, 'empleado',
-                (current_date - make_interval(years => 7))::date, '0999123456')
-        returning id
-        """,
-        (CEDULA_PRUEBA, CORREO_PRUEBA),
+    user_id = str(nuevo_id())
+    await ejecutar(
+        """INSERT INTO users (id, cedula, nombre, email, rol, fecha_ingreso, telefono)
+           VALUES (%s, %s, 'API Empleado', %s, 'empleado',
+                   CURRENT_DATE() - INTERVAL 7 YEAR, '0999123456')""",
+        (user_id, CEDULA_PRUEBA, CORREO_PRUEBA),
     )
-    user_id = str(fila["id"])
     # Saldo realista: sin esto acumularía los 7 años completos (108 días)
-    await obtener_uno("select public.cargar_saldo_inicial(%s, 12.5, 0) as saldo", (user_id,))
+    from app.reglas import periodos
+    await periodos.cargar_saldo_inicial(user_id, 12.5, 0)
     yield {"id": user_id, "cedula": CEDULA_PRUEBA, "email": CORREO_PRUEBA}
     await _limpiar()
 
 
 async def _limpiar() -> None:
-    # Los códigos de acceso se borran por dueño y no por una lista fija de
-    # cédulas. El límite de envíos cuenta por hora, y cada módulo de pruebas
-    # crea su propio jefe, su guardia o su Talento Humano: con una lista
-    # cerrada, esas cédulas acumulaban envíos hasta que el fixture recibía un
-    # 429 y la prueba moría en el arranque, sin que nada estuviera roto. Pasa
-    # igual cuando las pruebas de navegador entraron antes con el mismo
-    # personal de la semilla.
-    await ejecutar(
-        """delete from public.auth_otp
-            where cedula = any(%s)
-               or cedula in (select cedula from public.users
-                              where email::text like '%%@api.test'
-                                 or email::text like '%%@itsanet.test')""",
-        ([CEDULA_PRUEBA, CEDULA_SIN_REGISTRO, "0900000001", "1100000007", "1200000006"],))
-    await ejecutar(
-        "delete from public.notifications where user_id in "
-        "(select id from public.users where email like %s)", ("%@api.test",))
-    await ejecutar("delete from public.audit_logs where cedula = any(%s)",
-                   ([CEDULA_PRUEBA, CEDULA_SIN_REGISTRO, "0900000001", "1100000007", "1200000006"],))
-    # Y los intentos fallidos de identificarse, que NO se borran por cédula:
-    # se registran justamente con una que no corresponde a nadie, así que la
-    # limpieza de arriba no los alcanzaba. El alta se cierra tras diez
-    # intentos por hora desde la misma red, de modo que se iban acumulando
-    # entre ejecuciones hasta que todas las pruebas del alta empezaban a
-    # recibir 429 sin que nada estuviera roto.
-    await ejecutar("delete from public.audit_logs where accion = 'alta_identidad_fallida'")
+    cedulas = lista([CEDULA_PRUEBA, CEDULA_SIN_REGISTRO, "0900000001", "1100000007", "1200000006"])
+    async with transaccion():
+        # La bitácora es inmutable: borrar de ella exige la retención
+        # autorizada, encendida y apagada en esta misma conexión.
+        await ejecutar("SET @retencion = 'autorizada'")
+        try:
+            # Los códigos de acceso se borran por dueño y no por una lista fija
+            # de cédulas: el límite de envíos cuenta por hora, y cada módulo de
+            # pruebas crea su propio jefe, su guardia o su Talento Humano. Con
+            # una lista cerrada, esas cédulas acumulaban envíos hasta que el
+            # fixture recibía un 429 sin que nada estuviera roto.
+            await ejecutar(
+                """DELETE FROM auth_otp
+                    WHERE cedula IN %s
+                       OR cedula IN (SELECT cedula FROM users
+                                      WHERE email LIKE '%%@api.test' OR email LIKE '%%@itsanet.test')""",
+                (cedulas,))
+            await ejecutar(
+                "DELETE FROM notifications WHERE user_id IN (SELECT id FROM users WHERE email LIKE %s)",
+                ("%@api.test",))
+            await ejecutar("DELETE FROM audit_logs WHERE cedula IN %s", (cedulas,))
+            # Los intentos fallidos de identificarse se registran con una cédula
+            # que no corresponde a nadie, así que la limpieza de arriba no los
+            # alcanza; el alta se cierra tras diez por hora desde la misma red.
+            await ejecutar("DELETE FROM audit_logs WHERE accion = 'alta_identidad_fallida'")
+        finally:
+            await ejecutar("SET @retencion = NULL")
     # Los ajustes apuntan a quien los hizo y la clave foránea es restrictiva a
-    # propósito: en producción las personas se desactivan, no se borran, y la
-    # constancia del ajuste debe sobrevivirlas. Aquí sí hay que quitarlos.
+    # propósito: en producción las personas se desactivan, no se borran.
     await ejecutar(
-        "delete from public.request_adjustments where ajustado_por in "
-        "(select id from public.users where email like %s)", ("%@api.test",))
-    await ejecutar("delete from public.visitors where motivo_visita like %s", ("%de prueba%",))
-    await ejecutar("delete from public.visitors where nombre like %s", ("Proveedor de prueba%",))
+        "DELETE FROM request_adjustments WHERE ajustado_por IN (SELECT id FROM users WHERE email LIKE %s)",
+        ("%@api.test",))
+    await ejecutar("DELETE FROM visitors WHERE motivo_visita LIKE %s", ("%de prueba%",))
+    await ejecutar("DELETE FROM visitors WHERE nombre LIKE %s", ("Proveedor de prueba%",))
     # También por cédula: una prueba que cambie el correo de un usuario de
     # prueba lo dejaba fuera de esta limpieza y rompía a las siguientes.
     await ejecutar(
-        "delete from public.users where cedula = any(%s)",
-        ([CEDULA_PRUEBA, "0900000001", "1100000007", "1200000006",
-          "1700000019", "1700000027", "1700000035"],))
-    await ejecutar("delete from public.users where email like %s", ("%@api.test",))
-    await ejecutar("delete from public.users where email like %s", ("%@empresa-prueba.com",))
-    await ejecutar("delete from auth.users where email like %s", ("%@api.test",))
+        "DELETE FROM users WHERE cedula IN %s",
+        (lista([CEDULA_PRUEBA, "0900000001", "1100000007", "1200000006",
+                "1700000019", "1700000027", "1700000035"]),))
+    await ejecutar("DELETE FROM users WHERE email LIKE %s", ("%@api.test",))
+    await ejecutar("DELETE FROM users WHERE email LIKE %s", ("%@empresa-prueba.com",))
+
+
+# ------------------------------------------------- ayudantes para MySQL
+# PostgreSQL devolvía la fila con INSERT ... RETURNING y resolvía el choque
+# con ON CONFLICT. MySQL no tiene RETURNING: estos ayudantes hacen lo mismo
+# para las pruebas, sin que cada una repita la receta.
+class Sql(str):
+    """Un valor que va como expresión SQL y no como dato: Sql("CURRENT_DATE()")."""
+
+
+async def insertar(tabla: str, **campos) -> dict:
+    """INSERT ... RETURNING *: inserta y devuelve la fila como quedó."""
+    import re
+    import uuid as _uuid
+
+    from app.db import insertar as _insertar
+    assert re.fullmatch(r"[a-z_]+", tabla) and all(re.fullmatch(r"[a-z_]+", c) for c in campos)
+    columna_id = await obtener_uno(
+        """SELECT data_type, extra FROM information_schema.columns
+            WHERE table_schema = DATABASE() AND table_name = %s AND column_name = 'id'""", (tabla,))
+    if columna_id and columna_id["data_type"] == "char" and "id" not in campos:
+        campos["id"] = str(_uuid.uuid4())
+    marcas = ", ".join(v if isinstance(v, Sql) else "%s" for v in campos.values())
+    valores = tuple(v for v in campos.values() if not isinstance(v, Sql))
+    generado = await _insertar(f"INSERT INTO {tabla} ({', '.join(campos)}) VALUES ({marcas})", valores)
+    clave = campos.get("id", generado)
+    if columna_id is None:
+        return dict(campos)
+    return await obtener_uno(f"SELECT * FROM {tabla} WHERE id = %s", (clave,))
+
+
+async def persona(cedula: str, **campos) -> dict:
+    """Una persona de prueba por cédula: la crea, o actualiza la que ya está.
+
+    Es el `insert ... on conflict (cedula) do update ... returning id` de las
+    pruebas escritas para PostgreSQL. Por omisión entró hace 900 días.
+    """
+    campos.setdefault("fecha_ingreso", Sql("CURRENT_DATE() - INTERVAL 900 DAY"))
+    ya = await obtener_uno("SELECT id FROM users WHERE cedula = %s", (cedula,))
+    if ya is None:
+        return await insertar("users", cedula=cedula, **campos)
+    cambios = {k: v for k, v in campos.items() if k != "fecha_ingreso"}
+    if cambios:
+        asignaciones = ", ".join(f"{c} = {v}" if isinstance(v, Sql) else f"{c} = %s" for c, v in cambios.items())
+        await ejecutar(f"UPDATE users SET {asignaciones} WHERE id = %s",
+                       (*[v for v in cambios.values() if not isinstance(v, Sql)], ya["id"]))
+    return await obtener_uno("SELECT * FROM users WHERE id = %s", (ya["id"],))

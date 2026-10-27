@@ -13,9 +13,11 @@ from pydantic import BaseModel, Field, field_validator
 
 from .. import notificaciones
 from ..audit import registrar
-from ..db import conexion, obtener_todos, obtener_uno
+from ..db import ejecutar, obtener_todos, obtener_uno, para_json
 from ..deps import exigir_rol, usuario_actual
 from ..errores import traducir
+from ..reglas import personal
+from ..reglas import solicitudes as reglas_solicitudes
 from ..storage import nombre_seguro, subir_adjunto
 
 log = logging.getLogger("rrhh.solicitudes")
@@ -82,11 +84,11 @@ async def tipos_permiso(_: Annotated[dict, Depends(usuario_actual)]) -> list[dic
                pt.guia_ejemplo, pt.guia_adjuntos,
                c.codigo as categoria_codigo, c.nombre as categoria_nombre,
                l.norma, l.articulo, l.titulo as articulo_titulo, l.texto as articulo_texto
-        from public.permission_types pt
-        left join public.permission_categories c on c.id = pt.category_id
+        from permission_types pt
+        left join permission_categories c on c.id = pt.category_id
         -- La vista aplica el modo: un artículo oculto no tiene fila y el
         -- left join deja el tipo de permiso sin cita, que es lo pedido.
-        left join public.v_legal_colaborador l on l.codigo = pt.legal_ref
+        left join v_legal_colaborador l on l.codigo = pt.legal_ref
         where pt.activo
         order by pt.orden
         """
@@ -110,12 +112,12 @@ async def catalogo_permisos(_: Annotated[dict, Depends(usuario_actual)]) -> dict
                requiere_adjunto, requiere_justificacion, remunerado, descuenta_vacaciones,
                max_dias, max_horas, guia_ejemplo, guia_adjuntos,
                admite_horas, horas_antes, horas_despues
-        from public.v_catalogo_permisos
+        from v_catalogo_permisos
         order by categoria_orden, tipo_orden
         """
     )
     mandato = await obtener_uno(
-        "select valor from public.app_config where clave = 'mandato_descripcion'"
+        "select valor from app_config where clave = 'mandato_descripcion'"
     )
 
     pilares: list[dict] = []
@@ -158,11 +160,11 @@ async def companeros(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[
     return await obtener_todos(
         """
         select id, nombre, cargo
-        from public.users
+        from users
         where activo and id <> %(yo)s
           and (
-            (%(jefe)s::uuid is not null and jefe_id = %(jefe)s)
-            or (%(depto)s::text is not null and departamento = %(depto)s)
+            (%(jefe)s is not null and jefe_id = %(jefe)s)
+            or (%(depto)s is not null and departamento = %(depto)s)
           )
         order by nombre
         limit 100
@@ -204,7 +206,7 @@ async def calendario(
         select c.request_id, c.folio, c.user_id, c.nombre, c.departamento,
                c.fecha_inicio, c.fecha_fin, c.estado, c.motivo_general,
                c.reemplazo_nombre, c.procedencia
-        from public.v_calendario_equipo c
+        from v_calendario_equipo c
         where {alcance}
           and c.fecha_fin >= %(desde)s and c.fecha_inicio <= %(hasta)s
         order by c.fecha_inicio
@@ -237,7 +239,7 @@ async def calendario_equipo(
         alcance = "c.jefe_id = %(yo)s"
         parametros: dict = {"yo": usuario["id"]}
     else:
-        alcance = "(%(depto)s::text is null or c.departamento = %(depto)s)"
+        alcance = "(%(depto)s is null or c.departamento = %(depto)s)"
         parametros = {"depto": departamento}
 
     ausencias = await obtener_todos(
@@ -246,7 +248,7 @@ async def calendario_equipo(
                c.fecha_inicio, c.fecha_fin, c.hora_inicio, c.hora_fin,
                c.dias_solicitados, c.estado, c.motivo_general,
                c.reemplazo_nombre, c.ajustada_en, c.procedencia, c.historico_id
-        from public.v_calendario_equipo c
+        from v_calendario_equipo c
         where {alcance}
           and c.fecha_fin >= %(desde)s and c.fecha_inicio <= %(hasta)s
         order by c.fecha_inicio, c.nombre
@@ -259,10 +261,10 @@ async def calendario_equipo(
     equipo = await obtener_todos(
         """
         select id, nombre, cargo, departamento
-        from public.users
+        from users
         where activo and (
             (%(rol)s = 'jefe' and jefe_id = %(yo)s)
-            or (%(rol)s <> 'jefe' and (%(depto)s::text is null or departamento = %(depto)s))
+            or (%(rol)s <> 'jefe' and (%(depto)s is null or departamento = %(depto)s))
         )
         order by nombre
         """,
@@ -270,7 +272,7 @@ async def calendario_equipo(
     )
 
     dias_libres = await obtener_todos(
-        """select fecha, nombre from public.feriados
+        """select fecha, nombre from feriados
            where activo and fecha between %s and %s order by fecha""",
         (inicio, fin),
     )
@@ -302,22 +304,22 @@ async def tabla_antiguedad(_: Annotated[dict, Depends(usuario_actual)]) -> dict:
     filas = await obtener_todos(
         """select rango, anios_desde, anios_hasta, dias_gozar,
                   dias_laborables, dias_no_laborables
-             from public.v_antiguedad_referencia"""
+             from v_antiguedad_referencia"""
     )
     lineamientos = await obtener_todos(
         """select codigo, articulo, titulo, texto, categoria
-             from public.v_legal_colaborador
-            where starts_with(codigo, 'ITSANET_') order by orden"""
+             from v_legal_colaborador
+            where left(codigo, 8) = 'ITSANET_' order by orden"""
     )
     # Las reglas internas que se leen antes de enviar. Viven en una tabla y no
     # en el HTML: las decide Talento Humano y cambian por circular, no por
     # versión del sistema.
     avisos = await obtener_todos(
-        """select id, ambito, texto from public.lineamientos_solicitud
+        """select id, ambito, texto from lineamientos_solicitud
             where activo order by ambito, orden, id"""
     )
     parametros = await obtener_todos(
-        """select clave, valor from public.app_config
+        """select clave, valor from app_config
             where clave in ('vacaciones_bloque_minimo', 'vacaciones_bloque_sugerido',
                             'vacaciones_anticipacion_dias')"""
     )
@@ -344,7 +346,7 @@ async def mi_historial(usuario: Annotated[dict, Depends(usuario_actual)]) -> dic
     """
     filas = await obtener_todos(
         """select folio, fecha_inicio, fecha_fin, dias, procedencia, detalle
-             from public.v_historial_vacaciones
+             from v_historial_vacaciones
             where user_id = %s
             order by fecha_inicio desc""",
         (usuario["id"],),
@@ -364,8 +366,8 @@ async def mi_historial(usuario: Annotated[dict, Depends(usuario_actual)]) -> dic
 async def feriados(_: Annotated[dict, Depends(usuario_actual)]) -> list[dict]:
     """Feriados futuros: el calendario los marca para que no cuenten días."""
     return await obtener_todos(
-        """select fecha, nombre from public.feriados
-           where activo and fecha >= current_date - 30 order by fecha"""
+        """select fecha, nombre from feriados
+           where activo and fecha >= current_date() - interval 30 day order by fecha"""
     )
 
 
@@ -376,14 +378,10 @@ async def previsualizar(
 ) -> dict:
     """Días, saldo, avisos y rango corregido ANTES de enviar la solicitud."""
     try:
-        fila = await obtener_uno(
-            "select public.previsualizar_solicitud(%s, %s, %s, %s, %s) as resultado",
-            (usuario["id"], datos.tipo, datos.fecha_inicio, datos.fecha_fin,
-             datos.permission_type_id),
-        )
+        return para_json(await reglas_solicitudes.previsualizar_solicitud(
+            usuario["id"], datos.tipo, datos.fecha_inicio, datos.fecha_fin, datos.permission_type_id))
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
-    return fila["resultado"] if fila else {}
 
 
 # ------------------------------------------------------------------ envío
@@ -394,46 +392,20 @@ async def crear_solicitud(
 ) -> dict:
     """Crea la solicitud con sus adjuntos en una sola transacción.
 
-    La base valida en conjunto al confirmar: si el tipo de permiso exige
+    Se valida todo junto antes de confirmar: si el tipo de permiso exige
     respaldo y no llegó, se rechaza todo, no queda a medias.
     """
     try:
-        async with conexion() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """
-                    insert into public.requests
-                        (id, user_id, tipo, permission_type_id, fecha_inicio, fecha_fin,
-                         hora_inicio, hora_fin, descripcion, justificacion,
-                         bloque_menor_justificado)
-                    values (%(id)s, %(user_id)s, %(tipo)s, %(pt)s, %(inicio)s, %(fin)s,
-                            %(h_ini)s, %(h_fin)s, %(desc)s, %(just)s, %(excepcion)s)
-                    returning id, folio, estado, dias_solicitados, horas_solicitadas,
-                              fines_semana, es_adelanto, saldo_al_solicitar, created_at
-                    """,
-                    {
-                        "id": datos.id, "user_id": usuario["id"], "tipo": datos.tipo,
-                        "pt": datos.permission_type_id, "inicio": datos.fecha_inicio,
-                        "fin": datos.fecha_fin, "h_ini": datos.hora_inicio,
-                        "h_fin": datos.hora_fin, "desc": datos.descripcion,
-                        "just": datos.justificacion,
-                        "excepcion": datos.bloque_menor_justificado,
-                    },
-                )
-                creada = await cur.fetchone()
-
-                for adjunto in datos.adjuntos:
-                    await cur.execute(
-                        """
-                        insert into public.request_attachments
-                            (request_id, storage_path, nombre_archivo, mime_type,
-                             tamano_bytes, hash_sha256, subido_por)
-                        values (%s, %s, %s, %s, %s, %s, %s)
-                        """,
-                        (datos.id, adjunto.storage_path, adjunto.nombre_archivo,
-                         adjunto.mime_type, adjunto.tamano_bytes, adjunto.hash_sha256,
-                         usuario["id"]),
-                    )
+        creada = await reglas_solicitudes.crear_solicitud(
+            {"id": datos.id, "user_id": usuario["id"], "tipo": datos.tipo,
+             "permission_type_id": datos.permission_type_id,
+             "fecha_inicio": datos.fecha_inicio, "fecha_fin": datos.fecha_fin,
+             "hora_inicio": datos.hora_inicio, "hora_fin": datos.hora_fin,
+             "descripcion": datos.descripcion, "justificacion": datos.justificacion,
+             "bloque_menor_justificado": datos.bloque_menor_justificado},
+            [a.model_dump() for a in datos.adjuntos],
+            subido_por=usuario["id"],
+        )
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
@@ -449,10 +421,10 @@ async def crear_solicitud(
                r.jefe_token, r.rrhh_token, r.estado, r.bloque_menor_justificado, r.region,
                u.nombre as empleado, u.email as empleado_email, pt.nombre as categoria,
                j.email as jefe_email, j.nombre as jefe_nombre
-        from public.requests r
-        join public.users u on u.id = r.user_id
-        left join public.users j on j.id = r.jefe_id
-        left join public.permission_types pt on pt.id = r.permission_type_id
+        from requests r
+        join users u on u.id = r.user_id
+        left join users j on j.id = r.jefe_id
+        left join permission_types pt on pt.id = r.permission_type_id
         where r.id = %s
         """,
         (datos.id,),
@@ -465,10 +437,8 @@ async def crear_solicitud(
     # tiene que resolver.
     destino = "su jefe inmediato"
     if completa and completa["estado"] == "pendiente_rrhh":
-        personal_rrhh = await obtener_todos(
-            "select email, nombre from public.rrhh_de_region(%s)",
-            (completa["region"],),
-        )
+        personal_rrhh = [{"email": d["email"], "nombre": d["nombre"]}
+                         for d in await personal.rrhh_de_region(completa["region"])]
         tareas.add_task(
             notificaciones.avisar_excepcion_a_rrhh,
             personal_rrhh, completa, completa["empleado_email"],
@@ -513,11 +483,11 @@ async def mis_solicitudes(usuario: Annotated[dict, Depends(usuario_actual)]) -> 
                r.qr_hash, r.qr_emitido_en, r.qr_usado_en,
                j.nombre as jefe, rp.nombre as reemplazo,
                r.jefe_aprobado_en, r.rrhh_aprobado_en,
-               (select count(*) from public.request_attachments a where a.request_id = r.id) as adjuntos
-        from public.requests r
-        left join public.users j on j.id = r.jefe_id
-        left join public.users rp on rp.id = r.reemplazo_id
-        left join public.permission_types pt on pt.id = r.permission_type_id
+               (select count(*) from request_attachments a where a.request_id = r.id) as adjuntos
+        from requests r
+        left join users j on j.id = r.jefe_id
+        left join users rp on rp.id = r.reemplazo_id
+        left join permission_types pt on pt.id = r.permission_type_id
         where r.user_id = %s
         order by r.created_at desc
         limit 100
@@ -542,7 +512,7 @@ async def cancelar(
     deshacerla necesita el visto bueno de Talento Humano.
     """
     actual = await obtener_uno(
-        "select estado::text, folio from public.requests where id = %s and user_id = %s",
+        "SELECT estado, folio FROM requests WHERE id = %s AND user_id = %s",
         (solicitud_id, usuario["id"]),
     )
     if actual is None:
@@ -566,12 +536,12 @@ async def cancelar(
         )
 
     try:
-        fila = await obtener_uno(
-            """update public.requests
-                  set estado = %s, anulacion_motivo = coalesce(%s, anulacion_motivo)
-                where id = %s returning id, estado::text""",
+        await ejecutar(
+            """UPDATE requests SET estado = %s, anulacion_motivo = COALESCE(%s, anulacion_motivo)
+                WHERE id = %s""",
             (nuevo, (datos.motivo or "").strip() or None, solicitud_id),
         )
+        fila = await obtener_uno("SELECT id, estado FROM requests WHERE id = %s", (solicitud_id,))
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 

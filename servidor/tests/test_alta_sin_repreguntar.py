@@ -26,7 +26,7 @@ CEDULA_COMPLETO = "0914723788"
 async def ficha_completa_sin_correo():
     """Alguien con TODO menos el correo: el caso de la planilla real."""
     fila = await obtener_uno(
-        """insert into public.users
+        """insert into users
              (cedula, nombre, email, correo_pendiente, ficha_completa, rol,
               fecha_ingreso, fecha_nacimiento, telefono, direccion, cargo, departamento)
            values (%s, 'Prueba Expediente Completo', null, true, false, 'empleado',
@@ -39,7 +39,7 @@ async def ficha_completa_sin_correo():
         (CEDULA_COMPLETO,),
     )
     await ejecutar(
-        """insert into public.emergency_contacts
+        """insert into emergency_contacts
              (user_id, nombre, parentesco, telefono, es_principal)
            values (%s, 'Contacto Ya Registrado', 'madre', '0991112223', true)
            on conflict (user_id) where es_principal do update
@@ -47,9 +47,9 @@ async def ficha_completa_sin_correo():
         (fila["id"],),
     )
     yield {"id": str(fila["id"]), "cedula": CEDULA_COMPLETO}
-    await ejecutar("delete from public.emergency_contacts where user_id = %s", (fila["id"],))
-    await ejecutar("delete from public.altas_pendientes where user_id = %s", (fila["id"],))
-    await ejecutar("delete from public.users where cedula = %s", (CEDULA_COMPLETO,))
+    await ejecutar("delete from emergency_contacts where user_id = %s", (fila["id"],))
+    await ejecutar("delete from altas_pendientes where user_id = %s", (fila["id"],))
+    await ejecutar("delete from users where cedula = %s", (CEDULA_COMPLETO,))
 
 
 async def _probar(cliente, cedula):
@@ -82,7 +82,7 @@ async def test_basta_con_el_correo_cuando_lo_demas_ya_consta(
 
     fila = await obtener_uno(
         """select email, telefono, direccion, correo_pendiente, ficha_completa
-             from public.users where cedula = %s""", (ficha_completa_sin_correo["cedula"],))
+             from users where cedula = %s""", (ficha_completa_sin_correo["cedula"],))
     assert fila["email"] == "expediente.completo@itsanet.com.ec"
     assert fila["correo_pendiente"] is False
     assert fila["ficha_completa"] is True
@@ -100,7 +100,7 @@ async def test_el_contacto_de_emergencia_no_se_pisa_con_nulos(
         "token": token, "email": "otro.expediente@itsanet.com.ec"})
 
     fila = await obtener_uno(
-        """select nombre, telefono from public.emergency_contacts
+        """select nombre, telefono from emergency_contacts
             where user_id = %s and es_principal""", (ficha_completa_sin_correo["id"],))
     assert fila["nombre"] == "Contacto Ya Registrado"
     assert fila["telefono"] == "0991112223"
@@ -108,9 +108,9 @@ async def test_el_contacto_de_emergencia_no_se_pisa_con_nulos(
 
 async def test_a_quien_NO_tiene_telefono_sigue_pidiendosele(cliente, ficha_completa_sin_correo):
     """Opcional en la petición no es opcional en el resultado."""
-    await ejecutar("delete from public.emergency_contacts where user_id = %s",
+    await ejecutar("delete from emergency_contacts where user_id = %s",
                    (ficha_completa_sin_correo["id"],))
-    await ejecutar("update public.users set telefono = null where id = %s",
+    await ejecutar("update users set telefono = null where id = %s",
                    (ficha_completa_sin_correo["id"],))
 
     token = (await _probar(cliente, ficha_completa_sin_correo["cedula"])).json()["token"]
@@ -128,7 +128,7 @@ async def test_quien_declara_uno_nuevo_lo_reemplaza(cliente, ficha_completa_sin_
         "telefono": "0955556667",
     })
     assert r.status_code == 200, r.text
-    fila = await obtener_uno("select telefono from public.users where cedula = %s",
+    fila = await obtener_uno("select telefono from users where cedula = %s",
                              (ficha_completa_sin_correo["cedula"],))
     assert fila["telefono"] == "0955556667"
 

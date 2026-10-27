@@ -23,7 +23,7 @@ from tests.test_retorno import (guardia_auth, _permiso_por_horas_aprobado,  # no
 async def _situacion(request_id) -> dict:
     return await obtener_uno(
         """select situacion, debe_volver_hoy, minutos_de_atraso, se_espera_a_las
-             from public.v_garita_hoy where request_id = %s""", (request_id,))
+             from v_garita_hoy where request_id = %s""", (request_id,))
 
 
 async def test_sin_salir_mientras_no_use_el_codigo(
@@ -41,7 +41,7 @@ async def test_fuera_cuando_salio_y_todavia_no_vence(
     p = await _permiso_por_horas_aprobado(cliente, auth, jefe_auth, rrhh_auth)
     # Una franja que termina bien entrada la noche: salió y aún no le toca.
     await ejecutar(
-        "update public.requests set hora_inicio = '00:01', hora_fin = '23:59' where id = %s",
+        "update requests set hora_inicio = '00:01', hora_fin = '23:59' where id = %s",
         (p["id"],))
     await cliente.post("/garita/validar-qr", headers=guardia_auth, json={"codigo": p["qr"]})
 
@@ -57,7 +57,7 @@ async def test_fuera_y_atrasado_cuando_paso_la_hora(
     """Es lo único del panel que exige actuar, y por eso va primero."""
     p = await _permiso_por_horas_aprobado(cliente, auth, jefe_auth, rrhh_auth)
     await ejecutar(
-        "update public.requests set hora_inicio = '00:01', hora_fin = '00:02' where id = %s",
+        "update requests set hora_inicio = '00:01', hora_fin = '00:02' where id = %s",
         (p["id"],))
     await cliente.post("/garita/validar-qr", headers=guardia_auth, json={"codigo": p["qr"]})
 
@@ -78,7 +78,7 @@ async def test_una_ausencia_de_jornada_completa_no_esta_atrasada(
     p = await _permiso_por_horas_aprobado(cliente, auth, jefe_auth, rrhh_auth)
     # Sin horas declaradas: la ausencia ocupa la jornada, no una franja de ella.
     await ejecutar(
-        "update public.requests set hora_inicio = null, hora_fin = null where id = %s",
+        "update requests set hora_inicio = null, hora_fin = null where id = %s",
         (p["id"],))
     await cliente.post("/garita/validar-qr", headers=guardia_auth, json={"codigo": p["qr"]})
 
@@ -106,7 +106,7 @@ async def test_el_panel_llega_por_la_api_ordenado(
 ):
     p = await _permiso_por_horas_aprobado(cliente, auth, jefe_auth, rrhh_auth)
     await ejecutar(
-        "update public.requests set hora_inicio = '00:01', hora_fin = '00:02' where id = %s",
+        "update requests set hora_inicio = '00:01', hora_fin = '00:02' where id = %s",
         (p["id"],))
     await cliente.post("/garita/validar-qr", headers=guardia_auth, json={"codigo": p["qr"]})
 
@@ -137,9 +137,9 @@ async def test_una_solicitud_no_aprobada_no_entra_al_panel(
     })
     assert r.status_code == 201, r.text
     await ejecutar(
-        """update public.requests set fecha_inicio = current_date, fecha_fin = current_date
+        """update requests set fecha_inicio = current_date(), fecha_fin = current_date()
             where id = %s""", (r.json()["id"],))
     filas = await obtener_todos(
-        "select request_id from public.v_garita_hoy where request_id = %s",
+        "select request_id from v_garita_hoy where request_id = %s",
         (r.json()["id"],))
     assert not filas

@@ -20,14 +20,14 @@ async def auth(cliente, codigos, empleado):
 @pytest.fixture
 async def rrhh_auth(cliente, codigos, empleado):
     await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
-           values (%s, 'Talento Ficha', 'ficharrhh@api.test', 'rrhh', current_date - 900, 'Quito')
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
+           values (%s, 'Talento Ficha', 'ficharrhh@api.test', 'rrhh', current_date() - interval 900 day, 'Quito')
            on conflict (cedula) do update set rol = 'rrhh' returning id""", (CED_RRHH_F,))
     await cliente.post("/auth/solicitar-token", json={"cedula": CED_RRHH_F})
     r = await cliente.post("/auth/validar-token",
                            json={"cedula": CED_RRHH_F, "codigo": codigos[-1]})
     yield {"Authorization": f"Bearer {r.json()['access_token']}"}
-    await ejecutar("delete from public.users where cedula = %s", (CED_RRHH_F,))
+    await ejecutar("delete from users where cedula = %s", (CED_RRHH_F,))
 
 
 async def test_la_ficha_dice_que_se_puede_tocar_y_que_no(cliente, auth):
@@ -51,7 +51,7 @@ async def test_el_telefono_se_corrige_al_instante(cliente, auth, empleado):
                             json={"telefono": "0987654321", "direccion": "Av. Amazonas 123"})
     assert r.status_code == 200, r.text
     fila = await obtener_uno(
-        "select telefono, direccion from public.users where id = %s", (empleado["id"],))
+        "select telefono, direccion from users where id = %s", (empleado["id"],))
     assert fila["telefono"] == "0987654321"
     assert fila["direccion"] == "Av. Amazonas 123"
 
@@ -95,7 +95,7 @@ async def test_talento_humano_aprueba_y_el_dato_rige(cliente, auth, rrhh_auth, e
     r = await cliente.post(f"/rrhh/cambios-ficha/{cambio_id}", headers=rrhh_auth,
                            json={"accion": "aprobar"})
     assert r.status_code == 200, r.text
-    fila = await obtener_uno("select nombre from public.users where id = %s", (empleado["id"],))
+    fila = await obtener_uno("select nombre from users where id = %s", (empleado["id"],))
     assert fila["nombre"] == "Ana María Suárez"
 
 
@@ -109,21 +109,21 @@ async def test_rechazar_exige_decir_por_que(cliente, auth, rrhh_auth):
 
 async def test_confirmar_el_correo_habilita_el_acceso(cliente, auth, empleado):
     """Si el correo era un marcador, confirmarlo saca a la persona de la lista."""
-    await ejecutar("update public.users set correo_pendiente = true where id = %s",
+    await ejecutar("update users set correo_pendiente = true where id = %s",
                    (empleado["id"],))
     r = await cliente.post("/mi-ficha/correo", headers=auth,
                            json={"email": "validado@itsanet.com.ec"})
     assert r.status_code == 202, r.text
 
     antes = await obtener_uno(
-        "select email::text as email from public.users where id = %s", (empleado["id"],))
+        "select email as email from users where id = %s", (empleado["id"],))
     assert antes["email"] != "validado@itsanet.com.ec", (
         "el correo no debe regir antes de confirmarse: un dedazo dejaría a la "
         "persona sin poder recibir ni el código de acceso ni el de confirmación"
     )
 
     token = await obtener_uno(
-        """select token::text as token from public.confirmaciones_correo
+        """select token as token from confirmaciones_correo
             where user_id = %s and confirmado_en is null
             order by created_at desc limit 1""",
         (empleado["id"],))
@@ -131,7 +131,7 @@ async def test_confirmar_el_correo_habilita_el_acceso(cliente, auth, empleado):
     assert r.status_code == 200, r.text
 
     fila = await obtener_uno(
-        "select email::text as email, correo_pendiente from public.users where id = %s",
+        "select email as email, correo_pendiente from users where id = %s",
         (empleado["id"],))
     assert fila["email"] == "validado@itsanet.com.ec"
     assert fila["correo_pendiente"] is False
@@ -141,7 +141,7 @@ async def test_el_enlace_de_confirmacion_no_sirve_dos_veces(cliente, auth, emple
     await cliente.post("/mi-ficha/correo", headers=auth,
                        json={"email": "unavez@itsanet.com.ec"})
     token = await obtener_uno(
-        """select token::text as token from public.confirmaciones_correo
+        """select token as token from confirmaciones_correo
             where user_id = %s and confirmado_en is null
             order by created_at desc limit 1""",
         (empleado["id"],))
@@ -155,9 +155,9 @@ async def test_no_se_puede_reclamar_el_correo_de_otro(cliente, auth):
     """La dirección de otra persona no se toma ni pidiendo la confirmación."""
     ajeno = "1700000761"
     await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso)
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
            values (%s, 'Otro Colaborador', 'ocupado@itsanet.com.ec', 'empleado',
-                   current_date - 800)
+                   current_date() - interval 800 day)
            on conflict (cedula) do update set email = 'ocupado@itsanet.com.ec'
            returning id""",
         (ajeno,),
@@ -168,4 +168,4 @@ async def test_no_se_puede_reclamar_el_correo_de_otro(cliente, auth):
         assert r.status_code >= 400
         assert "otra persona" in str(r.json()).lower()
     finally:
-        await ejecutar("delete from public.users where cedula = %s", (ajeno,))
+        await ejecutar("delete from users where cedula = %s", (ajeno,))

@@ -30,16 +30,16 @@ CED_RRHH_SC = "1700000043"
 @pytest.fixture
 async def rrhh_auth(cliente, codigos, empleado):
     await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
            values (%s, 'Talento Caducidad', 'caducidad@api.test', 'rrhh',
-                   current_date - 900, 'Quito')
+                   current_date() - interval 900 day, 'Quito')
            on conflict (cedula) do update set rol = 'rrhh' returning id""",
         (CED_RRHH_SC,))
     await cliente.post("/auth/solicitar-token", json={"cedula": CED_RRHH_SC})
     r = await cliente.post("/auth/validar-token",
                            json={"cedula": CED_RRHH_SC, "codigo": codigos[-1]})
     yield {"Authorization": f"Bearer {r.json()['access_token']}"}
-    await ejecutar("delete from public.users where cedula = %s", (CED_RRHH_SC,))
+    await ejecutar("delete from users where cedula = %s", (CED_RRHH_SC,))
 
 
 @pytest.fixture
@@ -51,7 +51,7 @@ async def auth(cliente, codigos, empleado):
 
 
 async def test_esta_apagada_por_omision():
-    fila = await obtener_uno("select public.caducidad_activa() as activa")
+    fila = await obtener_uno("select caducidad_activa() as activa")
     assert fila["activa"] is False, (
         "La caducidad no puede estar activa por omisión: el Art. 75 permite "
         "acumular, no obliga a extinguir."
@@ -61,30 +61,30 @@ async def test_esta_apagada_por_omision():
 async def test_ante_la_duda_no_se_extingue():
     """Si la clave falta o trae basura, no se pierde ningún día de nadie."""
     previo = await obtener_uno(
-        "select valor from public.app_config where clave = 'caducidad_activa'")
+        "select valor from app_config where clave = 'caducidad_activa'")
     try:
         for valor in ("", "  ", "no", "1", "TRUE_PERO_NO", "sí"):
             await ejecutar(
-                "update public.app_config set valor = %s where clave = 'caducidad_activa'",
+                "update app_config set valor = %s where clave = 'caducidad_activa'",
                 (valor,))
-            fila = await obtener_uno("select public.caducidad_activa() as activa")
+            fila = await obtener_uno("select caducidad_activa() as activa")
             assert fila["activa"] is False, f"«{valor}» no debería activar la caducidad"
 
-        await ejecutar("delete from public.app_config where clave = 'caducidad_activa'")
-        fila = await obtener_uno("select public.caducidad_activa() as activa")
+        await ejecutar("delete from app_config where clave = 'caducidad_activa'")
+        fila = await obtener_uno("select caducidad_activa() as activa")
         assert fila["activa"] is False, "sin la clave tampoco se extingue nada"
     finally:
         await ejecutar(
-            """insert into public.app_config (clave, valor, descripcion)
+            """insert into app_config (clave, valor, descripcion)
                values ('caducidad_activa', %s, 'restaurada por la prueba')
                on conflict (clave) do update set valor = excluded.valor""",
             (previo["valor"] if previo else "false",))
 
 
 async def test_los_periodos_nacen_sin_fecha_de_vencimiento(empleado):
-    await obtener_uno("select public.generar_periodos_vacaciones(%s) as n", (empleado["id"],))
+    await obtener_uno("select generar_periodos_vacaciones(%s) as n", (empleado["id"],))
     filas = await obtener_todos(
-        "select periodo, vence_en from public.vacation_periods where user_id = %s",
+        "select periodo, vence_en from vacation_periods where user_id = %s",
         (empleado["id"],))
     assert filas, "la persona debería tener períodos"
     con_fecha = [f["periodo"] for f in filas if f["vence_en"] is not None]
@@ -93,35 +93,35 @@ async def test_los_periodos_nacen_sin_fecha_de_vencimiento(empleado):
 
 async def test_no_se_caduca_nada(empleado):
     """Aunque se fuerce una fecha vencida, no se extingue el período."""
-    await obtener_uno("select public.generar_periodos_vacaciones(%s) as n", (empleado["id"],))
+    await obtener_uno("select generar_periodos_vacaciones(%s) as n", (empleado["id"],))
     await ejecutar(
-        """update public.vacation_periods
-              set vence_en = current_date - 1
+        """update vacation_periods
+              set vence_en = current_date() - interval 1 day
             where user_id = %s and dias_saldo > 0""", (empleado["id"],))
 
     fila = await obtener_uno(
-        "select public.caducar_periodos_de(%s) as n", (empleado["id"],))
+        "select caducar_periodos_de(%s) as n", (empleado["id"],))
     assert fila["n"] == 0
 
     caducados = await obtener_uno(
-        """select count(*) as n from public.vacation_periods
+        """select count(*) as n from vacation_periods
             where user_id = %s and caducado""", (empleado["id"],))
     assert caducados["n"] == 0, "se extinguió un período con la caducidad apagada"
 
 
 async def test_no_se_avisa_de_una_perdida_que_no_va_a_ocurrir(empleado):
     """El aviso decía «Perderá 2,83 días el 07/02/2029», en rojo."""
-    await obtener_uno("select public.generar_periodos_vacaciones(%s) as n", (empleado["id"],))
+    await obtener_uno("select generar_periodos_vacaciones(%s) as n", (empleado["id"],))
     await ejecutar(
-        """update public.vacation_periods
-              set vence_en = current_date + 10
+        """update vacation_periods
+              set vence_en = current_date() + interval 10 day
             where user_id = %s and dias_saldo > 0""", (empleado["id"],))
-    await ejecutar("delete from public.notifications where user_id = %s", (empleado["id"],))
+    await ejecutar("delete from notifications where user_id = %s", (empleado["id"],))
 
-    await obtener_uno("select public.generar_alertas_vacaciones() as r")
+    await obtener_uno("select generar_alertas_vacaciones() as r")
 
     avisos = await obtener_todos(
-        """select titulo from public.notifications
+        """select titulo from notifications
             where user_id = %s and tipo = 'vacaciones_por_caducar'""",
         (empleado["id"],))
     assert not avisos, f"se avisó de una pérdida que no va a ocurrir: {avisos}"
@@ -136,25 +136,25 @@ async def test_reparar_no_mueve_ningun_saldo(empleado):
     esos días. Des-caducarlos sin más habría devuelto al saldo días que la
     persona sí gozó.
     """
-    await obtener_uno("select public.generar_periodos_vacaciones(%s) as n", (empleado["id"],))
+    await obtener_uno("select generar_periodos_vacaciones(%s) as n", (empleado["id"],))
     antes = await obtener_uno(
-        "select dias_vacaciones from public.users where id = %s", (empleado["id"],))
+        "select dias_vacaciones from users where id = %s", (empleado["id"],))
 
     # Se simula el estado viejo: un período marcado como caducado.
     await ejecutar(
-        """update public.vacation_periods
-              set caducado = true, vence_en = current_date - 1
+        """update vacation_periods
+              set caducado = true, vence_en = current_date() - interval 1 day
             where user_id = %s and periodo = 1""", (empleado["id"],))
     con_caducado = await obtener_uno(
-        "select dias_vacaciones from public.users where id = %s", (empleado["id"],))
+        "select dias_vacaciones from users where id = %s", (empleado["id"],))
 
     # Y la reparación, que es lo que hace la migración 0020.
     await ejecutar(
-        """update public.vacation_periods
+        """update vacation_periods
               set dias_consumidos = dias_asignados, caducado = false, vence_en = null
             where user_id = %s and caducado""", (empleado["id"],))
     despues = await obtener_uno(
-        "select dias_vacaciones from public.users where id = %s", (empleado["id"],))
+        "select dias_vacaciones from users where id = %s", (empleado["id"],))
 
     assert despues["dias_vacaciones"] == con_caducado["dias_vacaciones"], (
         "reparar movió el saldo: es exactamente lo que no debe pasar"
@@ -163,7 +163,7 @@ async def test_reparar_no_mueve_ningun_saldo(empleado):
     # como extinguido y ahora figura como gozado.
     periodo = await obtener_uno(
         """select caducado, dias_consumidos, dias_asignados, vence_en
-             from public.vacation_periods where user_id = %s and periodo = 1""",
+             from vacation_periods where user_id = %s and periodo = 1""",
         (empleado["id"],))
     assert periodo["caducado"] is False
     assert periodo["vence_en"] is None
@@ -186,7 +186,7 @@ async def test_la_pantalla_de_colaboradores_sabe_que_no_hay_caducidad(
 
 
 async def test_la_vista_de_control_deja_verlo_de_un_vistazo():
-    fila = await obtener_uno("select * from public.v_caducidad")
+    fila = await obtener_uno("select * from v_caducidad")
     assert fila["activa"] is False
     assert fila["periodos_caducados"] == 0, (
         "quedan períodos marcados como caducados con la caducidad apagada"
@@ -206,22 +206,22 @@ async def test_se_avisa_de_la_acumulacion_que_si_hay_que_resolver(empleado):
     """
     # Una antigüedad que deja tres períodos cumplidos sin gozar.
     await ejecutar(
-        """update public.users set fecha_ingreso = current_date - interval '5 years'
+        """update users set fecha_ingreso = current_date() - interval 5 YEAR
             where id = %s""", (empleado["id"],))
-    await ejecutar("delete from public.vacation_periods where user_id = %s", (empleado["id"],))
-    await obtener_uno("select public.generar_periodos_vacaciones(%s) as n", (empleado["id"],))
-    await ejecutar("delete from public.notifications where user_id = %s", (empleado["id"],))
+    await ejecutar("delete from vacation_periods where user_id = %s", (empleado["id"],))
+    await obtener_uno("select generar_periodos_vacaciones(%s) as n", (empleado["id"],))
+    await ejecutar("delete from notifications where user_id = %s", (empleado["id"],))
 
     acumula = await obtener_uno(
         "select periodos_sin_gozar, dias_de_anios_cumplidos "
-        "from public.v_acumulacion_excesiva where user_id = %s", (empleado["id"],))
+        "from v_acumulacion_excesiva where user_id = %s", (empleado["id"],))
     assert acumula is not None, "cinco años sin gozar nada deberían figurar"
     assert acumula["periodos_sin_gozar"] >= 3
 
-    await obtener_uno("select public.generar_alertas_vacaciones() as r")
+    await obtener_uno("select generar_alertas_vacaciones() as r")
 
     avisos = await obtener_todos(
-        """select titulo, mensaje from public.notifications
+        """select titulo, mensaje from notifications
             where user_id = %s and tipo = 'vacaciones_acumuladas'""", (empleado["id"],))
     assert avisos, "debería avisarse de la acumulación"
     texto = " ".join(a["mensaje"] for a in avisos)
@@ -232,16 +232,16 @@ async def test_se_avisa_de_la_acumulacion_que_si_hay_que_resolver(empleado):
 
 
 async def test_quien_esta_al_dia_no_recibe_ese_aviso(empleado):
-    await ejecutar("delete from public.notifications where user_id = %s", (empleado["id"],))
-    await obtener_uno("select public.generar_periodos_vacaciones(%s) as n", (empleado["id"],))
+    await ejecutar("delete from notifications where user_id = %s", (empleado["id"],))
+    await obtener_uno("select generar_periodos_vacaciones(%s) as n", (empleado["id"],))
     # Consumido todo lo de años cumplidos: no arrastra nada.
     await ejecutar(
-        """update public.vacation_periods set dias_consumidos = dias_asignados
+        """update vacation_periods set dias_consumidos = dias_asignados
             where user_id = %s and devengado""", (empleado["id"],))
 
-    await obtener_uno("select public.generar_alertas_vacaciones() as r")
+    await obtener_uno("select generar_alertas_vacaciones() as r")
     avisos = await obtener_todos(
-        """select titulo from public.notifications
+        """select titulo from notifications
             where user_id = %s and tipo = 'vacaciones_acumuladas'""", (empleado["id"],))
     assert not avisos, "quien está al día no tiene por qué recibir este aviso"
 
@@ -255,18 +255,18 @@ async def test_el_texto_del_articulo_75_es_el_de_la_ley():
     como perdidos y las alertas de severidad crítica.
     """
     art75 = await obtener_uno(
-        "select texto from public.legal_references where codigo = 'CT_ART_75'")
+        "select texto from legal_references where codigo = 'CT_ART_75'")
     assert "perderá" not in art75["texto"].lower(), (
         "el Art. 75 no habla de perder días; el Art. 76 dice que se pagan"
     )
     assert "tres años" in art75["texto"]
 
     art76 = await obtener_uno(
-        "select texto from public.legal_references where codigo = 'CT_ART_76'")
+        "select texto from legal_references where codigo = 'CT_ART_76'")
     assert art76 is not None, "faltaba el artículo que dice qué pasa con lo no gozado"
     assert "equivalente de las remuneraciones" in art76["texto"]
 
     const = await obtener_uno(
-        "select texto from public.legal_references where codigo = 'CONST_ART_326_2'")
+        "select texto from legal_references where codigo = 'CONST_ART_326_2'")
     assert const is not None
     assert "irrenunciables" in const["texto"]

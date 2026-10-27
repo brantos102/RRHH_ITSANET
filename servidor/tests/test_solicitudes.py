@@ -21,7 +21,7 @@ async def token(cliente, codigos, empleado):
     # Se dan por consumidos los fines de semana obligatorios para aislar
     # estas pruebas de esa regla (ya cubierta por el smoke test de la base).
     await ejecutar(
-        """update public.vacation_periods set fines_semana_consumidos = fines_semana_obligatorios
+        """update vacation_periods set fines_semana_consumidos = fines_semana_obligatorios
            where user_id = %s and not caducado""",
         (empleado["id"],),
     )
@@ -43,7 +43,7 @@ async def lunes_futuro(semanas: int = 6) -> date:
     feriados = {
         f["fecha"]
         for f in await obtener_todos(
-            "select fecha from public.feriados where activo and fecha >= current_date"
+            "select fecha from feriados where activo and fecha >= current_date()"
         )
     }
     base = date.today() + timedelta(weeks=semanas)
@@ -142,7 +142,7 @@ async def test_exceder_saldo_sin_justificar_da_mensaje_util(cliente, auth):
 async def test_regla_de_fin_de_semana_devuelve_rango_sugerido(cliente, auth, empleado):
     # Se reponen los fines de semana pendientes para activar la regla
     await ejecutar(
-        "update public.vacation_periods set fines_semana_consumidos = 0 where user_id = %s",
+        "update vacation_periods set fines_semana_consumidos = 0 where user_id = %s",
         (empleado["id"],),
     )
     lunes = await lunes_futuro()
@@ -194,9 +194,9 @@ async def test_un_permiso_medico_se_envia_aunque_el_respaldo_llegue_despues(clie
 
     # Y quien aprueba tiene que poder ver que vino sin respaldo.
     fila = await obtener_uno(
-        """select (select count(*) from public.request_attachments a
+        """select (select count(*) from request_attachments a
                     where a.request_id = r.id) as adjuntos
-             from public.requests r where r.id = %s""", (r.json()["id"],))
+             from requests r where r.id = %s""", (r.json()["id"],))
     assert fila["adjuntos"] == 0
 
 
@@ -258,7 +258,7 @@ async def test_la_solicitud_no_acepta_que_le_pidan_firmar(cliente, auth):
     )
     assert r.status_code == 201, r.text
     fila = await obtener_uno(
-        "select count(*) as n from public.request_signatures where request_id = %s",
+        "select count(*) as n from request_signatures where request_id = %s",
         (r.json()["id"],))
     assert fila["n"] == 0
 

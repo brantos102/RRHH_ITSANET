@@ -51,7 +51,7 @@ async def test_generar_desde_cero(dos, caducidad, prorrateado):
     await dos.misma_configuracion(caducidad_activa=caducidad, vacaciones_extra_prorrateado=prorrateado)
     for ingreso in _ingresos():
         pid = await dos.persona(cedula_de_prueba(next(_n)), ingreso)
-        res_pg, err_pg = dos.pg_llamar("select public.generar_periodos_vacaciones(%s)", (pid,))
+        res_pg, err_pg = dos.pg_llamar("select generar_periodos_vacaciones(%s)", (pid,))
         res_my = await periodos.generar_periodos_vacaciones(pid)
         assert err_pg is None
         assert res_my == res_pg, ingreso
@@ -75,7 +75,7 @@ async def test_generar_respeta_lo_ajustado_y_completa_lo_que_cumplio_el_anio(dos
     await dos.periodo(pid, **p(1), dias_asignados=20, dias_consumidos=4, devengado=True)
     await dos.periodo(pid, **p(2), dias_asignados=3, devengado=False)
     await dos.periodo(pid, **p(4), dias_asignados=14, devengado=False)
-    dos.pg_llamar("select public.generar_periodos_vacaciones(%s)", (pid,))
+    dos.pg_llamar("select generar_periodos_vacaciones(%s)", (pid,))
     await periodos.generar_periodos_vacaciones(pid)
     en_pg, en_my = await dos.foto(pid)
     assert en_my == en_pg
@@ -99,7 +99,7 @@ async def test_cargar_saldo_inicial(dos, saldo, fds):
     a cada uno, y el sistema reparte lo tomado entre sus períodos."""
     await dos.misma_configuracion()
     pid = await dos.persona(cedula_de_prueba(next(_n)), dt.date(2019, 8, 5))
-    res_pg, err_pg = dos.pg_llamar("select public.cargar_saldo_inicial(%s, %s::numeric, %s)",
+    res_pg, err_pg = dos.pg_llamar("select cargar_saldo_inicial(%s, %s, %s)",
                                    (pid, str(saldo), fds))
     try:
         res_my, err_my = await periodos.cargar_saldo_inicial(pid, saldo, fds), None
@@ -115,14 +115,14 @@ async def test_cargar_saldo_inicial(dos, saldo, fds):
 async def test_caducar_con_la_caducidad_encendida(dos):
     await dos.misma_configuracion(caducidad_activa="true")
     pid = await dos.persona(cedula_de_prueba(next(_n)), dt.date(2014, 3, 10))
-    dos.pg_llamar("select public.generar_periodos_vacaciones(%s)", (pid,))
+    dos.pg_llamar("select generar_periodos_vacaciones(%s)", (pid,))
     await periodos.generar_periodos_vacaciones(pid)
     # Los generados ya nacen caducados si vencieron; se reabren para que
     # caducar tenga algo que hacer.
-    dos.pg.execute("update public.vacation_periods set caducado = false where user_id = %s", (pid,))
+    dos.pg.execute("update vacation_periods set caducado = false where user_id = %s", (pid,))
     from app.db import ejecutar
     await ejecutar("UPDATE vacation_periods SET caducado = FALSE WHERE user_id = %s", (pid,))
-    res_pg, _ = dos.pg_llamar("select public.caducar_periodos_de(%s)", (pid,))
+    res_pg, _ = dos.pg_llamar("select caducar_periodos_de(%s)", (pid,))
     res_my = await periodos.caducar_periodos_de(pid)
     assert res_my == res_pg and res_my > 0
     en_pg, en_my = await dos.foto(pid)
@@ -149,9 +149,9 @@ async def test_corregir_fines_semana(dos, consumidos, motivo, por_rrhh):
     pid = await dos.persona(cedula_de_prueba(next(_n)), dt.date(2019, 8, 5))
     rol = "rrhh" if por_rrhh else "jefe"
     por = await dos.persona(cedula_de_prueba(next(_n)), dt.date(2015, 1, 1), rol=rol)
-    dos.pg_llamar("select public.generar_periodos_vacaciones(%s)", (pid,))
+    dos.pg_llamar("select generar_periodos_vacaciones(%s)", (pid,))
     await periodos.generar_periodos_vacaciones(pid)
-    _, err_pg = dos.pg_llamar("select public.corregir_fines_semana(%s, 1, %s, %s, %s)",
+    _, err_pg = dos.pg_llamar("select corregir_fines_semana(%s, 1, %s, %s, %s)",
                               (pid, consumidos, motivo, por))
     try:
         await periodos.corregir_fines_semana(pid, 1, consumidos, motivo, por)
@@ -162,7 +162,7 @@ async def test_corregir_fines_semana(dos, consumidos, motivo, por_rrhh):
     en_pg, en_my = await dos.foto(pid)
     assert en_my == en_pg
     if err_pg is None:
-        bit_pg = dos.pg.execute("select detalle from public.audit_logs where user_id = %s "
+        bit_pg = dos.pg.execute("select detalle from audit_logs where user_id = %s "
                                 "and accion = 'fines_semana_corregidos'", (por,)).fetchone()["detalle"]
         from app.db import obtener_uno
         bit_my = (await obtener_uno("SELECT detalle FROM audit_logs WHERE user_id = %s "

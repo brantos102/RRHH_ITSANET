@@ -34,24 +34,24 @@ async def persona_con_cinco_anios():
     consume el período en curso, y entonces no hay nada «en formación» que
     mirar: justo la mitad del desglose que interesa comprobar.
     """
-    await ejecutar("delete from public.users where cedula = %s", (CEDULA_DESGLOSE,))
+    await ejecutar("delete from users where cedula = %s", (CEDULA_DESGLOSE,))
     fila = await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso)
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
            values (%s, 'Desglose Prueba', 'desglose@itsanet.test', 'empleado', %s)
            returning id""",
         (CEDULA_DESGLOSE, date(2021, 2, 1)),
     )
     user_id = str(fila["id"])
-    await obtener_uno("select public.generar_periodos_vacaciones(%s)", (user_id,))
-    await obtener_uno("select public.caducar_periodos_vencidos()")
+    await obtener_uno("select generar_periodos_vacaciones(%s)", (user_id,))
+    await obtener_uno("select caducar_periodos_vencidos()")
     yield user_id
-    await ejecutar("delete from public.users where cedula = %s", (CEDULA_DESGLOSE,))
+    await ejecutar("delete from users where cedula = %s", (CEDULA_DESGLOSE,))
 
 
 async def test_el_saldo_separa_lo_ganado_de_lo_que_se_acumula(persona_con_cinco_anios):
     """Cinco años cumplidos y un año en marcha no son la misma bolsa de días."""
     d = await obtener_uno(
-        "select * from public.saldo_desglosado(%s)", (persona_con_cinco_anios,))
+        "select * from saldo_desglosado(%s)", (persona_con_cinco_anios,))
 
     # Lo ganado sale de años cumplidos; lo en curso, del año que corre.
     assert float(d["dias_ganados"]) > 0, "cinco años cumplidos dan días exigibles"
@@ -77,7 +77,7 @@ async def test_el_saldo_separa_lo_ganado_de_lo_que_se_acumula(persona_con_cinco_
 
 async def test_el_desglose_llega_por_la_api(cliente, auth, empleado):
     """Las claves nuevas deben verse desde el panel, no solo en la base."""
-    await obtener_uno("select public.generar_periodos_vacaciones(%s)", (empleado["id"],))
+    await obtener_uno("select generar_periodos_vacaciones(%s)", (empleado["id"],))
     r = await cliente.get("/auth/mi-saldo", headers=auth)
     assert r.status_code == 200, r.text
     saldo = r.json()
@@ -91,35 +91,35 @@ async def test_el_desglose_llega_por_la_api(cliente, auth, empleado):
 
 async def test_el_saldo_avisa_si_el_cacheado_no_cuadra(cliente, auth, empleado):
     """Un titular que no coincide con sus períodos miente sin que nadie lo note."""
-    await obtener_uno("select public.generar_periodos_vacaciones(%s)", (empleado["id"],))
+    await obtener_uno("select generar_periodos_vacaciones(%s)", (empleado["id"],))
 
     sano = (await cliente.get("/auth/mi-saldo", headers=auth)).json()
     assert sano["saldo_desalineado"] is False
 
     # Se desalinea a mano, como lo haría una carga mal hecha.
-    await ejecutar("update public.users set dias_vacaciones = dias_vacaciones + 20 where id = %s",
+    await ejecutar("update users set dias_vacaciones = dias_vacaciones + 20 where id = %s",
                    (empleado["id"],))
     roto = (await cliente.get("/auth/mi-saldo", headers=auth)).json()
     assert roto["saldo_desalineado"] is True, "debe detectarse la diferencia"
 
     # Y se repara.
-    await obtener_uno("select public.recalcular_saldos(%s)", (empleado["id"],))
+    await obtener_uno("select recalcular_saldos(%s)", (empleado["id"],))
     reparado = (await cliente.get("/auth/mi-saldo", headers=auth)).json()
     assert reparado["saldo_desalineado"] is False
 
 
 async def test_la_vista_de_control_lista_a_quien_tenga_el_saldo_torcido(empleado):
-    await obtener_uno("select public.generar_periodos_vacaciones(%s)", (empleado["id"],))
-    await obtener_uno("select public.recalcular_saldos(%s)", (empleado["id"],))
+    await obtener_uno("select generar_periodos_vacaciones(%s)", (empleado["id"],))
+    await obtener_uno("select recalcular_saldos(%s)", (empleado["id"],))
 
     antes = await obtener_todos(
-        "select cedula from public.v_saldos_desalineados where cedula = %s", (CEDULA_PRUEBA,))
+        "select cedula from v_saldos_desalineados where cedula = %s", (CEDULA_PRUEBA,))
     assert antes == [], "recién recalculado no debería aparecer"
 
-    await ejecutar("update public.users set dias_vacaciones = 90 where id = %s",
+    await ejecutar("update users set dias_vacaciones = 90 where id = %s",
                    (empleado["id"],))
     despues = await obtener_todos(
-        "select cedula, diferencia from public.v_saldos_desalineados where cedula = %s",
+        "select cedula, diferencia from v_saldos_desalineados where cedula = %s",
         (CEDULA_PRUEBA,))
     assert len(despues) == 1, "la diferencia debe salir en la vista de control"
 
@@ -176,7 +176,7 @@ async def test_la_excepcion_no_exige_el_fin_de_semana_obligatorio(cliente, auth,
     """
     # Se deja con fines de semana pendientes, que es cuando la regla muerde.
     await ejecutar(
-        """update public.vacation_periods set fines_semana_consumidos = 0
+        """update vacation_periods set fines_semana_consumidos = 0
            where user_id = %s and not caducado""",
         (empleado["id"],),
     )
@@ -199,7 +199,7 @@ async def test_la_excepcion_no_exige_el_fin_de_semana_obligatorio(cliente, auth,
 async def test_una_vacacion_normal_si_respeta_el_fin_de_semana(cliente, auth, empleado):
     """La regla sigue en pie para el descanso ordinario."""
     await ejecutar(
-        """update public.vacation_periods set fines_semana_consumidos = 0
+        """update vacation_periods set fines_semana_consumidos = 0
            where user_id = %s and not caducado""",
         (empleado["id"],),
     )

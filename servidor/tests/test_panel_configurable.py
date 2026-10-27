@@ -17,9 +17,9 @@ from tests.test_reglas_nuevas import (CEDULA_JEFE_R, CEDULA_RRHH_R,  # noqa: F40
 @pytest.fixture
 async def admin_auth(cliente, codigos):
     fila = await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso)
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
            values ('1710034073', 'Admin Panel', 'admin.panel@api.test', 'admin',
-                   current_date - 900)
+                   current_date() - interval 900 day)
            on conflict (cedula) do update set rol = 'admin', activo = true
            returning cedula""")
     await cliente.post("/auth/solicitar-token", json={"cedula": fila["cedula"]})
@@ -37,11 +37,11 @@ async def _panel_como_de_fabrica():
     """
     yield
     await ejecutar(
-        """update public.panel_bloques
+        """update panel_bloques
               set visible = true, roles = '{}', cuerpo = null,
                   actualizado_en = null, actualizado_por = null""")
     await ejecutar(
-        """update public.panel_bloques b set orden = d.orden
+        """update panel_bloques b set orden = d.orden
              from (values ('anuncio',5),('alertas',10),('saldo',20),('antiguedad',30),
                           ('fines_semana',40),('acciones',50),('calendario',60),
                           ('logros',80),('solicitudes',90))
@@ -77,7 +77,7 @@ async def test_lo_esencial_no_se_puede_apagar(cliente, admin_auth):
         assert "no se puede ocultar" in r.json()["detail"]["mensaje"].lower()
 
     visibles = await obtener_todos(
-        "select clave from public.panel_bloques where esencial and not visible")
+        "select clave from panel_bloques where esencial and not visible")
     assert not visibles
 
 
@@ -186,12 +186,12 @@ async def test_el_cambio_queda_firmado(cliente, admin_auth):
                       headers=admin_auth, json={"visible": False})
     fila = await obtener_uno(
         """select b.actualizado_en, u.rol
-             from public.panel_bloques b
-             join public.users u on u.id = b.actualizado_por
+             from panel_bloques b
+             join users u on u.id = b.actualizado_por
             where b.clave = 'logros'""")
     assert fila is not None and fila["rol"] == "admin"
     rastro = await obtener_uno(
-        """select detalle from public.audit_logs
+        """select detalle from audit_logs
             where accion = 'panel.configurar' and entidad_id = 'logros'
             order by created_at desc limit 1""")
     assert rastro is not None

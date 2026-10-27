@@ -30,6 +30,8 @@ de motor y siga recibiendo lo que recibía de PostgreSQL:
   DATETIME                        datetime CON la zona de Ecuador. MySQL los
                                   da sin zona; sin esto, la API mandaría
                                   fechas ambiguas al navegador.
+  TIME                            time (hora del día). PyMySQL los da como
+                                  una duración.
 
 Cada conexión fija utf8mb4 y la hora de Ecuador. Las dos cosas se probaron
 en esta migración: sin utf8mb4, «Suárez» se guarda corrompido sin dar
@@ -134,6 +136,12 @@ def _convertir_fila(fila: dict[str, Any] | None, descripcion) -> dict[str, Any] 
             fila[nombre] = uuid.UUID(valor)
         elif isinstance(valor, dt.datetime) and valor.tzinfo is None:
             fila[nombre] = valor.replace(tzinfo=ZONA_ECUADOR)
+        elif tipo == FIELD_TYPE.TIME and isinstance(valor, dt.timedelta) \
+                and dt.timedelta(0) <= valor < dt.timedelta(days=1):
+            # PyMySQL entrega TIME como duración; psycopg, como hora del día.
+            # Sin esto, str() de las 9:00 da «9:00:00» y el «[:5]» con que
+            # las pantallas recortan la hora mostraba «9:00:».
+            fila[nombre] = (dt.datetime.min + valor).time()
     return fila
 
 
@@ -302,6 +310,25 @@ async def insertar(sql: str, params: tuple | dict | list | None = ()) -> int:
             return cur.lastrowid
         finally:
             await cur.close()
+
+
+def para_json(valor: Any) -> Any:
+    """Un resultado que antes armaba PostgreSQL como JSON, listo para la API.
+
+    En PostgreSQL, explicar_saldo y compañía devolvían jsonb y los números
+    llegaban al navegador como números. Ahora esas reglas viven en Python y
+    sus números son Decimal, que FastAPI escribe como TEXTO ("18.00"): la
+    pantalla que suma saldos recibiría cadenas. Esto los deja como números,
+    igual que antes. Las fechas las sigue escribiendo FastAPI en ISO.
+    """
+    if isinstance(valor, decimal.Decimal):
+        return int(valor) if valor == valor.to_integral_value() and valor.as_tuple().exponent >= 0 \
+            else float(valor)
+    if isinstance(valor, dict):
+        return {k: para_json(v) for k, v in valor.items()}
+    if isinstance(valor, (list, tuple)):
+        return [para_json(v) for v in valor]
+    return valor
 
 
 def nuevo_id() -> uuid.UUID:

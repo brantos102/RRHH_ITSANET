@@ -52,13 +52,13 @@ async def test_no_se_corrigen_directamente(cliente, auth_empleado, empleado, cam
     prueba pasando aunque la protección desaparezca.
     """
     antes = await obtener_uno(
-        f"select {campo}::text as v from public.users where id = %s", (empleado["id"],))
+        f"select {campo} as v from users where id = %s", (empleado["id"],))
 
     await cliente.patch("/mi-ficha", headers=auth_empleado,
                         json={campo: {**BLOQUEADOS, **REVISADOS}[campo]})
 
     despues = await obtener_uno(
-        f"select {campo}::text as v from public.users where id = %s", (empleado["id"],))
+        f"select {campo} as v from users where id = %s", (empleado["id"],))
     assert despues["v"] == antes["v"], f"{campo} cambió y no debía"
 
 
@@ -82,7 +82,7 @@ async def test_pedir_el_cargo_no_lo_cambia_hasta_que_lo_confirmen(
     del Excel. Lo que no puede es que su palabra rija sola.
     """
     antes = await obtener_uno(
-        "select cargo from public.users where id = %s", (empleado["id"],))
+        "select cargo from users where id = %s", (empleado["id"],))
 
     r = await cliente.post("/mi-ficha/cambios", headers=auth_empleado,
                            json={"campo": "cargo", "valor": "Gerente General",
@@ -90,13 +90,13 @@ async def test_pedir_el_cargo_no_lo_cambia_hasta_que_lo_confirmen(
     assert r.status_code == 201, r.text
 
     despues = await obtener_uno(
-        "select cargo from public.users where id = %s", (empleado["id"],))
+        "select cargo from users where id = %s", (empleado["id"],))
     assert despues["cargo"] == antes["cargo"], (
         "el cargo cambió sin que Talento Humano lo confirmara"
     )
 
     pendiente = await obtener_uno(
-        """select estado from public.cambios_ficha
+        """select estado from cambios_ficha
             where user_id = %s and campo = 'cargo'
             order by created_at desc limit 1""",
         (empleado["id"],))
@@ -128,20 +128,20 @@ async def test_la_base_rechaza_el_campo_aunque_el_backend_lo_dejara_pasar(emplea
     """
     with pytest.raises(Exception) as fallo:
         await obtener_uno(
-            "select public.actualizar_ficha_libre(%s, %s::jsonb)",
+            "select actualizar_ficha_libre(%s, %s)",
             (empleado["id"], '{"fecha_ingreso": "2000-01-01"}'),
         )
     assert "Talento Humano" in str(fallo.value) or "no se corrige" in str(fallo.value)
 
     intacta = await obtener_uno(
-        "select fecha_ingreso from public.users where id = %s", (empleado["id"],))
+        "select fecha_ingreso from users where id = %s", (empleado["id"],))
     assert intacta["fecha_ingreso"] != date(2000, 1, 1)
 
 
 async def test_la_fecha_de_ingreso_no_cambia_por_ninguna_via(cliente, auth_empleado, empleado):
     """La comprobación que importa: el dato sigue igual después de intentarlo."""
     antes = (await obtener_uno(
-        "select fecha_ingreso from public.users where id = %s", (empleado["id"],)))["fecha_ingreso"]
+        "select fecha_ingreso from users where id = %s", (empleado["id"],)))["fecha_ingreso"]
 
     await cliente.patch("/mi-ficha", headers=auth_empleado,
                         json={"fecha_ingreso": "2000-01-01"})
@@ -153,7 +153,7 @@ async def test_la_fecha_de_ingreso_no_cambia_por_ninguna_via(cliente, auth_emple
                         json={"telefono": "0999888777", "fecha_ingreso": "2000-01-01"})
 
     despues = (await obtener_uno(
-        "select fecha_ingreso from public.users where id = %s", (empleado["id"],)))["fecha_ingreso"]
+        "select fecha_ingreso from users where id = %s", (empleado["id"],)))["fecha_ingreso"]
     assert despues == antes, "la fecha de ingreso cambió: de ella dependen los días"
 
 
@@ -164,7 +164,7 @@ async def test_un_campo_bloqueado_no_cuela_junto_a_uno_valido(cliente, auth_empl
     assert r.status_code == 200, r.text
 
     fila = await obtener_uno(
-        "select telefono, dias_vacaciones from public.users where id = %s", (empleado["id"],))
+        "select telefono, dias_vacaciones from users where id = %s", (empleado["id"],))
     assert fila["telefono"] == "0988777666", "el campo válido sí debía aplicarse"
     assert float(fila["dias_vacaciones"]) != 365, "el saldo no se toca desde la ficha"
 
@@ -179,7 +179,7 @@ async def test_lo_suyo_si_lo_cambia_solo(cliente, auth_empleado, empleado):
     })
     assert r.status_code == 200, r.text
     fila = await obtener_uno(
-        "select telefono, telefono_alternativo, direccion from public.users where id = %s",
+        "select telefono, telefono_alternativo, direccion from users where id = %s",
         (empleado["id"],))
     assert fila["telefono"] == "0991234567"
     assert fila["direccion"].startswith("Av. Amazonas")
@@ -193,27 +193,27 @@ async def test_lo_delicado_pasa_por_revision(cliente, auth_empleado, empleado):
     assert r.status_code in (200, 201), r.text
 
     pendientes = await obtener_todos(
-        "select campo, estado from public.cambios_ficha where user_id = %s and estado = 'pendiente'",
+        "select campo, estado from cambios_ficha where user_id = %s and estado = 'pendiente'",
         (empleado["id"],))
     assert any(p["campo"] == "estado_civil" for p in pendientes)
 
     # Y no se aplicó todavía: eso es lo que significa «pendiente».
     actual = await obtener_uno(
-        "select estado_civil from public.users where id = %s", (empleado["id"],))
+        "select estado_civil from users where id = %s", (empleado["id"],))
     assert actual["estado_civil"] != "casado", "no debe aplicarse antes de aprobarse"
 
 
 async def test_el_catalogo_declara_bloqueados_los_que_debe(cliente, auth_empleado):
     """Si alguien reclasifica un campo, esta prueba lo delata."""
     filas = await obtener_todos(
-        "select campo from public.campos_ficha where nivel = 'bloqueado'")
+        "select campo from campos_ficha where nivel = 'bloqueado'")
     bloqueados = {f["campo"] for f in filas}
     for campo in ("fecha_ingreso", "cedula", "dias_vacaciones", "departamento"):
         assert campo in bloqueados, f"{campo} debe estar bloqueado para el empleado"
 
     # Y los que sí se señalan, con confirmación de por medio.
     niveles = {f["campo"]: f["nivel"] for f in await obtener_todos(
-        "select campo, nivel from public.campos_ficha")}
+        "select campo, nivel from campos_ficha")}
     assert niveles["cargo"] == "revisado"
     assert niveles["jefe_id"] == "revisado"
     assert niveles["email"] == "confirmado", (

@@ -50,7 +50,7 @@ async def test_un_permiso_de_domingo_se_puede_pedir(cliente, auth):
         "justificacion": "Cubro el puesto de garita ese día."})
     assert r.status_code == 201, r.text
     fila = await obtener_uno(
-        "select dias_solicitados from public.requests where id = %s", (r.json()["id"],))
+        "select dias_solicitados from requests where id = %s", (r.json()["id"],))
     assert fila["dias_solicitados"] == 1
 
 
@@ -64,7 +64,7 @@ async def test_un_permiso_por_horas_de_domingo_tambien(cliente, auth):
         "justificacion": "Cubro el puesto de garita ese día."})
     assert r.status_code == 201, r.text
     fila = await obtener_uno(
-        "select dias_solicitados, horas_solicitadas from public.requests where id = %s",
+        "select dias_solicitados, horas_solicitadas from requests where id = %s",
         (r.json()["id"],))
     assert fila["dias_solicitados"] == 1
     assert float(fila["horas_solicitadas"]) == 2.0
@@ -80,7 +80,7 @@ async def test_un_rango_de_varios_dias_sigue_descartando_el_fin_de_semana(client
         "justificacion": "Tengo que acompañar a un familiar fuera de la ciudad."})
     if r.status_code == 201:
         fila = await obtener_uno(
-            "select dias_solicitados from public.requests where id = %s", (r.json()["id"],))
+            "select dias_solicitados from requests where id = %s", (r.json()["id"],))
         # Ocho días calendario, seis hábiles: el fin de semana se sigue
         # descartando. Si algún feriado cae dentro serán menos, nunca más.
         assert fila["dias_solicitados"] <= 6
@@ -102,8 +102,8 @@ async def test_las_vacaciones_nunca_descartaron_el_fin_de_semana():
     """
     domingo = _proximo_domingo()
     fila = await obtener_uno(
-        """select public.calcular_dias('vacacion', %(d)s, %(d)s) as vacacion,
-                  public.calcular_dias('permiso',  %(d)s, %(d)s) as permiso""",
+        """select calcular_dias('vacacion', %(d)s, %(d)s) as vacacion,
+                  calcular_dias('permiso',  %(d)s, %(d)s) as permiso""",
         {"d": domingo})
     assert float(fila["vacacion"]) == 1.0, "un domingo de vacaciones siempre contó"
     assert float(fila["permiso"]) == 0.0, "y un permiso de domingo nunca contó"
@@ -119,8 +119,8 @@ async def test_el_permiso_de_un_dia_lo_arregla_el_disparador_no_el_calculo():
     """
     lunes, domingo = _proximo_lunes(), _proximo_domingo()
     fila = await obtener_uno(
-        """select public.calcular_dias('permiso', %s, %s) as domingo,
-                  public.calcular_dias('permiso', %s, %s) as lunes""",
+        """select calcular_dias('permiso', %s, %s) as domingo,
+                  calcular_dias('permiso', %s, %s) as lunes""",
         (domingo, domingo, lunes, lunes))
     assert float(fila["domingo"]) == 0.0
     assert float(fila["lunes"]) == 1.0

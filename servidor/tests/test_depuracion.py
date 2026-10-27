@@ -69,12 +69,12 @@ async def test_borrar_una_persona_sigue_arrastrando_su_expediente(cliente):
     —porque una migración cambió una cascada por SET NULL— el manual estaría
     asustando de más, y eso también se corrige."""
     cascadas = await obtener_todos("""
-        select c.conrelid::regclass::text as tabla
+        select c.conrelid::regclass as tabla
           from pg_constraint c
          where c.contype = 'f' and c.confdeltype = 'c'
            and c.connamespace = 'public'::regnamespace
-           and c.confrelid = 'public.users'::regclass""")
-    nombres = {c["tabla"].replace("public.", "") for c in cascadas}
+           and c.confrelid = 'users'::regclass""")
+    nombres = {c["tabla"].replace("", "") for c in cascadas}
     # Las que de verdad duelen: el expediente y lo que la LOPDP obliga a
     # conservar.
     for tabla in ("requests", "vacation_periods", "vacaciones_historicas",

@@ -21,15 +21,15 @@ async def gente(empleado):
         ("1700000746", "Zoila Paredes Mena", "Analista de Sistemas", "TI", "zoila@itsanet.test"),
         ("1700000753", "Bruno Salcedo Vaca", "Chofer", "LOGISTICA", "bruno@itsanet.test"),
     ]:
-        await ejecutar("delete from public.users where cedula = %s", (cedula,))
+        await ejecutar("delete from users where cedula = %s", (cedula,))
         await obtener_uno(
-            """insert into public.users (cedula, nombre, email, rol, cargo, departamento,
+            """insert into users (cedula, nombre, email, rol, cargo, departamento,
                                          fecha_ingreso)
-               values (%s, %s, %s, 'empleado', %s, %s, current_date - 900) returning id""",
+               values (%s, %s, %s, 'empleado', %s, %s, current_date() - interval 900 day) returning id""",
             (cedula, nombre, correo, cargo, depto),
         )
     yield
-    await ejecutar("delete from public.users where cedula in ('1700000746','1700000753')")
+    await ejecutar("delete from users where cedula in ('1700000746','1700000753')")
 
 
 async def test_una_busqueda_sin_coincidencias_no_devuelve_nada(cliente, rrhh_auth, gente):

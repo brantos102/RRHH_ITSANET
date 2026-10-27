@@ -35,9 +35,9 @@ async def test_la_baja_queda_con_su_causa(cliente, rrhh_auth, empleado):
     assert r.status_code == 200, r.text
 
     fila = await obtener_uno(
-        """select activo, fecha_salida, motivo_salida::text as motivo, detalle_salida,
+        """select activo, fecha_salida, motivo_salida as motivo, detalle_salida,
                   salida_registrada_por is not null as con_responsable
-             from public.users where id = %s""", (empleado["id"],))
+             from users where id = %s""", (empleado["id"],))
     assert fila["activo"] is False
     assert fila["motivo"] == "renuncia"
     assert "15 días" in fila["detalle_salida"]
@@ -59,12 +59,12 @@ async def test_avisa_de_lo_que_queda_abierto_a_su_nombre(cliente, rrhh_auth, emp
     """No se impide la baja —la persona ya se fue— pero se devuelve para
     resolverlo ahora en vez de descubrirlo semanas después."""
     await ejecutar(
-        """insert into public.requests
+        """insert into requests
              (user_id, tipo, permission_type_id, fecha_inicio, fecha_fin, dias_solicitados,
               descripcion, justificacion, estado)
-           select %s, 'permiso', id, current_date + 20, current_date + 20, 1,
+           select %s, 'permiso', id, current_date() + interval 20 day, current_date() + interval 20 day, 1,
                   'Tramite pendiente', 'Quedo en tramite al salir', 'pendiente_jefe'
-             from public.permission_types
+             from permission_types
             where activo and not requiere_adjunto order by id limit 1""",
         (empleado["id"],))
 
@@ -94,7 +94,7 @@ async def test_la_fecha_de_salida_no_puede_ser_futura(cliente, rrhh_auth, emplea
 
 
 async def test_nadie_se_da_de_baja_a_si_mismo(cliente, rrhh_auth):
-    yo = await obtener_uno("select id from public.users where cedula = %s", (CEDULA_RRHH_R,))
+    yo = await obtener_uno("select id from users where cedula = %s", (CEDULA_RRHH_R,))
     r = await cliente.post(f"/admin/usuarios/{yo['id']}/baja", headers=rrhh_auth,
                            json={"fecha_salida": str(date.today()), "motivo": "renuncia"})
     assert r.status_code >= 400

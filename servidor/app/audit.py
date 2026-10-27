@@ -9,7 +9,7 @@ from fastapi import Request
 from .db import ejecutar
 
 SQL_INSERT = """
-    insert into public.audit_logs
+    insert into audit_logs
         (user_id, cedula, accion, entidad, entidad_id, ip, user_agent, detalle)
     values (%(user_id)s, %(cedula)s, %(accion)s, %(entidad)s, %(entidad_id)s,
             %(ip)s, %(user_agent)s, %(detalle)s)

@@ -34,7 +34,7 @@ async def auth(cliente, codigos, empleado):
 
 @pytest.fixture
 async def historico(empleado):
-    await ejecutar("delete from public.vacaciones_historicas where user_id = %s",
+    await ejecutar("delete from vacaciones_historicas where user_id = %s",
                    (empleado["id"],))
     for ini, fin, dias, fila in [
         ("2022-01-20", "2022-01-26", 7, 1025),
@@ -42,42 +42,42 @@ async def historico(empleado):
         ("2024-02-14", "2024-02-18", 5, 1036),
     ]:
         await obtener_uno(
-            """insert into public.vacaciones_historicas
+            """insert into vacaciones_historicas
                  (user_id, fecha_inicio, fecha_fin, dias, fila_origen)
                values (%s, %s, %s, %s, %s) returning id""",
             (empleado["id"], ini, fin, dias, fila))
     yield
-    await ejecutar("delete from public.vacaciones_historicas where user_id = %s",
+    await ejecutar("delete from vacaciones_historicas where user_id = %s",
                    (empleado["id"],))
 
 
 async def test_el_historial_no_toca_el_saldo(empleado, historico):
     """Sumarlo otra vez seria descontar dos veces los mismos dias."""
     antes = await obtener_uno(
-        "select dias_vacaciones from public.users where id = %s", (empleado["id"],))
+        "select dias_vacaciones from users where id = %s", (empleado["id"],))
     await obtener_uno(
-        """insert into public.vacaciones_historicas
+        """insert into vacaciones_historicas
              (user_id, fecha_inicio, fecha_fin, dias)
            values (%s, '2021-05-03', '2021-05-07', 5) returning id""",
         (empleado["id"],))
     despues = await obtener_uno(
-        "select dias_vacaciones from public.users where id = %s", (empleado["id"],))
+        "select dias_vacaciones from users where id = %s", (empleado["id"],))
     assert despues["dias_vacaciones"] == antes["dias_vacaciones"]
 
 
 async def test_cargar_dos_veces_no_duplica(empleado, historico):
     """Volver a pasar el mismo archivo tiene que ser inofensivo."""
     antes = await obtener_uno(
-        "select count(*) as n from public.vacaciones_historicas where user_id = %s",
+        "select count(*) as n from vacaciones_historicas where user_id = %s",
         (empleado["id"],))
     await ejecutar(
-        """insert into public.vacaciones_historicas
+        """insert into vacaciones_historicas
              (user_id, fecha_inicio, fecha_fin, dias)
            values (%s, '2022-01-20', '2022-01-26', 7)
            on conflict (user_id, fecha_inicio, fecha_fin) do nothing""",
         (empleado["id"],))
     despues = await obtener_uno(
-        "select count(*) as n from public.vacaciones_historicas where user_id = %s",
+        "select count(*) as n from vacaciones_historicas where user_id = %s",
         (empleado["id"],))
     assert despues["n"] == antes["n"]
 
@@ -85,7 +85,7 @@ async def test_cargar_dos_veces_no_duplica(empleado, historico):
 async def test_no_se_admite_un_rango_invertido(empleado):
     with pytest.raises(Exception) as fallo:
         await ejecutar(
-            """insert into public.vacaciones_historicas
+            """insert into vacaciones_historicas
                  (user_id, fecha_inicio, fecha_fin, dias)
                values (%s, '2022-03-10', '2022-03-01', 5)""",
             (empleado["id"],))
@@ -95,7 +95,7 @@ async def test_no_se_admite_un_rango_invertido(empleado):
 async def test_ni_dias_en_cero(empleado):
     with pytest.raises(Exception):
         await ejecutar(
-            """insert into public.vacaciones_historicas
+            """insert into vacaciones_historicas
                  (user_id, fecha_inicio, fecha_fin, dias)
                values (%s, '2022-03-01', '2022-03-01', 0)""",
             (empleado["id"],))
@@ -129,12 +129,12 @@ async def test_cada_registro_dice_de_donde_viene(cliente, auth, historico):
 async def test_nadie_ve_el_historial_de_otro(cliente, auth, empleado, historico):
     """Es la comprobación que importa cuando se carga por nombre."""
     otro = await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso)
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
            values ('1700000076', 'Otro Con Historial', 'otrohist@api.test',
-                   'empleado', current_date - 800)
+                   'empleado', current_date() - interval 800 day)
            on conflict (cedula) do update set nombre = excluded.nombre returning id""")
     await obtener_uno(
-        """insert into public.vacaciones_historicas
+        """insert into vacaciones_historicas
              (user_id, fecha_inicio, fecha_fin, dias)
            values (%s, '2020-08-01', '2020-08-10', 10) returning id""", (otro["id"],))
     try:
@@ -143,12 +143,12 @@ async def test_nadie_ve_el_historial_de_otro(cliente, auth, empleado, historico)
         assert "2020-08-01" not in fechas, "se está viendo el historial de otra persona"
         assert r.json()["veces"] == 3
     finally:
-        await ejecutar("delete from public.users where cedula = '1700000076'")
+        await ejecutar("delete from users where cedula = '1700000076'")
 
 
 async def test_el_resumen_cuadra_con_lo_cargado(empleado, historico):
     fila = await obtener_uno(
         """select vacaciones_registradas, dias_gozados_historicos
-             from public.v_historico_resumen where user_id = %s""", (empleado["id"],))
+             from v_historico_resumen where user_id = %s""", (empleado["id"],))
     assert fila["vacaciones_registradas"] == 3
     assert float(fila["dias_gozados_historicos"]) == 15

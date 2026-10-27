@@ -42,30 +42,30 @@ async def auth(cliente, codigos, empleado):
 @pytest.fixture
 async def rrhh_auth(cliente, codigos, empleado):
     await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
            values (%s, 'Talento Confirma', 'confirmarrhh@api.test', 'rrhh',
-                   current_date - 900, 'Quito')
+                   current_date() - interval 900 day, 'Quito')
            on conflict (cedula) do update set rol = 'rrhh' returning id""",
         (CED_RRHH_C,))
     await cliente.post("/auth/solicitar-token", json={"cedula": CED_RRHH_C})
     r = await cliente.post("/auth/validar-token",
                            json={"cedula": CED_RRHH_C, "codigo": codigos[-1]})
     yield {"Authorization": f"Bearer {r.json()['access_token']}"}
-    await ejecutar("delete from public.users where cedula = %s", (CED_RRHH_C,))
+    await ejecutar("delete from users where cedula = %s", (CED_RRHH_C,))
 
 
 @pytest.fixture
 async def jefe(empleado):
     fila = await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, cargo,
+        """insert into users (cedula, nombre, email, rol, cargo,
                                      departamento, fecha_ingreso)
            values (%s, 'Jefa De Area', 'jefa@api.test', 'jefe',
-                   'Jefa de Operaciones', 'OPERACIONES', current_date - 2000)
+                   'Jefa de Operaciones', 'OPERACIONES', current_date() - interval 2000 day)
            on conflict (cedula) do update set rol = 'jefe' returning id""",
         (CED_JEFE,),
     )
     yield {"id": str(fila["id"]), "cedula": CED_JEFE}
-    await ejecutar("delete from public.users where cedula = %s", (CED_JEFE,))
+    await ejecutar("delete from users where cedula = %s", (CED_JEFE,))
 
 
 # ------------------------------------------------------- el correo se confirma
@@ -76,7 +76,7 @@ async def test_el_correo_no_rige_hasta_que_se_abre_el_enlace(cliente, auth, empl
     assert "24 horas" in r.json()["mensaje"]
 
     fila = await obtener_uno(
-        "select email::text as email from public.users where id = %s", (empleado["id"],))
+        "select email as email from users where id = %s", (empleado["id"],))
     assert fila["email"] != "bryan.nuevo@itsanet.com.ec"
 
     # Y la ficha lo dice, para que la pantalla pueda avisarlo.
@@ -88,11 +88,11 @@ async def test_un_enlace_vencido_no_aplica_nada(cliente, auth, empleado):
     await cliente.post("/mi-ficha/correo", headers=auth,
                        json={"email": "tarde@itsanet.com.ec"})
     await ejecutar(
-        """update public.confirmaciones_correo set expira_en = now() - interval '1 minute'
+        """update confirmaciones_correo set expira_en = now(6) - interval 1 MINUTE
             where user_id = %s""",
         (empleado["id"],))
     token = await obtener_uno(
-        """select token::text as token from public.confirmaciones_correo
+        """select token as token from confirmaciones_correo
             where user_id = %s order by created_at desc limit 1""",
         (empleado["id"],))
 
@@ -101,7 +101,7 @@ async def test_un_enlace_vencido_no_aplica_nada(cliente, auth, empleado):
     assert "venció" in r.json()["detail"]["mensaje"]
 
     fila = await obtener_uno(
-        "select email::text as email from public.users where id = %s", (empleado["id"],))
+        "select email as email from users where id = %s", (empleado["id"],))
     assert fila["email"] != "tarde@itsanet.com.ec"
 
 
@@ -110,7 +110,7 @@ async def test_pedirlo_de_nuevo_invalida_el_enlace_anterior(cliente, auth, emple
     await cliente.post("/mi-ficha/correo", headers=auth,
                        json={"email": "primera@itsanet.com.ec"})
     primero = await obtener_uno(
-        """select token::text as token from public.confirmaciones_correo
+        """select token as token from confirmaciones_correo
             where user_id = %s order by created_at desc limit 1""",
         (empleado["id"],))
 
@@ -130,14 +130,14 @@ async def test_confirmar_deja_constancia(cliente, auth, empleado):
 
     fila = await obtener_uno(
         """select cargo_confirmado_en, jefe_confirmado_en
-             from public.users where id = %s""", (empleado["id"],))
+             from users where id = %s""", (empleado["id"],))
     assert fila["cargo_confirmado_en"] is not None
     assert fila["jefe_confirmado_en"] is not None
 
 
 async def test_corregir_el_jefe_queda_a_la_espera(cliente, auth, empleado, jefe):
     antes = await obtener_uno(
-        "select jefe_id from public.users where id = %s", (empleado["id"],))
+        "select jefe_id from users where id = %s", (empleado["id"],))
 
     r = await cliente.post("/mi-ficha/confirmar", headers=auth,
                            json={"cargo_correcto": True, "jefe_correcto": False,
@@ -146,11 +146,11 @@ async def test_corregir_el_jefe_queda_a_la_espera(cliente, auth, empleado, jefe)
     assert "Jefe que indica" in r.json()["en_revision"]
 
     despues = await obtener_uno(
-        "select jefe_id from public.users where id = %s", (empleado["id"],))
+        "select jefe_id from users where id = %s", (empleado["id"],))
     assert despues["jefe_id"] == antes["jefe_id"], "el jefe cambió sin confirmación"
 
     pendiente = await obtener_uno(
-        """select estado, valor_nuevo from public.cambios_ficha
+        """select estado, valor_nuevo from cambios_ficha
             where user_id = %s and campo = 'jefe_id'
             order by created_at desc limit 1""", (empleado["id"],))
     assert pendiente["estado"] == "pendiente"
@@ -163,7 +163,7 @@ async def test_al_aprobarlo_el_jefe_rige(cliente, auth, empleado, jefe, rrhh_aut
                        json={"cargo_correcto": True, "jefe_correcto": False,
                              "jefe_propuesto_id": jefe["id"]})
     cambio = await obtener_uno(
-        """select id from public.cambios_ficha
+        """select id from cambios_ficha
             where user_id = %s and campo = 'jefe_id' and estado = 'pendiente'""",
         (empleado["id"],))
 
@@ -172,7 +172,7 @@ async def test_al_aprobarlo_el_jefe_rige(cliente, auth, empleado, jefe, rrhh_aut
     assert r.status_code == 200, r.text
 
     fila = await obtener_uno(
-        "select jefe_id::text as jefe_id from public.users where id = %s", (empleado["id"],))
+        "select jefe_id as jefe_id from users where id = %s", (empleado["id"],))
     assert fila["jefe_id"] == jefe["id"]
 
 
@@ -203,7 +203,7 @@ async def test_nadie_se_ve_a_si_mismo_en_la_lista(cliente, auth, empleado, jefe)
 @pytest.fixture
 async def sin_correo(empleado):
     fila = await obtener_uno(
-        """insert into public.users
+        """insert into users
              (cedula, nombre, email, rol, cargo, fecha_ingreso, fecha_nacimiento,
               correo_pendiente, ficha_completa, ciudad)
            values (%s, 'Sin Correo Confirma', %s, 'empleado', 'Bodeguero', %s, %s,
@@ -218,7 +218,7 @@ async def sin_correo(empleado):
          INGRESO, NACIMIENTO),
     )
     yield {"id": str(fila["id"]), "cedula": CED_SIN_CORREO_C}
-    await ejecutar("delete from public.users where cedula = %s", (CED_SIN_CORREO_C,))
+    await ejecutar("delete from users where cedula = %s", (CED_SIN_CORREO_C,))
 
 
 async def test_la_prueba_de_identidad_muestra_que_hay_que_confirmar(cliente, sin_correo):
@@ -256,15 +256,15 @@ async def test_el_alta_registra_la_correccion_del_cargo(cliente, sin_correo, jef
 
     # El correo y el teléfono sí quedaron: no necesitan que nadie los apruebe.
     fila = await obtener_uno(
-        """select email::text as email, telefono, cargo
-             from public.users where id = %s""", (sin_correo["id"],))
+        """select email as email, telefono, cargo
+             from users where id = %s""", (sin_correo["id"],))
     assert fila["email"] == "confirma@itsanet.com.ec"
     assert fila["telefono"] == "0991234567"
     # El cargo no: ese lo confirma Talento Humano.
     assert fila["cargo"] == "Bodeguero"
 
     pendientes = await obtener_todos(
-        """select campo from public.cambios_ficha
+        """select campo from cambios_ficha
             where user_id = %s and estado = 'pendiente'""", (sin_correo["id"],))
     assert {f["campo"] for f in pendientes} == {"cargo", "jefe_id"}
 
@@ -288,7 +288,7 @@ async def test_el_alta_deja_constancia_de_lo_confirmado(cliente, sin_correo):
 
     fila = await obtener_uno(
         """select cargo_confirmado_en, jefe_confirmado_en
-             from public.users where id = %s""", (sin_correo["id"],))
+             from users where id = %s""", (sin_correo["id"],))
     assert fila["cargo_confirmado_en"] is not None
     assert fila["jefe_confirmado_en"] is not None
 
@@ -313,7 +313,7 @@ async def test_una_jefatura_inventada_no_tumba_el_alta(cliente, sin_correo):
     assert r.json()["avisos"], "debería avisar que la jefatura no existe"
 
     fila = await obtener_uno(
-        "select email::text as email from public.users where id = %s", (sin_correo["id"],))
+        "select email as email from users where id = %s", (sin_correo["id"],))
     assert fila["email"] == "pese.al.error@itsanet.com.ec"
 
 
@@ -362,18 +362,18 @@ async def test_reabrir_un_alta_no_choca_con_el_contacto_de_emergencia(
 
     # Talento Humano reabre: la persona se equivocó de correo.
     await ejecutar(
-        """update public.users set correo_pendiente = true, ficha_completa = false
+        """update users set correo_pendiente = true, ficha_completa = false
             where cedula = %s""", (CED_SIN_CORREO_C,))
 
     r = await completar("corregido@itsanet.com.ec")
     assert r.status_code == 200, r.text
 
     fila = await obtener_uno(
-        "select email::text as email from public.users where cedula = %s",
+        "select email as email from users where cedula = %s",
         (CED_SIN_CORREO_C,))
     assert fila["email"] == "corregido@itsanet.com.ec"
 
     contactos = await obtener_todos(
-        """select nombre from public.emergency_contacts
+        """select nombre from emergency_contacts
             where user_id = %s and es_principal""", (sin_correo["id"],))
     assert len(contactos) == 1, "no debe duplicarse el contacto principal"

@@ -17,7 +17,7 @@ CED_JEFE_C = "1700000027"
 
 @pytest.fixture
 async def auth(cliente, codigos, empleado):
-    await ejecutar("update public.users set ciudad = 'Quito' where id = %s", (empleado["id"],))
+    await ejecutar("update users set ciudad = 'Quito' where id = %s", (empleado["id"],))
     await cliente.post("/auth/solicitar-token", json={"cedula": CEDULA_PRUEBA})
     r = await cliente.post("/auth/validar-token",
                            json={"cedula": CEDULA_PRUEBA, "codigo": codigos[0]})
@@ -27,30 +27,30 @@ async def auth(cliente, codigos, empleado):
 @pytest.fixture
 async def rrhh_auth(cliente, codigos, empleado):
     await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
-           values (%s, 'Talento Chat', 'chatrrhh@api.test', 'rrhh', current_date - 900, 'Quito')
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
+           values (%s, 'Talento Chat', 'chatrrhh@api.test', 'rrhh', current_date() - interval 900 day, 'Quito')
            on conflict (cedula) do update set rol='rrhh', ciudad='Quito' returning id""",
         (CED_RRHH_C,))
     await cliente.post("/auth/solicitar-token", json={"cedula": CED_RRHH_C})
     r = await cliente.post("/auth/validar-token",
                            json={"cedula": CED_RRHH_C, "codigo": codigos[-1]})
     yield {"Authorization": f"Bearer {r.json()['access_token']}"}
-    await ejecutar("delete from public.users where cedula = %s", (CED_RRHH_C,))
+    await ejecutar("delete from users where cedula = %s", (CED_RRHH_C,))
 
 
 @pytest.fixture
 async def jefe_auth(cliente, codigos, empleado):
     jefe = await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
-           values (%s, 'Jefe Curioso', 'jefechat@api.test', 'jefe', current_date - 900, 'Quito')
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
+           values (%s, 'Jefe Curioso', 'jefechat@api.test', 'jefe', current_date() - interval 900 day, 'Quito')
            on conflict (cedula) do update set rol='jefe' returning id""", (CED_JEFE_C,))
-    await ejecutar("update public.users set jefe_id = %s where id = %s",
+    await ejecutar("update users set jefe_id = %s where id = %s",
                    (jefe["id"], empleado["id"]))
     await cliente.post("/auth/solicitar-token", json={"cedula": CED_JEFE_C})
     r = await cliente.post("/auth/validar-token",
                            json={"cedula": CED_JEFE_C, "codigo": codigos[-1]})
     yield {"Authorization": f"Bearer {r.json()['access_token']}"}
-    await ejecutar("delete from public.users where cedula = %s", (CED_JEFE_C,))
+    await ejecutar("delete from users where cedula = %s", (CED_JEFE_C,))
 
 
 async def test_escribir_abre_la_conversacion(cliente, auth):
@@ -86,7 +86,7 @@ async def test_talento_humano_responde_y_queda_anotado(cliente, auth, rrhh_auth)
     assert hilo.json()["mensajes"][-1]["es_rrhh"] is True
 
     fila = await obtener_uno(
-        "select atendida_por from public.conversaciones where id = %s", (cid,))
+        "select atendida_por from conversaciones where id = %s", (cid,))
     assert fila["atendida_por"] is not None
 
 
@@ -112,13 +112,13 @@ async def test_cerrar_y_reabrir(cliente, auth, rrhh_auth):
     cid = creada.json()["conversacion_id"]
     await cliente.post(f"/chat/conversaciones/{cid}/cerrar", headers=rrhh_auth)
 
-    fila = await obtener_uno("select estado from public.conversaciones where id = %s", (cid,))
+    fila = await obtener_uno("select estado from conversaciones where id = %s", (cid,))
     assert fila["estado"] == "cerrada"
 
     # Si la persona vuelve a escribir, se reabre sola
     await cliente.post("/chat/mensajes", headers=auth,
                        json={"conversacion_id": cid, "texto": "Sigo con la duda"})
-    fila = await obtener_uno("select estado from public.conversaciones where id = %s", (cid,))
+    fila = await obtener_uno("select estado from conversaciones where id = %s", (cid,))
     assert fila["estado"] == "abierta"
 
 

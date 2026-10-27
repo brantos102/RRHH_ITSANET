@@ -164,7 +164,7 @@ async def test_el_jefe_no_se_lleva_el_subtipo_medico(cliente, auth, jefe_auth, r
     Talento Humano lo conserva completo: lleva el expediente laboral.
     """
     tipos = await obtener_todos(
-        """select id, nombre from public.permission_types
+        """select id, nombre from permission_types
             where admite_horas and not requiere_adjunto and activo order by id limit 1""")
     tipo = tipos[0]
 

@@ -24,7 +24,7 @@ def salida_de_ayer(hora: int = 17) -> str:
     """La hora de salida de la jornada de ayer, calculada y no escrita a mano.
 
     Estaba fija —«2026-09-29T17:00:00Z»— y las jornadas se insertan con
-    `current_date - 1`: al día siguiente la salida caía un día ANTES de la
+    `current_date() - interval 1 day`: al día siguiente la salida caía un día ANTES de la
     entrada, la base la rechazaba con razón y la prueba fallaba sin que nada
     estuviera roto en el sistema.
     """
@@ -35,9 +35,9 @@ def salida_de_ayer(hora: int = 17) -> str:
 @pytest.fixture
 async def guardia_auth(cliente, codigos, empleado):
     await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso)
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
            values (%s, 'Guardia Temporal', 'guardiat@api.test', 'guardia',
-                   current_date - 400)
+                   current_date() - interval 400 day)
            on conflict (cedula) do update set rol = 'guardia' returning id""",
         (CED_GUARDIA_T,))
     await cliente.post("/auth/solicitar-token", json={"cedula": CED_GUARDIA_T})
@@ -49,34 +49,34 @@ async def guardia_auth(cliente, codigos, empleado):
 @pytest.fixture
 async def rrhh_auth(cliente, codigos, empleado):
     await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s, 'Talento Temporal', 'rrhht@api.test', 'rrhh', current_date - 900)
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
+           values (%s, 'Talento Temporal', 'rrhht@api.test', 'rrhh', current_date() - interval 900 day)
            on conflict (cedula) do update set rol = 'rrhh' returning id""",
         (CED_RRHH_T,))
     await cliente.post("/auth/solicitar-token", json={"cedula": CED_RRHH_T})
     r = await cliente.post("/auth/validar-token",
                            json={"cedula": CED_RRHH_T, "codigo": codigos[-1]})
     yield {"Authorization": f"Bearer {r.json()['access_token']}"}
-    await ejecutar("delete from public.users where cedula = %s", (CED_RRHH_T,))
+    await ejecutar("delete from users where cedula = %s", (CED_RRHH_T,))
 
 
 @pytest.fixture
 async def operario(rrhh_auth, cliente):
-    await ejecutar("delete from public.personal_temporal where cedula = %s", (CED_OPERARIO,))
+    await ejecutar("delete from personal_temporal where cedula = %s", (CED_OPERARIO,))
     r = await cliente.post("/temporal", headers=rrhh_auth, json={
         "cedula": CED_OPERARIO, "nombre": "Operario De Prueba",
         "labor": "Estibador", "proveedor": "Servicios ACME", "valor_hora": 4.5,
     })
     assert r.status_code == 201, r.text
     yield {"id": r.json()["id"], "cedula": CED_OPERARIO}
-    await ejecutar("delete from public.personal_temporal where cedula = %s", (CED_OPERARIO,))
+    await ejecutar("delete from personal_temporal where cedula = %s", (CED_OPERARIO,))
 
 
 # ----------------------------------------------------------------- registro
 async def test_el_temporal_no_es_un_usuario_del_sistema(operario):
     """No tiene acceso, ni vacaciones, ni jefe: no está en `users`."""
     fila = await obtener_uno(
-        "select 1 as x from public.users where cedula = %s", (CED_OPERARIO,))
+        "select 1 as x from users where cedula = %s", (CED_OPERARIO,))
     assert fila is None, (
         "un operario temporal en `users` tendría saldo de vacaciones que nadie "
         "le debe y un acceso al sistema que no necesita"
@@ -149,16 +149,16 @@ async def test_una_sola_jornada_por_dia(cliente, guardia_auth, operario):
                        json={"temporal_id": operario["id"]})
     with pytest.raises(Exception):
         await ejecutar(
-            """insert into public.jornadas_temporales (temporal_id, fecha)
-               values (%s, current_date)""", (operario["id"],))
+            """insert into jornadas_temporales (temporal_id, fecha)
+               values (%s, current_date())""", (operario["id"],))
 
 
 # --------------------------------------------------- lo que quedó sin cerrar
 async def test_una_jornada_de_ayer_sin_salida_se_señala(cliente, guardia_auth, operario):
     await obtener_uno(
-        """insert into public.jornadas_temporales
+        """insert into jornadas_temporales
              (temporal_id, fecha, entrada_en)
-           values (%s, current_date - 1, now() - interval '1 day')
+           values (%s, current_date() - interval 1 day, now(6) - interval 1 DAY)
            returning id""", (operario["id"],))
 
     r = await cliente.get("/temporal/sin-cerrar", headers=guardia_auth)
@@ -171,11 +171,11 @@ async def test_una_jornada_de_ayer_sin_salida_se_señala(cliente, guardia_auth, 
 async def test_el_sistema_no_inventa_una_hora_de_salida(cliente, guardia_auth, operario):
     """Una salida automática convertiría un dato que falta en uno falso."""
     fila = await obtener_uno(
-        """insert into public.jornadas_temporales (temporal_id, fecha, entrada_en)
-           values (%s, current_date - 2, now() - interval '2 days')
+        """insert into jornadas_temporales (temporal_id, fecha, entrada_en)
+           values (%s, current_date() - interval 2 day, now(6) - interval 2 DAY)
            returning id""", (operario["id"],))
     guardada = await obtener_uno(
-        "select salida_en, horas from public.jornadas_temporales where id = %s",
+        "select salida_en, horas from jornadas_temporales where id = %s",
         (fila["id"],))
     assert guardada["salida_en"] is None
     assert guardada["horas"] is None
@@ -185,8 +185,8 @@ async def test_talento_humano_cierra_a_mano_y_queda_constancia(
     cliente, rrhh_auth, operario
 ):
     fila = await obtener_uno(
-        """insert into public.jornadas_temporales (temporal_id, fecha, entrada_en)
-           values (%s, current_date - 1, (current_date - 1)::timestamptz + interval '8 hours')
+        """insert into jornadas_temporales (temporal_id, fecha, entrada_en)
+           values (%s, current_date() - interval 1 day, (current_date() - interval 1 day) + interval 8 HOUR)
            returning id""", (operario["id"],))
 
     r = await cliente.post(f"/temporal/jornadas/{fila['id']}/cerrar", headers=rrhh_auth,
@@ -196,7 +196,7 @@ async def test_talento_humano_cierra_a_mano_y_queda_constancia(
 
     guardada = await obtener_uno(
         """select salida_en, horas, observacion, registro_salida
-             from public.jornadas_temporales where id = %s""", (fila["id"],))
+             from jornadas_temporales where id = %s""", (fila["id"],))
     assert guardada["salida_en"] is not None
     assert guardada["horas"] is not None
     assert "Cerrada a mano" in guardada["observacion"]
@@ -205,9 +205,9 @@ async def test_talento_humano_cierra_a_mano_y_queda_constancia(
 
 async def test_cerrar_a_mano_exige_explicacion(cliente, rrhh_auth, operario):
     fila = await obtener_uno(
-        """insert into public.jornadas_temporales (temporal_id, fecha, entrada_en)
-           values (%s, current_date - 1,
-                   (current_date - 1)::timestamptz + interval '8 hours') returning id""",
+        """insert into jornadas_temporales (temporal_id, fecha, entrada_en)
+           values (%s, current_date() - interval 1 day,
+                   (current_date() - interval 1 day) + interval 8 HOUR) returning id""",
         (operario["id"],))
     r = await cliente.post(f"/temporal/jornadas/{fila['id']}/cerrar", headers=rrhh_auth,
                            json={"salida": salida_de_ayer(), "motivo": "ok"})
@@ -216,9 +216,9 @@ async def test_cerrar_a_mano_exige_explicacion(cliente, rrhh_auth, operario):
 
 async def test_la_garita_no_cierra_jornadas_a_mano(cliente, guardia_auth, operario):
     fila = await obtener_uno(
-        """insert into public.jornadas_temporales (temporal_id, fecha, entrada_en)
-           values (%s, current_date - 1,
-                   (current_date - 1)::timestamptz + interval '8 hours') returning id""",
+        """insert into jornadas_temporales (temporal_id, fecha, entrada_en)
+           values (%s, current_date() - interval 1 day,
+                   (current_date() - interval 1 day) + interval 8 HOUR) returning id""",
         (operario["id"],))
     r = await cliente.post(f"/temporal/jornadas/{fila['id']}/cerrar", headers=guardia_auth,
                            json={"salida": salida_de_ayer(),
@@ -236,9 +236,9 @@ async def test_la_semana_cuenta_jornadas_y_horas(cliente, rrhh_auth, operario):
     día que cambie la tarifa sigue saliendo igual de convincente.
     """
     await obtener_uno(
-        """insert into public.jornadas_temporales
+        """insert into jornadas_temporales
              (temporal_id, fecha, entrada_en, salida_en, horas)
-           values (%s, current_date, now() - interval '8 hours', now(), 8)
+           values (%s, current_date(), now(6) - interval 8 HOUR, now(6), 8)
            returning id""", (operario["id"],))
 
     r = await cliente.get("/temporal/semana", headers=rrhh_auth)
@@ -256,8 +256,8 @@ async def test_la_semana_cuenta_jornadas_y_horas(cliente, rrhh_auth, operario):
 async def test_las_horas_avisan_cuando_estan_incompletas(cliente, rrhh_auth, operario):
     """Dar por buenas unas horas que no cuadran es peor que no darlas."""
     await obtener_uno(
-        """insert into public.jornadas_temporales (temporal_id, fecha, entrada_en)
-           values (%s, current_date, now() - interval '3 hours') returning id""",
+        """insert into jornadas_temporales (temporal_id, fecha, entrada_en)
+           values (%s, current_date(), now(6) - interval 3 HOUR) returning id""",
         (operario["id"],))
 
     r = await cliente.get("/temporal/semana", headers=rrhh_auth)
@@ -291,11 +291,11 @@ async def test_la_garita_no_ve_la_liquidacion(cliente, guardia_auth, operario):
 async def _jornada(temporal_id, dia: int, horas: float = 8, cerrada: bool = True):
     from app.db import obtener_uno as uno
     return await uno(
-        """insert into public.jornadas_temporales
+        """insert into jornadas_temporales
              (temporal_id, fecha, entrada_en, salida_en, horas)
-           values (%s, current_date - %s,
-                   (current_date - %s)::timestamptz + interval '8 hours',
-                   case when %s then (current_date - %s)::timestamptz + interval '16 hours' end,
+           values (%s, current_date() - %s,
+                   (current_date() - %s) + interval 8 HOUR,
+                   case when %s then (current_date() - %s) + interval 16 HOUR end,
                    case when %s then %s end)
            returning id""",
         (temporal_id, dia, dia, cerrada, dia, cerrada, horas))

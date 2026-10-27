@@ -23,8 +23,8 @@ CEDULA_GUARDIA = "1713175071"
 @pytest.fixture
 async def guardia_auth(cliente, codigos, empleado):
     await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s, 'Garita Prueba', 'garita@api.test', 'guardia', current_date - 800)
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
+           values (%s, 'Garita Prueba', 'garita@api.test', 'guardia', current_date() - interval 800 day)
            on conflict (cedula) do update set rol = 'guardia', activo = true
            returning id""",
         (CEDULA_GUARDIA,),
@@ -56,12 +56,12 @@ async def _permiso_por_horas_aprobado(cliente, auth, jefe_auth, rrhh_auth,
     Se pide para un día laborable y recién después se lo fecha hoy. Parece un
     rodeo y es lo contrario: así la solicitud recorre la validación completa
     de la API —que no computa días en fin de semana— y la vista de garita,
-    que se ancla a `current_date`, encuentra la fila donde la espera. Antes se
+    que se ancla a `current_date()`, encuentra la fila donde la espera. Antes se
     pedía directamente para hoy y las dieciocho pruebas de garita y retorno
     fallaban los sábados y domingos, por el calendario y no por el código.
     """
     tipo = await obtener_uno(
-        """select id from public.permission_types
+        """select id from permission_types
             where admite_horas and not requiere_adjunto and activo
               and (max_horas is null or max_horas >= 4) order by id limit 1""")
     laborable = _proximo_laborable()
@@ -77,14 +77,14 @@ async def _permiso_por_horas_aprobado(cliente, auth, jefe_auth, rrhh_auth,
     # —hay un disparador que lo impide, y está bien que lo impida—.
     if laborable != date.today():
         await ejecutar(
-            """update public.requests
-                  set fecha_inicio = current_date, fecha_fin = current_date
+            """update requests
+                  set fecha_inicio = current_date(), fecha_fin = current_date()
                 where id = %s""", (cuerpo["id"],))
     for etapa in (jefe_auth, rrhh_auth):
         await cliente.post(f"/aprobaciones/{cuerpo['id']}/decidir", headers=etapa,
                            json={"accion": "aprobar"})
     fila = await obtener_uno(
-        "select qr_hash, folio from public.requests where id = %s", (cuerpo["id"],))
+        "select qr_hash, folio from requests where id = %s", (cuerpo["id"],))
     return {"id": cuerpo["id"], "qr": str(fila["qr_hash"]), "folio": fila["folio"]}
 
 
@@ -109,7 +109,7 @@ async def test_la_segunda_lectura_es_el_regreso(cliente, auth, jefe_auth, rrhh_a
     assert "Regreso registrado" in cuerpo["motivo"]
 
     fila = await obtener_uno(
-        "select retorno_en, retorno_exceso_minutos from public.requests where id = %s",
+        "select retorno_en, retorno_exceso_minutos from requests where id = %s",
         (p["id"],))
     assert fila["retorno_en"] is not None, "debe quedar la hora real de regreso"
     assert fila["retorno_exceso_minutos"] is not None
@@ -121,7 +121,7 @@ async def test_queda_en_la_bitacora_de_accesos(cliente, auth, jefe_auth, rrhh_au
     await cliente.post("/garita/validar-qr", headers=guardia_auth, json={"codigo": p["qr"]})
 
     accesos = await obtener_todos(
-        """select tipo_acceso::text from public.access_logs
+        """select tipo_acceso from access_logs
             where request_id = %s order by created_at""", (p["id"],))
     tipos = [a["tipo_acceso"] for a in accesos]
     assert tipos == ["salida_empleado", "retorno_empleado"], tipos
@@ -148,9 +148,9 @@ async def test_no_se_registra_un_regreso_sin_salida(cliente, auth, jefe_auth, rr
     p = await _permiso_por_horas_aprobado(cliente, auth, jefe_auth, rrhh_auth)
     with pytest.raises(Exception) as fallo:
         await obtener_uno(
-            "select public.registrar_retorno(%s, %s) as r",
+            "select registrar_retorno(%s, %s) as r",
             (p["id"], (await obtener_uno(
-                "select id from public.users where cedula = %s", (CEDULA_GUARDIA,)))["id"]),
+                "select id from users where cedula = %s", (CEDULA_GUARDIA,)))["id"]),
         )
     assert "salida" in str(fallo.value).lower()
 
@@ -165,7 +165,7 @@ async def test_el_tercer_paso_no_inventa_otro_movimiento(cliente, auth, jefe_aut
     assert r.json()["movimiento"] == "ya_completo"
 
     accesos = await obtener_todos(
-        "select count(*) as n from public.access_logs where request_id = %s", (p["id"],))
+        "select count(*) as n from access_logs where request_id = %s", (p["id"],))
     assert accesos[0]["n"] == 2, "no debe acumular movimientos falsos"
 
 
@@ -177,7 +177,7 @@ async def test_la_vista_de_informes_clasifica_la_puntualidad(cliente, auth, jefe
     await cliente.post("/garita/validar-qr", headers=guardia_auth, json={"codigo": p["qr"]})
 
     fila = await obtener_uno(
-        "select puntualidad, salio_en, retorno_en from public.v_retornos where folio = %s",
+        "select puntualidad, salio_en, retorno_en from v_retornos where folio = %s",
         (p["folio"],))
     assert fila is not None, "la solicitud con salida debe aparecer en la vista"
     assert fila["puntualidad"] == "volvió tarde"
@@ -192,7 +192,7 @@ async def test_solo_garita_o_talento_humano_registran_el_retorno(cliente, auth, 
     await cliente.post("/garita/validar-qr", headers=guardia_auth, json={"codigo": p["qr"]})
 
     with pytest.raises(Exception) as fallo:
-        await obtener_uno("select public.registrar_retorno(%s, %s) as r",
+        await obtener_uno("select registrar_retorno(%s, %s) as r",
                           (p["id"], empleado["id"]))
     assert "garita" in str(fallo.value).lower() or "solo" in str(fallo.value).lower()
 
@@ -212,7 +212,7 @@ async def test_volver_antes_de_hora_no_es_un_exceso_negativo(
 
     # Una franja que termina mucho después de ahora: el regreso es temprano.
     await ejecutar(
-        """update public.requests
+        """update requests
               set hora_inicio = '00:01', hora_fin = '23:59'
             where id = %s""", (p["id"],))
 
@@ -223,5 +223,5 @@ async def test_volver_antes_de_hora_no_es_un_exceso_negativo(
     assert r.json()["retorno"]["a_tiempo"] is True
 
     fila = await obtener_uno(
-        "select retorno_exceso_minutos from public.requests where id = %s", (p["id"],))
+        "select retorno_exceso_minutos from requests where id = %s", (p["id"],))
     assert fila["retorno_exceso_minutos"] == 0

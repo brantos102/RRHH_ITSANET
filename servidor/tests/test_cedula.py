@@ -1,4 +1,4 @@
-"""Validación de cédula: debe coincidir con `public.es_cedula_valida`."""
+"""Validación de cédula: debe coincidir con `es_cedula_valida`."""
 import pytest
 
 from app.cedula import es_cedula_valida, normalizar_cedula

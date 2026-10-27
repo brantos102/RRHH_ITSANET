@@ -54,7 +54,7 @@ async def test_un_jefe_solo_ve_a_su_gente(cliente, jefe_auth, rrhh_auth, emplead
     """Y al probar el identificador de otra persona recibe lo mismo que si no
     existiera: no puede averiguar quién trabaja en otra área."""
     ajeno = await obtener_uno(
-        """select id from public.users
+        """select id from users
             where activo and (jefe_id is null or jefe_id <> %s)
               and cedula <> %s limit 1""",
         (await _id_de(CEDULA_JEFE_R), CEDULA_PRUEBA))
@@ -79,7 +79,7 @@ async def test_sin_sesion_no_hay_expediente(cliente, empleado):
 
 
 async def _id_de(cedula: str):
-    fila = await obtener_uno("select id from public.users where cedula = %s", (cedula,))
+    fila = await obtener_uno("select id from users where cedula = %s", (cedula,))
     return fila["id"] if fila else None
 
 
@@ -104,7 +104,7 @@ async def test_talento_humano_los_escribe(cliente, auth, rrhh_auth):
                   (await cliente.get("/catalogos/antiguedad", headers=auth)).json()["avisos"]]
         assert any("15 de noviembre" in t for t in textos)
     finally:
-        await ejecutar("delete from public.lineamientos_solicitud where id = %s",
+        await ejecutar("delete from lineamientos_solicitud where id = %s",
                        (creado.json()["id"],))
 
 
@@ -120,7 +120,7 @@ async def test_apagar_uno_lo_quita_del_formulario(cliente, auth, rrhh_auth):
                   (await cliente.get("/catalogos/antiguedad", headers=auth)).json()["avisos"]]
         assert not any("se va a apagar" in t for t in textos)
     finally:
-        await ejecutar("delete from public.lineamientos_solicitud where id = %s", (ident,))
+        await ejecutar("delete from lineamientos_solicitud where id = %s", (ident,))
 
 
 async def test_un_lineamiento_vacio_se_rechaza(cliente, rrhh_auth):

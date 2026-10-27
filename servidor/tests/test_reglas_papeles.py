@@ -22,16 +22,16 @@ def _ordenadas(filas):
 
 
 async def test_datos_de_trazabilidad_de_toda_la_muestra(muestra):
-    for p in muestra.execute("select id from public.users order by cedula").fetchall():
-        en_pg = muestra.execute("select public.datos_informe_trazabilidad(%s) as d", (p["id"],)).fetchone()["d"]
+    for p in muestra.execute("select id from users order by cedula").fetchall():
+        en_pg = muestra.execute("select datos_informe_trazabilidad(%s) as d", (p["id"],)).fetchone()["d"]
         assert json_normal(await papeles.datos_informe_trazabilidad(p["id"])) == json_normal(en_pg), p["id"]
 
 
 async def test_datos_de_cada_solicitud_de_la_muestra(muestra):
-    filas = muestra.execute("select id from public.requests order by folio").fetchall()
+    filas = muestra.execute("select id from requests order by folio").fetchall()
     assert len(filas) > 40
     for r in filas:
-        en_pg = muestra.execute("select public.datos_informe_solicitud(%s) as d", (r["id"],)).fetchone()["d"]
+        en_pg = muestra.execute("select datos_informe_solicitud(%s) as d", (r["id"],)).fetchone()["d"]
         assert json_normal(await papeles.datos_informe_solicitud(r["id"])) == json_normal(en_pg), r["id"]
 
 
@@ -44,15 +44,15 @@ async def test_el_folio_tiene_la_forma_de_siempre_y_no_se_repite():
 
 
 async def test_asegurar_la_trazabilidad_de_quien_no_la_tiene(muestra):
-    sin = muestra.execute("""select u.id from public.users u where not exists
-                               (select 1 from public.informes_firmados i where i.user_id = u.id)
+    sin = muestra.execute("""select u.id from users u where not exists
+                               (select 1 from informes_firmados i where i.user_id = u.id)
                              order by cedula limit 5""").fetchall()
     assert sin
     with muestra.transaction(force_rollback=True):
         for p in sin:
-            muestra.execute("select public.informe_trazabilidad_asegurar(%s, null)", (p["id"],))
+            muestra.execute("select informe_trazabilidad_asegurar(%s, null)", (p["id"],))
         en_pg = [_fila(f) for f in muestra.execute(
-            "select * from public.informes_firmados where user_id = any(%s) order by user_id",
+            "select * from informes_firmados where user_id = any(%s) order by user_id",
             ([p["id"] for p in sin],)).fetchall()]
     async with y_deshacer():
         for p in sin:
@@ -66,13 +66,13 @@ async def test_asegurar_la_trazabilidad_de_quien_no_la_tiene(muestra):
 
 
 async def test_asegurar_el_de_una_solicitud_lo_actualiza(muestra):
-    r = muestra.execute("""select i.request_id from public.informes_firmados i
+    r = muestra.execute("""select i.request_id from informes_firmados i
                             where i.tipo = 'solicitud' order by folio limit 1""").fetchone()
     with muestra.transaction(force_rollback=True):
-        muestra.execute("update public.requests set descripcion = 'Cambiada en la prueba' where id = %s",
+        muestra.execute("update requests set descripcion = 'Cambiada en la prueba' where id = %s",
                         (r["request_id"],))
-        muestra.execute("select public.informe_solicitud_asegurar(%s, null)", (r["request_id"],))
-        en_pg = _fila(muestra.execute("select * from public.informes_firmados where request_id = %s",
+        muestra.execute("select informe_solicitud_asegurar(%s, null)", (r["request_id"],))
+        en_pg = _fila(muestra.execute("select * from informes_firmados where request_id = %s",
                                       (r["request_id"],)).fetchone())
     async with y_deshacer():
         from app.db import ejecutar
@@ -86,19 +86,19 @@ async def test_asegurar_el_de_una_solicitud_lo_actualiza(muestra):
 
 
 async def test_reemitir_y_sus_rechazos(muestra):
-    rrhh = muestra.execute("select id from public.users where rol = 'rrhh' limit 1").fetchone()["id"]
-    con = muestra.execute("select user_id from public.informes_firmados where tipo = 'trazabilidad' "
+    rrhh = muestra.execute("select id from users where rol = 'rrhh' limit 1").fetchone()["id"]
+    con = muestra.execute("select user_id from informes_firmados where tipo = 'trazabilidad' "
                           "order by folio limit 1").fetchone()["user_id"]
-    sin = muestra.execute("""select u.id from public.users u where not exists
-                               (select 1 from public.informes_firmados i where i.user_id = u.id)
+    sin = muestra.execute("""select u.id from users u where not exists
+                               (select 1 from informes_firmados i where i.user_id = u.id)
                              limit 1""").fetchone()["id"]
     for persona, motivo in [(con, "   "), (sin, "Se perdió el original"), (con, "Se perdió el original")]:
         with muestra.transaction(force_rollback=True):
             try:
-                muestra.execute("select public.informe_trazabilidad_reemitir(%s, %s, %s)", (persona, rrhh, motivo))
+                muestra.execute("select informe_trazabilidad_reemitir(%s, %s, %s)", (persona, rrhh, motivo))
                 err_pg = None
                 en_pg = [_fila(f) for f in muestra.execute(
-                    "select * from public.informes_firmados where user_id = %s order by emitido_en", (persona,))]
+                    "select * from informes_firmados where user_id = %s order by emitido_en", (persona,))]
             except Exception as exc:  # noqa: BLE001
                 err_pg = exc.diag.message_primary
         async with y_deshacer():

@@ -29,7 +29,7 @@ async def _buzon_del_departamento(region: str | None) -> str | None:
     from .db import obtener_uno
     try:
         fila = await obtener_uno(
-            "select public.rrhh_correo_de_region(%s) as buzon", (region or "sierra",))
+            "SELECT rrhh_correo_de_region(%s) AS buzon", (region or "sierra",))
     except Exception:  # noqa: BLE001
         log.exception("No se pudo leer el buzón del departamento")
         return None

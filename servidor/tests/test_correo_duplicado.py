@@ -37,17 +37,17 @@ CEDULA_LIBRE = "1750000000"
 async def dos_fichas():
     """Una ficha con el correo puesto y otra sin correo."""
     con_correo = await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso, departamento)
-           values (%s, 'Quien Tiene El Correo', %s, 'empleado', current_date - 400, 'REDES')
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso, departamento)
+           values (%s, 'Quien Tiene El Correo', %s, 'empleado', current_date() - interval 400 day, 'REDES')
            on conflict (cedula) do update set email = excluded.email, activo = true
            returning id""", (CEDULA_A, CORREO))
     sin_correo = await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s, 'Quien Lo Necesita', null, 'empleado', current_date - 400)
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
+           values (%s, 'Quien Lo Necesita', null, 'empleado', current_date() - interval 400 day)
            on conflict (cedula) do update set email = null, activo = true
            returning id""", (CEDULA_B,))
     yield {"con_correo": con_correo["id"], "sin_correo": sin_correo["id"]}
-    await ejecutar("delete from public.users where cedula = any(%s)", ([CEDULA_A, CEDULA_B],))
+    await ejecutar("delete from users where cedula = any(%s)", ([CEDULA_A, CEDULA_B],))
 
 
 async def test_el_mensaje_dice_de_quien_es_el_correo(cliente, rrhh_auth, dos_fichas):
@@ -88,7 +88,7 @@ async def test_choca_igual_aunque_cambien_las_mayusculas(cliente, rrhh_auth, dos
 
 async def test_avisa_cuando_la_ficha_que_lo_tiene_esta_inactiva(cliente, rrhh_auth, dos_fichas):
     """El caso que más desconcierta: la ficha culpable no sale en la lista."""
-    await ejecutar("update public.users set activo = false where id = %s",
+    await ejecutar("update users set activo = false where id = %s",
                    (dos_fichas["con_correo"],))
     r = await cliente.patch(f"/admin/usuarios/{dos_fichas['sin_correo']}",
                             headers=rrhh_auth, json={"email": CORREO})
@@ -116,7 +116,7 @@ async def test_el_alta_con_correo_repetido_tambien(cliente, rrhh_auth, dos_ficha
         "email": CORREO, "fecha_ingreso": "2024-01-15"})
     assert r.status_code == 409, r.text
     assert "Quien Tiene El Correo" in r.json()["detail"]["mensaje"]
-    await ejecutar("delete from public.users where cedula = %s", (CEDULA_LIBRE,))
+    await ejecutar("delete from users where cedula = %s", (CEDULA_LIBRE,))
 
 
 async def test_la_restriccion_sigue_en_pie(cliente, rrhh_auth, dos_fichas):
@@ -125,7 +125,7 @@ async def test_la_restriccion_sigue_en_pie(cliente, rrhh_auth, dos_fichas):
     await cliente.patch(f"/admin/usuarios/{dos_fichas['sin_correo']}",
                         headers=rrhh_auth, json={"email": CORREO})
     cuantas = await obtener_uno(
-        "select count(*) as n from public.users where email = %s", (CORREO,))
+        "select count(*) as n from users where email = %s", (CORREO,))
     assert cuantas["n"] == 1, "el correo quedó en dos fichas"
 
 

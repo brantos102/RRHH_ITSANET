@@ -31,5 +31,5 @@ async def test_una_consulta_repetida_muchas_veces_no_falla():
 
     for _ in range(8):
         fila = await obtener_uno(
-            "select to_regclass(%s) is not null as existe", ("public.users",))
+            "select to_regclass(%s) is not null as existe", ("users",))
         assert fila["existe"] is True

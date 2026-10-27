@@ -24,7 +24,7 @@ async def lunes_futuro(semanas: int = 6) -> date:
     feriados = {
         f["fecha"]
         for f in await obtener_todos(
-            "select fecha from public.feriados where activo and fecha >= current_date"
+            "select fecha from feriados where activo and fecha >= current_date()"
         )
     }
     base = date.today() + timedelta(weeks=semanas)
@@ -67,18 +67,18 @@ def correos(monkeypatch) -> list[dict]:
 async def equipo(empleado):
     """Jefe y personal de Talento Humano, con el empleado a cargo del jefe."""
     jefe = await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s, 'API Jefe', 'jefe@api.test', 'jefe', current_date - 900) returning id""",
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
+           values (%s, 'API Jefe', 'jefe@api.test', 'jefe', current_date() - interval 900 day) returning id""",
         (CEDULA_JEFE,),
     )
     rrhh = await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s, 'API RRHH', 'rrhh@api.test', 'rrhh', current_date - 900) returning id""",
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
+           values (%s, 'API RRHH', 'rrhh@api.test', 'rrhh', current_date() - interval 900 day) returning id""",
         (CEDULA_RRHH,),
     )
-    await ejecutar("update public.users set jefe_id = %s where id = %s", (jefe["id"], empleado["id"]))
+    await ejecutar("update users set jefe_id = %s where id = %s", (jefe["id"], empleado["id"]))
     await ejecutar(
-        """update public.vacation_periods set fines_semana_consumidos = fines_semana_obligatorios
+        """update vacation_periods set fines_semana_consumidos = fines_semana_obligatorios
            where user_id = %s and not caducado""",
         (empleado["id"],),
     )
@@ -234,7 +234,7 @@ async def test_dos_personas_de_rrhh_a_la_vez(cliente, codigos, solicitud):
 # ------------------------------------------------------- enlace del correo
 async def _token_enlace(solicitud_id: str, rol: str) -> str:
     columna = "jefe_token" if rol == "jefe" else "rrhh_token"
-    fila = await obtener_uno(f"select {columna} as t from public.requests where id = %s", (solicitud_id,))
+    fila = await obtener_uno(f"select {columna} as t from requests where id = %s", (solicitud_id,))
     return str(fila["t"])
 
 
@@ -246,7 +246,7 @@ async def test_el_enlace_muestra_la_solicitud_sin_cambiar_nada(cliente, solicitu
     assert datos["puede_decidir"] is True
     assert datos["solicitud"]["empleado"] == "API Empleado"
 
-    estado = await obtener_uno("select estado from public.requests where id = %s", (solicitud,))
+    estado = await obtener_uno("select estado from requests where id = %s", (solicitud,))
     assert estado["estado"] == "pendiente_jefe", "un GET no debe cambiar el estado"
 
 
@@ -286,7 +286,7 @@ async def test_el_token_del_jefe_no_sirve_como_rrhh(cliente, solicitud):
 
 async def test_enlace_vencido_se_rechaza(cliente, solicitud):
     await ejecutar(
-        "update public.requests set created_at = now() - interval '30 days' where id = %s", (solicitud,)
+        "update requests set created_at = now(6) - interval 30 DAY where id = %s", (solicitud,)
     )
     token = await _token_enlace(solicitud, "jefe")
     r = await cliente.get(f"/aprobaciones/enlace/{token}?rol=jefe")
@@ -309,7 +309,7 @@ async def test_el_qr_solo_contiene_el_identificador(solicitud, cliente, codigos,
     await cliente.post(f"/aprobaciones/{solicitud}/decidir",
                        headers={"Authorization": f"Bearer {token_rrhh}"}, json={"accion": "aprobar"})
 
-    fila = await obtener_uno("select qr_hash from public.requests where id = %s", (solicitud,))
+    fila = await obtener_uno("select qr_hash from requests where id = %s", (solicitud,))
     from app.qr import png
     imagen = png(str(fila["qr_hash"]))
     assert imagen[:8] == b"\x89PNG\r\n\x1a\n"

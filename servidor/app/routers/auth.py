@@ -22,7 +22,7 @@ from .. import correo, notificaciones
 from ..audit import ip_del_cliente, registrar
 from ..cedula import normalizar_cedula
 from ..config import get_settings
-from ..db import ejecutar, nuevo_id, obtener_todos, obtener_uno, transaccion
+from ..db import ejecutar, nuevo_id, obtener_todos, obtener_uno, para_json, transaccion
 from ..errores import traducir
 from ..reglas import acceso, ficha, periodos, personal, saldo
 from ..deps import usuario_actual
@@ -292,7 +292,7 @@ async def perfil(usuario: Annotated[dict, Depends(usuario_actual)]) -> Perfil:
 @router.get("/mi-saldo")
 async def mi_saldo(usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
     """Desglose del saldo con la explicación y los artículos que lo sustentan."""
-    return await saldo.explicar_saldo(usuario["id"])
+    return para_json(await saldo.explicar_saldo(usuario["id"]))
 
 
 @router.get("/mis-notificaciones")

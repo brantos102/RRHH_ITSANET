@@ -35,7 +35,7 @@ async def test_cedula_registrada_recibe_codigo(cliente, codigos, empleado):
 async def test_el_codigo_se_guarda_hasheado(cliente, codigos, empleado):
     await cliente.post("/auth/solicitar-token", json={"cedula": CEDULA_PRUEBA})
     fila = await obtener_uno(
-        "select code_hash from public.auth_otp where cedula = %s", (CEDULA_PRUEBA,)
+        "select code_hash from auth_otp where cedula = %s", (CEDULA_PRUEBA,)
     )
     assert codigos[0] not in fila["code_hash"]
     assert len(fila["code_hash"]) == 64        # SHA-256 en hexadecimal
@@ -86,10 +86,11 @@ async def test_codigo_correcto_inicia_sesion(cliente, codigos, empleado):
         sesion["access_token"],
         "secreto-de-prueba-suficientemente-largo-1234",
         algorithms=["HS256"],
-        audience="authenticated",
+        audience="rrhh-itsanet",
     )
-    assert datos["role"] == "authenticated"
-    assert datos["user_metadata"]["cedula"] == CEDULA_PRUEBA
+    # La sesión identifica a la ficha (users.id), no a una cuenta de Supabase.
+    assert datos["sub"] == sesion["perfil"]["id"]
+    assert datos["cedula"] == CEDULA_PRUEBA and datos["rol"] == "empleado"
 
 
 async def test_codigo_incorrecto_no_inicia_sesion(cliente, codigos, empleado):
@@ -102,7 +103,7 @@ async def test_codigo_incorrecto_no_inicia_sesion(cliente, codigos, empleado):
     assert r.status_code == 401
 
     fila = await obtener_uno(
-        "select intentos from public.auth_otp where cedula = %s", (CEDULA_PRUEBA,)
+        "select intentos from auth_otp where cedula = %s", (CEDULA_PRUEBA,)
     )
     assert fila["intentos"] == 1               # el intento quedó contado
 
@@ -134,8 +135,8 @@ async def test_intentos_agotados_bloquean_el_codigo(cliente, codigos, empleado):
 async def test_codigo_expirado_se_rechaza(cliente, codigos, empleado):
     await cliente.post("/auth/solicitar-token", json={"cedula": CEDULA_PRUEBA})
     await obtener_uno(
-        "update public.auth_otp set expira_en = now() - interval '1 minute' "
-        "where cedula = %s returning id",
+        "update auth_otp set expira_en = now(6) - interval 1 MINUTE "
+        "where cedula = %s",
         (CEDULA_PRUEBA,),
     )
     r = await cliente.post(
@@ -150,7 +151,7 @@ async def test_el_inicio_de_sesion_queda_auditado(cliente, codigos, empleado):
         "/auth/validar-token", json={"cedula": CEDULA_PRUEBA, "codigo": codigos[0]}
     )
     fila = await obtener_uno(
-        """select count(*) as n from public.audit_logs
+        """select count(*) as n from audit_logs
            where cedula = %s and accion in ('otp_enviado','sesion_iniciada')""",
         (CEDULA_PRUEBA,),
     )

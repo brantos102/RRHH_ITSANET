@@ -23,25 +23,25 @@ CED_JEFE_R = "1700000035"
 @pytest.fixture
 async def equipo_regional(cliente, codigos, empleado):
     """Un jefe, y Talento Humano en cada región."""
-    await ejecutar("update public.users set ciudad = 'Quito' where id = %s", (empleado["id"],))
+    await ejecutar("update users set ciudad = 'Quito' where id = %s", (empleado["id"],))
     jefe = await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
-           values (%s, 'Jefe Region', 'jefer@api.test', 'jefe', current_date - 2000, 'Quito')
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
+           values (%s, 'Jefe Region', 'jefer@api.test', 'jefe', current_date() - interval 2000 day, 'Quito')
            on conflict (cedula) do update set rol = 'jefe' returning id""", (CED_JEFE_R,))
-    await ejecutar("update public.users set jefe_id = %s where id = %s",
+    await ejecutar("update users set jefe_id = %s where id = %s",
                    (jefe["id"], empleado["id"]))
     await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
-           values (%s, 'Talento Sierra', 'sierra@api.test', 'rrhh', current_date - 2000, 'Quito')
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
+           values (%s, 'Talento Sierra', 'sierra@api.test', 'rrhh', current_date() - interval 2000 day, 'Quito')
            on conflict (cedula) do update set rol='rrhh', ciudad='Quito' returning id""",
         (CED_RRHH_SIERRA,))
     await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
-           values (%s, 'Talento Costa', 'costa@api.test', 'rrhh', current_date - 2000, 'Guayaquil')
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
+           values (%s, 'Talento Costa', 'costa@api.test', 'rrhh', current_date() - interval 2000 day, 'Guayaquil')
            on conflict (cedula) do update set rol='rrhh', ciudad='Guayaquil' returning id""",
         (CED_RRHH_COSTA,))
     yield jefe
-    await ejecutar("delete from public.users where cedula = any(%s)",
+    await ejecutar("delete from users where cedula = any(%s)",
                    ([CED_RRHH_SIERRA, CED_RRHH_COSTA, CED_JEFE_R],))
 
 
@@ -58,13 +58,13 @@ async def test_la_ciudad_decide_la_region(empleado):
                              ("Cuenca", "sierra"), ("Manta", "costa"),
                              ("Tena", "sierra"), ("Galápagos", "costa")]:
         fila = await obtener_uno(
-            "select public.region_de_ciudad(%s) as region", (ciudad,))
+            "select region_de_ciudad(%s) as region", (ciudad,))
         assert fila["region"] == esperado, f"{ciudad} debería ser {esperado}"
 
 
 async def test_una_ciudad_desconocida_se_atiende_desde_quito():
     """Mejor que llegue a la sede administrativa que a nadie."""
-    fila = await obtener_uno("select public.region_de_ciudad(%s) as region", ("Timbuktú",))
+    fila = await obtener_uno("select region_de_ciudad(%s) as region", ("Timbuktú",))
     assert fila["region"] == "sierra"
 
 
@@ -79,7 +79,7 @@ async def test_la_solicitud_guarda_la_region_de_quien_la_pide(
     })
     assert r.status_code == 201, r.text
     fila = await obtener_uno(
-        "select region from public.requests where id = %s", (r.json()["id"],))
+        "select region from requests where id = %s", (r.json()["id"],))
     assert fila["region"] == "sierra"
 
 
@@ -139,14 +139,14 @@ async def test_el_aviso_va_al_grupo_de_la_region(
 async def test_ningun_permiso_exige_ya_la_firma_dibujada():
     """Entrar exige un código al correo: la identidad ya está probada."""
     filas = await obtener_todos(
-        "select codigo from public.permission_types where requiere_firma and activo")
+        "select codigo from permission_types where requiere_firma and activo")
     assert filas == [], f"siguen exigiendo firma: {[f['codigo'] for f in filas]}"
 
 
 async def test_se_puede_pedir_un_permiso_sin_respaldo(cliente, codigos, empleado, equipo_regional):
     auth = await _sesion(cliente, codigos, CEDULA_PRUEBA)
     tipo = await obtener_uno(
-        "select id from public.permission_types where codigo = 'sufragio'")
+        "select id from permission_types where codigo = 'sufragio'")
     r = await cliente.post("/solicitudes", headers=auth, json={
         "tipo": "permiso", "permission_type_id": tipo["id"],
         "fecha_inicio": str(await lunes_sin_feriados()),

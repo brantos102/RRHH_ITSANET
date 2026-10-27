@@ -33,12 +33,12 @@ from tests.test_reglas_nuevas import (CEDULA_JEFE_R, CEDULA_RRHH_R,  # noqa: F40
 @pytest.fixture
 async def sin_jefe(empleado):
     """El colaborador se queda sin jefe, como los quince de la planilla."""
-    antes = await obtener_uno("select jefe_id from public.users where id = %s",
+    antes = await obtener_uno("select jefe_id from users where id = %s",
                               (empleado["id"],))
-    await ejecutar("update public.users set jefe_id = null where id = %s",
+    await ejecutar("update users set jefe_id = null where id = %s",
                    (empleado["id"],))
     yield empleado
-    await ejecutar("update public.users set jefe_id = %s where id = %s",
+    await ejecutar("update users set jefe_id = %s where id = %s",
                    (antes["jefe_id"], empleado["id"]))
 
 
@@ -56,7 +56,7 @@ async def test_la_solicitud_queda_sin_jefe_asignado(cliente, auth, sin_jefe):
     """El punto de partida: así queda la fila, y es correcto que quede así."""
     pedida = await _pedir(cliente, auth)
     fila = await obtener_uno(
-        "select estado::text as estado, jefe_id from public.requests where id = %s",
+        "select estado as estado, jefe_id from requests where id = %s",
         (pedida["id"],))
     assert fila["estado"] == "pendiente_jefe"
     assert fila["jefe_id"] is None
@@ -92,7 +92,7 @@ async def test_talento_humano_la_puede_resolver(cliente, auth, rrhh_auth, sin_je
                            json={"accion": "aprobar"})
     assert r.status_code == 200, r.text
     fila = await obtener_uno(
-        "select estado::text as estado from public.requests where id = %s", (pedida["id"],))
+        "select estado as estado from requests where id = %s", (pedida["id"],))
     # La etapa de jefatura queda resuelta y pasa a la de Talento Humano, que
     # es la que falta. No se salta ningún control.
     assert fila["estado"] == "pendiente_rrhh"
@@ -121,7 +121,7 @@ async def test_el_contador_de_la_region_no_se_lleva_las_de_la_otra(
         cliente, auth, rrhh_auth, sin_jefe, empleado):
     """Talento Humano resuelve lo de SU región, también lo huérfano."""
     pedida = await _pedir(cliente, auth)
-    await ejecutar("update public.requests set region = 'costa' where id = %s",
+    await ejecutar("update requests set region = 'costa' where id = %s",
                    (pedida["id"],))
     pendientes = (await cliente.get("/aprobaciones/pendientes", headers=rrhh_auth)).json()
     assert pedida["id"] not in {p["id"] for p in pendientes}, \

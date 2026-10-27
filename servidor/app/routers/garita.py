@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from ..audit import ip_del_cliente, registrar
 from ..cedula import es_cedula_valida, normalizar_cedula
-from ..db import conexion, obtener_todos, obtener_uno
+from ..db import ejecutar, nuevo_id, obtener_todos, obtener_uno, para_json, transaccion
 from ..deps import exigir_rol
 from ..errores import traducir
 
@@ -79,11 +79,11 @@ async def validar_qr(lectura: LecturaQR, request: Request, guardia: Guardia) -> 
                u.id as user_id, u.cedula, u.nombre, u.cargo, u.departamento, u.telefono,
                pt.nombre as categoria,
                j.nombre as autorizo_jefe, h.nombre as autorizo_rrhh
-        from public.requests r
-        join public.users u on u.id = r.user_id
-        left join public.users j on j.id = r.jefe_aprobado_por
-        left join public.users h on h.id = r.rrhh_aprobado_por
-        left join public.permission_types pt on pt.id = r.permission_type_id
+        from requests r
+        join users u on u.id = r.user_id
+        left join users j on j.id = r.jefe_aprobado_por
+        left join users h on h.id = r.rrhh_aprobado_por
+        left join permission_types pt on pt.id = r.permission_type_id
         where r.qr_hash = %s
         """,
         (codigo,),
@@ -132,18 +132,16 @@ async def validar_qr(lectura: LecturaQR, request: Request, guardia: Guardia) -> 
     # y nadie podía saber si la persona volvió a las 15:00 o a las 18:00. El
     # guardia no tiene que aprender nada nuevo: pasa el código igual que antes.
     ya_salio = await obtener_uno(
-        """select 1 as x from public.access_logs
+        """select 1 as x from access_logs
             where request_id = %s and tipo_acceso = 'salida_empleado' and autorizado
             limit 1""",
         (solicitud["id"],),
     )
     if ya_salio and solicitud["retorno_en"] is None:
-        detalle = await obtener_uno(
-            "select public.registrar_retorno(%s, %s, %s, %s) as r",
-            (solicitud["id"], guardia["id"], ip_del_cliente(request),
-             (request.headers.get("user-agent") or "")[:500]),
-        )
-        r = detalle["r"]
+        from ..reglas import garita as reglas_garita
+        r = para_json(await reglas_garita.registrar_retorno(
+            solicitud["id"], guardia["id"], ip_del_cliente(request),
+            (request.headers.get("user-agent") or "")[:500]))
         await registrar(request, "garita_retorno_registrado", user_id=str(guardia["id"]),
                         cedula=guardia["cedula"], entidad="requests",
                         entidad_id=str(solicitud["id"]),
@@ -167,23 +165,20 @@ async def validar_qr(lectura: LecturaQR, request: Request, guardia: Guardia) -> 
         }
 
     # Primera lectura: se registra la salida y se cuenta el uso del código
-    async with conexion() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                """update public.requests
-                      set qr_usos = qr_usos + 1, qr_usado_en = coalesce(qr_usado_en, now())
-                    where id = %s""",
-                (solicitud["id"],),
-            )
-            await cur.execute(
-                """
-                insert into public.access_logs
-                    (user_id, cedula, request_id, tipo_acceso, autorizado, guardia_id, ip, user_agent)
-                values (%s, %s, %s, 'salida_empleado', true, %s, %s, %s)
-                """,
-                (solicitud["user_id"], solicitud["cedula"], solicitud["id"], guardia["id"],
-                 ip_del_cliente(request), (request.headers.get("user-agent") or "")[:500]),
-            )
+    async with transaccion():
+        await ejecutar(
+            """UPDATE requests
+                  SET qr_usos = qr_usos + 1, qr_usado_en = COALESCE(qr_usado_en, NOW(6))
+                WHERE id = %s""",
+            (solicitud["id"],),
+        )
+        await ejecutar(
+            """INSERT INTO access_logs
+                 (user_id, cedula, request_id, tipo_acceso, autorizado, guardia_id, ip, user_agent)
+               VALUES (%s, %s, %s, 'salida_empleado', TRUE, %s, %s, %s)""",
+            (solicitud["user_id"], solicitud["cedula"], solicitud["id"], guardia["id"],
+             ip_del_cliente(request), (request.headers.get("user-agent") or "")[:500]),
+        )
 
     await registrar(request, "garita_salida_autorizada", user_id=str(guardia["id"]),
                     cedula=guardia["cedula"], entidad="requests", entidad_id=str(solicitud["id"]),
@@ -223,13 +218,12 @@ def _texto_retorno(r: dict) -> str:
 async def _registrar_acceso(request: Request, guardia: dict, *, autorizado: bool,
                             observacion: str, cedula: str | None,
                             user_id: str | None = None, request_id: str | None = None) -> None:
-    await obtener_uno(
+    await ejecutar(
         """
-        insert into public.access_logs
+        insert into access_logs
             (user_id, cedula, request_id, tipo_acceso, autorizado, observacion,
              guardia_id, ip, user_agent)
         values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        returning id
         """,
         (user_id, cedula, request_id,
          "salida_empleado" if autorizado else "acceso_denegado",
@@ -244,14 +238,14 @@ async def personal_de_hoy(guardia: Guardia) -> dict:
     """Quién tiene autorización vigente y quién la tiene en trámite."""
     filas = await obtener_todos(
         """
-        select r.id, r.folio, r.estado::text, r.tipo::text, pt.nombre as categoria,
+        select r.id, r.folio, r.estado, r.tipo, pt.nombre as categoria,
                r.fecha_inicio, r.fecha_fin, r.hora_inicio, r.hora_fin, r.qr_usado_en,
                u.cedula, u.nombre, u.departamento, u.cargo
-        from public.requests r
-        join public.users u on u.id = r.user_id
-        left join public.permission_types pt on pt.id = r.permission_type_id
+        from requests r
+        join users u on u.id = r.user_id
+        left join permission_types pt on pt.id = r.permission_type_id
         where r.estado in ('aprobado', 'pendiente_jefe', 'pendiente_rrhh', 'pendiente_anulacion')
-          and current_date between r.fecha_inicio and r.fecha_fin
+          and current_date() between r.fecha_inicio and r.fecha_fin
         order by r.estado, u.nombre
         """
     )
@@ -270,14 +264,14 @@ async def personal_de_hoy(guardia: Guardia) -> dict:
                   tipo, categoria, hora_inicio, hora_fin,
                   salio_en, retorno_en, retorno_exceso_minutos,
                   debe_volver_hoy, se_espera_a_las, situacion, minutos_de_atraso
-             from public.v_garita_hoy
+             from v_garita_hoy
             order by case situacion
                        when 'fuera_atrasado' then 0
                        when 'fuera'          then 1
                        when 'sin_salir'      then 2
                        when 'no_vuelve_hoy'  then 3
                        else 4 end,
-                     minutos_de_atraso desc nulls last, nombre"""
+                     minutos_de_atraso is null, minutos_de_atraso desc, nombre"""
     )
     movimientos = [
         {**f, "request_id": str(f["request_id"]),
@@ -304,14 +298,14 @@ async def personal_de_hoy(guardia: Guardia) -> dict:
 async def accesos_recientes(guardia: Guardia, limite: int = 40) -> list[dict]:
     return await obtener_todos(
         """
-        select a.id, a.tipo_acceso::text, a.autorizado, a.observacion, a.created_at,
+        select a.id, a.tipo_acceso, a.autorizado, a.observacion, a.created_at,
                coalesce(u.nombre, v.nombre) as persona,
                coalesce(a.cedula, u.cedula, v.cedula) as cedula,
                g.nombre as guardia
-        from public.access_logs a
-        left join public.users u on u.id = a.user_id
-        left join public.visitors v on v.id = a.visitor_id
-        left join public.users g on g.id = a.guardia_id
+        from access_logs a
+        left join users u on u.id = a.user_id
+        left join visitors v on v.id = a.visitor_id
+        left join users g on g.id = a.guardia_id
         order by a.created_at desc
         limit %s
         """,
@@ -323,31 +317,26 @@ async def accesos_recientes(guardia: Guardia, limite: int = 40) -> list[dict]:
 @router.post("/visitantes", status_code=status.HTTP_201_CREATED)
 async def registrar_visitante(datos: NuevoVisitante, request: Request, guardia: Guardia) -> dict:
     try:
-        async with conexion() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """
-                    insert into public.visitors
-                        (cedula, nombre, empresa, telefono, motivo_visita,
-                         a_quien_visita, a_quien_visita_texto, registrado_por)
-                    values (%s, %s, %s, %s, %s, %s, %s, %s)
-                    returning id, nombre, ingreso_en
-                    """,
-                    (datos.cedula, datos.nombre.strip(), datos.empresa, datos.telefono,
-                     datos.motivo_visita.strip(), datos.a_quien_visita,
-                     datos.a_quien_visita_texto, guardia["id"]),
-                )
-                visitante = await cur.fetchone()
-
-                await cur.execute(
-                    """
-                    insert into public.access_logs
-                        (visitor_id, cedula, tipo_acceso, autorizado, guardia_id, ip, user_agent)
-                    values (%s, %s, 'ingreso_visita', true, %s, %s, %s)
-                    """,
-                    (visitante["id"], datos.cedula, guardia["id"],
-                     ip_del_cliente(request), (request.headers.get("user-agent") or "")[:500]),
-                )
+        async with transaccion():
+            nuevo = nuevo_id()
+            await ejecutar(
+                """INSERT INTO visitors
+                     (id, cedula, nombre, empresa, telefono, motivo_visita,
+                      a_quien_visita, a_quien_visita_texto, registrado_por)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (nuevo, datos.cedula, datos.nombre.strip(), datos.empresa, datos.telefono,
+                 datos.motivo_visita.strip(), datos.a_quien_visita,
+                 datos.a_quien_visita_texto, guardia["id"]),
+            )
+            visitante = await obtener_uno("SELECT id, nombre, ingreso_en FROM visitors WHERE id = %s",
+                                          (nuevo,))
+            await ejecutar(
+                """INSERT INTO access_logs
+                     (visitor_id, cedula, tipo_acceso, autorizado, guardia_id, ip, user_agent)
+                   VALUES (%s, %s, 'ingreso_visita', TRUE, %s, %s, %s)""",
+                (visitante["id"], datos.cedula, guardia["id"],
+                 ip_del_cliente(request), (request.headers.get("user-agent") or "")[:500]),
+            )
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
@@ -366,8 +355,8 @@ async def visitantes_dentro(guardia: Guardia) -> list[dict]:
         """
         select v.id, v.cedula, v.nombre, v.empresa, v.motivo_visita, v.telefono,
                coalesce(u.nombre, v.a_quien_visita_texto) as visita_a, v.ingreso_en
-        from public.visitors v
-        left join public.users u on u.id = v.a_quien_visita
+        from visitors v
+        left join users u on u.id = v.a_quien_visita
         where v.salida_en is null
         order by v.ingreso_en desc
         """
@@ -376,29 +365,26 @@ async def visitantes_dentro(guardia: Guardia) -> list[dict]:
 
 @router.post("/visitantes/{visitante_id}/salida")
 async def registrar_salida(visitante_id: uuid.UUID, request: Request, guardia: Guardia) -> dict:
-    async with conexion() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                """update public.visitors set salida_en = now()
-                    where id = %s and salida_en is null
-                    returning id, nombre, cedula, ingreso_en, salida_en""",
-                (visitante_id,),
+    async with transaccion():
+        salidos = await ejecutar(
+            "UPDATE visitors SET salida_en = NOW(6) WHERE id = %s AND salida_en IS NULL",
+            (visitante_id,),
+        )
+        visitante = (await obtener_uno(
+            "SELECT id, nombre, cedula, ingreso_en, salida_en FROM visitors WHERE id = %s",
+            (visitante_id,)) if salidos else None)
+        if visitante is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"mensaje": "No hay un visitante con esa ficha todavía dentro."},
             )
-            visitante = await cur.fetchone()
-            if visitante is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail={"mensaje": "No hay un visitante con esa ficha todavía dentro."},
-                )
-            await cur.execute(
-                """
-                insert into public.access_logs
-                    (visitor_id, cedula, tipo_acceso, autorizado, guardia_id, ip, user_agent)
-                values (%s, %s, 'salida_visita', true, %s, %s, %s)
-                """,
-                (visitante["id"], visitante["cedula"], guardia["id"],
-                 ip_del_cliente(request), (request.headers.get("user-agent") or "")[:500]),
-            )
+        await ejecutar(
+            """INSERT INTO access_logs
+                 (visitor_id, cedula, tipo_acceso, autorizado, guardia_id, ip, user_agent)
+               VALUES (%s, %s, 'salida_visita', TRUE, %s, %s, %s)""",
+            (visitante["id"], visitante["cedula"], guardia["id"],
+             ip_del_cliente(request), (request.headers.get("user-agent") or "")[:500]),
+        )
 
     await registrar(request, "garita_salida_visita", user_id=str(guardia["id"]),
                     cedula=guardia["cedula"], entidad="visitors", entidad_id=str(visitante_id))
@@ -415,8 +401,8 @@ async def buscar_anfitrion(guardia: Guardia, q: str = "") -> list[dict]:
         return []
     return await obtener_todos(
         """select id, nombre, cargo, departamento
-           from public.users
-           where activo and (nombre ilike %(q)s or cedula like %(c)s)
+           from users
+           where activo and (nombre like %(q)s or cedula like %(c)s)
            order by nombre limit 15""",
         {"q": f"%{q.strip()}%", "c": f"{normalizar_cedula(q)}%"},
     )

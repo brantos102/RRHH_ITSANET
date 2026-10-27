@@ -22,7 +22,7 @@ BASE = Decimal("1.25")   # quince días partidos para doce
 
 async def _devengado(ingreso: str, periodo: int) -> Decimal:
     fila = await obtener_uno(
-        "select public.dias_devengados_en_curso(%s::date, %s) as d", (ingreso, periodo))
+        "select dias_devengados_en_curso(%s, %s) as d", (ingreso, periodo))
     return Decimal(str(fila["d"]))
 
 
@@ -32,7 +32,7 @@ async def test_el_ano_en_curso_acumula_uno_con_veinticinco_al_mes(cliente):
     Es el caso que destapó todo: la hoja decía 83,75 devengados y el panel
     84,33 para la misma persona y el mismo día.
     """
-    hoy = await obtener_uno("select current_date - interval '5 years 7 months' as f")
+    hoy = await obtener_uno("select current_date() - interval '5 years 7 months' as f")
     ingreso = str(hoy["f"].date())
     assert await _devengado(ingreso, 6) == Decimal("8.75")
 
@@ -48,7 +48,7 @@ async def test_los_dos_calculos_coinciden_en_cada_aniversario(cliente):
     for anios in (1, 3, 5, 6, 10, 16, 21):
         # Lo que dice la hoja: doce meses por año, a 1,25, más los adicionales.
         topes = [Decimal(str((await obtener_uno(
-            "select public.dias_por_antiguedad(%s) as d", (k,)))["d"]))
+            "select dias_por_antiguedad(%s) as d", (k,)))["d"]))
             for k in range(1, anios + 1)]
         segun_el_sistema = sum(topes)
         base_hoja = BASE * 12 * anios
@@ -62,7 +62,7 @@ async def test_los_dos_calculos_coinciden_en_cada_aniversario(cliente):
         # Recién cumplido el aniversario, el período en curso arranca en cero
         # con cualquiera de los dos cálculos.
         fila = await obtener_uno(
-            "select (current_date - make_interval(years => %s))::date as f", (anios,))
+            "select (current_date() - interval %s YEAR) as f", (anios,))
         assert await _devengado(str(fila["f"]), anios + 1) == Decimal("0.00")
 
 
@@ -74,7 +74,7 @@ async def test_quien_lleva_menos_de_cinco_anos_no_ve_ninguna_diferencia(cliente)
     """
     for anios, meses in ((0, 7), (1, 3), (2, 11), (4, 6)):
         fila = await obtener_uno(
-            """select (current_date - make_interval(years => %s, months => %s))::date as f""",
+            """select (current_date() - interval %s, months => %s YEAR) as f""",
             (anios, meses))
         ingreso = str(fila["f"])
         esperado = (BASE * meses).quantize(Decimal("0.01"))
@@ -83,7 +83,7 @@ async def test_quien_lleva_menos_de_cinco_anos_no_ve_ninguna_diferencia(cliente)
 
 async def test_no_acumula_mas_de_un_ano_si_el_periodo_quedo_sin_renovar(cliente):
     """Un período vencido y no renovado no sigue sumando para siempre."""
-    fila = await obtener_uno("select (current_date - interval '3 years')::date as f")
+    fila = await obtener_uno("select (current_date() - interval 3 YEAR) as f")
     assert await _devengado(str(fila["f"]), 1) == BASE * 12
 
 
@@ -94,17 +94,17 @@ async def test_se_puede_volver_al_prorrateo_sin_otra_migracion(cliente):
     """
     from app.db import ejecutar
 
-    fila = await obtener_uno("select current_date - interval '5 years 7 months' as f")
+    fila = await obtener_uno("select current_date() - interval '5 years 7 months' as f")
     ingreso = str(fila["f"].date())
     try:
         await ejecutar(
-            """insert into public.app_config (clave, valor)
+            """insert into app_config (clave, valor)
                values ('vacaciones_extra_prorrateado', 'true')
                on conflict (clave) do update set valor = 'true'""")
         assert await _devengado(ingreso, 6) == Decimal("9.33")
     finally:
         await ejecutar(
-            """update public.app_config set valor = 'false'
+            """update app_config set valor = 'false'
                 where clave = 'vacaciones_extra_prorrateado'""")
     assert await _devengado(ingreso, 6) == Decimal("8.75")
 
@@ -113,16 +113,16 @@ async def test_ante_un_parametro_raro_se_queda_con_el_calculo_de_la_hoja(cliente
     """Ni «sí», ni «1», ni vacío encienden el prorrateo. Solo «true»."""
     from app.db import ejecutar
 
-    fila = await obtener_uno("select current_date - interval '5 years 7 months' as f")
+    fila = await obtener_uno("select current_date() - interval '5 years 7 months' as f")
     ingreso = str(fila["f"].date())
     for valor in ("si", "1", "", "TRUE.", "verdadero"):
         await ejecutar(
-            """insert into public.app_config (clave, valor)
+            """insert into app_config (clave, valor)
                values ('vacaciones_extra_prorrateado', %s)
                on conflict (clave) do update set valor = excluded.valor""", (valor,))
         assert await _devengado(ingreso, 6) == Decimal("8.75"), f"con «{valor}»"
     await ejecutar(
-        """update public.app_config set valor = 'false'
+        """update app_config set valor = 'false'
             where clave = 'vacaciones_extra_prorrateado'""")
 
 
@@ -131,7 +131,7 @@ async def test_la_vista_de_cotejo_ensena_los_dos_numeros(cliente, empleado):
     fila = await obtener_uno(
         """select meses_del_periodo, tope_anual_del_periodo,
                   devengado_hoja, devengado_prorrateado
-             from public.v_devengo_cotejo limit 1""")
+             from v_devengo_cotejo limit 1""")
     assert fila is not None
     assert fila["devengado_hoja"] <= fila["devengado_prorrateado"]
 
@@ -175,8 +175,8 @@ async def test_ningun_aviso_dice_que_los_dias_se_pierden(cliente):
             assert frase not in visible, f"{f['proname']} todavía dice «{frase}»"
 
     guardados = await obtener_todos(
-        """select id, mensaje from public.notifications
-            where mensaje ilike %s or mensaje ilike %s""",
+        """select id, mensaje from notifications
+            where mensaje like %s or mensaje like %s""",
         ("%se pierden%", "%perderá%"))
     assert not guardados, (
         "quedan avisos enviados que afirman que los días se pierden: "
@@ -195,7 +195,7 @@ async def test_a_este_anio_le_tocan_los_dias_del_periodo_en_curso(cliente, auth,
     a la persona, que es el número que Talento Humano contrasta con su hoja.
     """
     await ejecutar(
-        "update public.users set fecha_ingreso = current_date - interval '7 years 6 months' "
+        "update users set fecha_ingreso = current_date() - interval '7 years 6 months' "
         "where id = %s", (empleado["id"],))
 
     saldo = (await cliente.get("/auth/mi-saldo", headers=auth)).json()
@@ -207,7 +207,7 @@ async def test_a_este_anio_le_tocan_los_dias_del_periodo_en_curso(cliente, auth,
 async def test_por_debajo_de_seis_anios_no_cambia_nada(cliente, auth, empleado):
     """Todos esos períodos valen quince: el día adicional nace en el sexto."""
     await ejecutar(
-        "update public.users set fecha_ingreso = current_date - interval '3 years 2 months' "
+        "update users set fecha_ingreso = current_date() - interval '3 years 2 months' "
         "where id = %s", (empleado["id"],))
     saldo = (await cliente.get("/auth/mi-saldo", headers=auth)).json()
     assert saldo["anios_servicio"] == 3
@@ -218,10 +218,10 @@ async def test_la_correccion_no_mueve_el_saldo(cliente, auth, empleado):
     """El año en curso devenga sobre la base de quince, no sobre el tope del
     período: por eso esto corrige un texto y no un número de días."""
     await ejecutar(
-        "update public.users set fecha_ingreso = current_date - interval '7 years 6 months' "
+        "update users set fecha_ingreso = current_date() - interval '7 years 6 months' "
         "where id = %s", (empleado["id"],))
     saldo = (await cliente.get("/auth/mi-saldo", headers=auth)).json()
     fila = await obtener_uno(
         "select round(coalesce(sum(dias_saldo), 0), 2) as total "
-        "from public.vacation_periods where user_id = %s and not caducado", (empleado["id"],))
+        "from vacation_periods where user_id = %s and not caducado", (empleado["id"],))
     assert float(saldo["saldo_total"]) == float(fila["total"])

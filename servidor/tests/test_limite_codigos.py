@@ -95,7 +95,7 @@ async def test_anular_un_codigo_no_cuenta_como_haber_entrado(cliente, codigos, e
     fila = await obtener_uno(
         """select count(*) filter (where anulado_en is not null) as anulados,
                   count(*) filter (where consumido_en is not null) as usados
-             from public.auth_otp where cedula = %s""", (CEDULA_PRUEBA,))
+             from auth_otp where cedula = %s""", (CEDULA_PRUEBA,))
     assert fila["anulados"] >= tope - 1, "los anteriores deberían quedar anulados"
     assert fila["usados"] == 0, "nadie entró: ninguno debería figurar como usado"
 
@@ -109,7 +109,7 @@ async def test_agotar_los_intentos_anula_y_no_cuenta_como_ingreso(cliente, codig
 
     fila = await obtener_uno(
         """select anulado_en is not null as anulado, consumido_en is not null as usado
-             from public.auth_otp where cedula = %s
+             from auth_otp where cedula = %s
             order by created_at desc limit 1""", (CEDULA_PRUEBA,))
     assert fila["anulado"], "al agotar los intentos el código debe quedar anulado"
     assert not fila["usado"], "no entró nadie: no puede figurar como usado"
@@ -121,7 +121,7 @@ async def test_el_desbloqueo_no_da_acceso_a_nadie(cliente, codigos, empleado):
     await _pedir(cliente)
     codigo = codigos[-1]
     await ejecutar(
-        """update public.auth_otp set expira_en = now() - interval '1 second'
+        """update auth_otp set expira_en = now(6) - interval 1 SECOND
             where cedula = %s and consumido_en is null""", (CEDULA_PRUEBA,))
 
     r = await cliente.post("/auth/validar-token",

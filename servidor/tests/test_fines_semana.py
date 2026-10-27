@@ -19,7 +19,7 @@ MOTIVO = "Tomo sus dos fines de semana en 2024, antes de que existiera el sistem
 
 @pytest.fixture
 async def con_periodos(empleado):
-    await obtener_uno("select public.generar_periodos_vacaciones(%s)", (empleado["id"],))
+    await obtener_uno("select generar_periodos_vacaciones(%s)", (empleado["id"],))
     return empleado
 
 
@@ -36,7 +36,7 @@ async def test_talento_humano_corrige_el_contador(cliente, rrhh_auth, con_period
     assert r.status_code == 200, r.text
 
     fila = await obtener_uno(
-        """select fines_semana_consumidos from public.vacation_periods
+        """select fines_semana_consumidos from vacation_periods
             where user_id = %s and periodo = %s""",
         (con_periodos["id"], abierto["periodo"]))
     assert fila["fines_semana_consumidos"] == 2
@@ -51,7 +51,7 @@ async def test_queda_constancia_de_quien_lo_corrigio(cliente, rrhh_auth, con_per
                        json={"periodo": abierto["periodo"], "consumidos": 1, "motivo": MOTIVO})
 
     rastro = await obtener_todos(
-        """select detalle from public.audit_logs
+        """select detalle from audit_logs
             where accion = 'fines_semana_corregidos' order by created_at desc limit 5""")
     assert rastro, "la corrección debe quedar en la bitácora"
     assert any(MOTIVO in str(r["detalle"]) for r in rastro), \
@@ -108,7 +108,7 @@ async def test_corregirlo_quita_ese_obstaculo(cliente, auth, rrhh_auth, con_peri
     # contrario: alguien a quien el sistema se los reclama.
     from app.db import ejecutar
     await ejecutar(
-        """update public.vacation_periods set fines_semana_consumidos = 0
+        """update vacation_periods set fines_semana_consumidos = 0
             where user_id = %s and not caducado""",
         (con_periodos["id"],))
 

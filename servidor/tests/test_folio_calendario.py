@@ -16,7 +16,7 @@ CEDULA_JEFE = "1100000007"
 async def lunes_limpio(semanas: int = 6) -> date:
     feriados = {
         f["fecha"] for f in await obtener_todos(
-            "select fecha from public.feriados where activo and fecha >= current_date")
+            "select fecha from feriados where activo and fecha >= current_date()")
     }
     base = date.today() + timedelta(weeks=semanas)
     candidato = base - timedelta(days=base.weekday())
@@ -30,12 +30,12 @@ async def lunes_limpio(semanas: int = 6) -> date:
 @pytest.fixture
 async def companero(empleado):
     """Un compañero del mismo departamento, candidato a reemplazo."""
-    await ejecutar("update public.users set departamento = 'Operaciones' where id = %s",
+    await ejecutar("update users set departamento = 'Operaciones' where id = %s",
                    (empleado["id"],))
     fila = await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, departamento, fecha_ingreso)
+        """insert into users (cedula, nombre, email, rol, departamento, fecha_ingreso)
            values (%s, 'API Compañero', 'compa@api.test', 'empleado', 'Operaciones',
-                   current_date - 800)
+                   current_date() - interval 800 day)
            returning id""",
         (CEDULA_COMPA,),
     )
@@ -48,7 +48,7 @@ async def auth(cliente, codigos, empleado):
     r = await cliente.post("/auth/validar-token",
                            json={"cedula": CEDULA_PRUEBA, "codigo": codigos[0]})
     await ejecutar(
-        """update public.vacation_periods set fines_semana_consumidos = fines_semana_obligatorios
+        """update vacation_periods set fines_semana_consumidos = fines_semana_obligatorios
            where user_id = %s and not caducado""",
         (empleado["id"],),
     )
@@ -63,14 +63,14 @@ async def jefe_auth(cliente, codigos, empleado, companero):
     a quién asignar como reemplazo y quién decida, sin inventar más gente.
     """
     jefe = await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, departamento, fecha_ingreso)
+        """insert into users (cedula, nombre, email, rol, departamento, fecha_ingreso)
            values (%s, 'API Jefatura', 'jefatura@api.test', 'jefe', 'Operaciones',
-                   current_date - 1500)
+                   current_date() - interval 1500 day)
            on conflict (cedula) do update set rol = 'jefe'
            returning id""",
         (CEDULA_JEFE,),
     )
-    await ejecutar("update public.users set jefe_id = %s where id = %s",
+    await ejecutar("update users set jefe_id = %s where id = %s",
                    (jefe["id"], empleado["id"]))
 
     await cliente.post("/auth/solicitar-token", json={"cedula": CEDULA_JEFE})
@@ -119,8 +119,8 @@ async def test_el_numero_aparece_en_mis_solicitudes(cliente, auth):
 async def test_el_desglose_explica_de_que_se_componen_los_dias(cliente, auth):
     """Con un feriado dentro del rango, debe decir cuántos días no se descuentan."""
     feriado = await obtener_uno(
-        """select fecha from public.feriados
-           where activo and fecha > current_date + 30 and extract(isodow from fecha) between 1 and 5
+        """select fecha from feriados
+           where activo and fecha > current_date() + interval 30 day and extract(isodow from fecha) between 1 and 5
            order by fecha limit 1"""
     )
     inicio = feriado["fecha"] - timedelta(days=feriado["fecha"].weekday())
@@ -146,7 +146,7 @@ async def test_el_desglose_cuenta_los_fines_de_semana(cliente, auth):
 async def test_el_solicitante_no_puede_elegir_quien_lo_cubre(cliente, auth, companero):
     """Aunque lo envíe a mano: quien conoce la carga del equipo es el jefe."""
     creada = await _crear(cliente, auth, reemplazo_id=companero)
-    fila = await obtener_uno("select reemplazo_id from public.requests where id = %s",
+    fila = await obtener_uno("select reemplazo_id from requests where id = %s",
                              (creada["id"],))
     assert fila["reemplazo_id"] is None
 
@@ -160,7 +160,7 @@ async def test_el_jefe_asigna_el_reemplazo_al_aprobar(cliente, auth, codigos,
     )
     assert r.status_code == 200, r.text
 
-    fila = await obtener_uno("select reemplazo_id from public.requests where id = %s",
+    fila = await obtener_uno("select reemplazo_id from requests where id = %s",
                              (creada["id"],))
     assert str(fila["reemplazo_id"]) == companero
 

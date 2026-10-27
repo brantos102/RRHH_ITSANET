@@ -19,7 +19,7 @@ INGRESO = "2022-06-01"
 @pytest.fixture
 async def sin_correo(empleado):
     fila = await obtener_uno(
-        """insert into public.users
+        """insert into users
              (cedula, nombre, email, rol, fecha_ingreso, fecha_nacimiento,
               correo_pendiente, ficha_completa, ciudad)
            values (%s, 'Sin Correo Prueba', %s, 'empleado', %s, %s, true, false, 'Quito')
@@ -31,7 +31,7 @@ async def sin_correo(empleado):
         (CED_SIN_CORREO, f"{CED_SIN_CORREO}@pendiente.itsanet.local", INGRESO, NACIMIENTO),
     )
     yield {"id": str(fila["id"]), "cedula": CED_SIN_CORREO}
-    await ejecutar("delete from public.users where cedula = any(%s)",
+    await ejecutar("delete from users where cedula = any(%s)",
                    ([CED_SIN_CORREO, "1700000027"],))
 
 
@@ -87,15 +87,15 @@ async def test_la_ficha_queda_registrada_y_la_persona_puede_entrar(
     assert r.status_code == 200, r.text
 
     fila = await obtener_uno(
-        """select email::text as email, correo_pendiente, telefono, ficha_completa
-             from public.users where cedula = %s""", (CED_SIN_CORREO,))
+        """select email as email, correo_pendiente, telefono, ficha_completa
+             from users where cedula = %s""", (CED_SIN_CORREO,))
     assert fila["email"] == "sincorreo@itsanet.com.ec"
     assert fila["correo_pendiente"] is False
     assert fila["telefono"] == "0991112223"
     assert fila["ficha_completa"] is True
 
     contacto = await obtener_uno(
-        """select nombre, parentesco::text as parentesco from public.emergency_contacts
+        """select nombre, parentesco as parentesco from emergency_contacts
             where user_id = %s""", (sin_correo["id"],))
     assert contacto["nombre"] == "Contacto Prueba"
     assert contacto["parentesco"] == "madre"
@@ -125,8 +125,8 @@ async def test_no_se_puede_tomar_el_correo_de_otra_persona(cliente, sin_correo, 
     ajeno = "ocupado@itsanet.com.ec"
     # Un tercero, para no alterar al empleado que comparten las demás pruebas.
     await obtener_uno(
-        """insert into public.users (cedula, nombre, email, rol, fecha_ingreso)
-           values ('1700000027', 'Correo Ocupado', %s, 'empleado', current_date - 900)
+        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
+           values ('1700000027', 'Correo Ocupado', %s, 'empleado', current_date() - interval 900 day)
            on conflict (cedula) do update set email = excluded.email returning id""",
         (ajeno,),
     )
