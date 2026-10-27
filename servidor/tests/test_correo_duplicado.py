@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.conftest import Sql, persona
 from app.db import ejecutar, obtener_uno
 from tests.test_reglas_nuevas import CEDULA_RRHH_R, rrhh_auth  # noqa: F401
 
@@ -36,16 +37,8 @@ CEDULA_LIBRE = "1750000000"
 @pytest.fixture
 async def dos_fichas():
     """Una ficha con el correo puesto y otra sin correo."""
-    con_correo = await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso, departamento)
-           values (%s, 'Quien Tiene El Correo', %s, 'empleado', current_date() - interval 400 day, 'REDES')
-           on conflict (cedula) do update set email = excluded.email, activo = true
-           returning id""", (CEDULA_A, CORREO))
-    sin_correo = await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s, 'Quien Lo Necesita', null, 'empleado', current_date() - interval 400 day)
-           on conflict (cedula) do update set email = null, activo = true
-           returning id""", (CEDULA_B,))
+    con_correo = await persona(CEDULA_A, al_existir={"email": CORREO, "activo": True}, nombre='Quien Tiene El Correo', email=CORREO, rol='empleado', fecha_ingreso=Sql("current_date() - interval 400 day"), departamento='REDES')
+    sin_correo = await persona(CEDULA_B, al_existir={"email": None, "activo": True}, nombre='Quien Lo Necesita', email=None, rol='empleado', fecha_ingreso=Sql("current_date() - interval 400 day"))
     yield {"con_correo": con_correo["id"], "sin_correo": sin_correo["id"]}
     await ejecutar("delete from users where cedula = any(%s)", ([CEDULA_A, CEDULA_B],))
 

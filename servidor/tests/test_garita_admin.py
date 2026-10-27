@@ -8,6 +8,7 @@ import pytest
 
 from app.db import ejecutar, obtener_todos, obtener_uno
 from tests.conftest import CEDULA_PRUEBA
+from tests.conftest import Sql, insertar, persona
 
 CEDULA_GUARDIA = "0900000001"
 CEDULA_RRHH = "1100000007"
@@ -28,14 +29,8 @@ async def lunes_limpio(semanas: int = 6) -> date:
 
 @pytest.fixture
 async def equipo(empleado):
-    await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s,'API Guardia','guardia@api.test','guardia', current_date() - interval 500 day) returning id""",
-        (CEDULA_GUARDIA,))
-    rrhh = await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s,'API RRHH','rrhh@api.test','rrhh', current_date() - interval 900 day) returning id""",
-        (CEDULA_RRHH,))
+    await persona(CEDULA_GUARDIA, nombre='API Guardia', email='guardia@api.test', rol='guardia', fecha_ingreso=Sql("current_date() - interval 500 day"))
+    rrhh = await persona(CEDULA_RRHH, nombre='API RRHH', email='rrhh@api.test', rol='rrhh', fecha_ingreso=Sql("current_date() - interval 900 day"))
     await ejecutar(
         """update vacation_periods set fines_semana_consumidos = fines_semana_obligatorios
            where user_id = %s and not caducado""", (empleado["id"],))
@@ -106,12 +101,10 @@ async def test_fuera_de_fecha_se_deniega(cliente, codigos, aprobada, empleado):
     """Una autorización aprobada pero cuyo período aún no empieza no deja salir."""
     # Toda solicitud nace pendiente: el trigger lo impone aunque se inserte
     # directamente. Hay que recorrer el flujo para llegar a «aprobado».
-    creada = await obtener_uno(
-        """insert into requests (user_id, tipo, fecha_inicio, fecha_fin, descripcion)
-           values (%s, 'vacacion', current_date() + interval 20 day, current_date() + interval 27 day,
-                   'Autorizacion de fecha futura')
-           returning id""",
-        (empleado["id"],))
+    creada = await insertar("requests", user_id=empleado["id"], tipo="vacacion",
+                            fecha_inicio=Sql("CURRENT_DATE() + INTERVAL 20 DAY"),
+                            fecha_fin=Sql("CURRENT_DATE() + INTERVAL 27 DAY"),
+                            descripcion="Autorizacion de fecha futura")
     await ejecutar("update requests set estado='pendiente_rrhh' where id=%s", (creada["id"],))
     await ejecutar("update requests set estado='aprobado' where id=%s", (creada["id"],))
     futura = await obtener_uno("select qr_hash from requests where id=%s", (creada["id"],))

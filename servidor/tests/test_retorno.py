@@ -12,7 +12,9 @@ from datetime import date, datetime, time, timedelta
 import pytest
 
 from app.db import ejecutar, obtener_todos, obtener_uno
+from app.reglas.garita import registrar_retorno
 from tests.conftest import CEDULA_PRUEBA
+from tests.conftest import Sql, persona
 from tests.test_reglas_nuevas import (CEDULA_JEFE_R, CEDULA_RRHH_R,  # noqa: F401
                                       auth, jefe_auth, lunes_sin_feriados,
                                       rrhh_auth)
@@ -22,13 +24,7 @@ CEDULA_GUARDIA = "1713175071"
 
 @pytest.fixture
 async def guardia_auth(cliente, codigos, empleado):
-    await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s, 'Garita Prueba', 'garita@api.test', 'guardia', current_date() - interval 800 day)
-           on conflict (cedula) do update set rol = 'guardia', activo = true
-           returning id""",
-        (CEDULA_GUARDIA,),
-    )
+    await persona(CEDULA_GUARDIA, al_existir={"rol": 'guardia', "activo": True}, nombre='Garita Prueba', email='garita@api.test', rol='guardia', fecha_ingreso=Sql("current_date() - interval 800 day"))
     await cliente.post("/auth/solicitar-token", json={"cedula": CEDULA_GUARDIA})
     r = await cliente.post("/auth/validar-token",
                            json={"cedula": CEDULA_GUARDIA, "codigo": codigos[-1]})
@@ -147,11 +143,9 @@ async def test_no_se_registra_un_regreso_sin_salida(cliente, auth, jefe_auth, rr
     """Sería anotar que volvió alguien que nunca se fue."""
     p = await _permiso_por_horas_aprobado(cliente, auth, jefe_auth, rrhh_auth)
     with pytest.raises(Exception) as fallo:
-        await obtener_uno(
-            "select registrar_retorno(%s, %s) as r",
-            (p["id"], (await obtener_uno(
-                "select id from users where cedula = %s", (CEDULA_GUARDIA,)))["id"]),
-        )
+        await registrar_retorno(
+            p["id"], (await obtener_uno(
+                "select id from users where cedula = %s", (CEDULA_GUARDIA,)))["id"], None, None)
     assert "salida" in str(fallo.value).lower()
 
 
@@ -192,8 +186,7 @@ async def test_solo_garita_o_talento_humano_registran_el_retorno(cliente, auth, 
     await cliente.post("/garita/validar-qr", headers=guardia_auth, json={"codigo": p["qr"]})
 
     with pytest.raises(Exception) as fallo:
-        await obtener_uno("select registrar_retorno(%s, %s) as r",
-                          (p["id"], empleado["id"]))
+        await registrar_retorno(p["id"], empleado["id"], None, None)
     assert "garita" in str(fallo.value).lower() or "solo" in str(fallo.value).lower()
 
 

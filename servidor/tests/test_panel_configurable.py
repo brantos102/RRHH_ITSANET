@@ -10,18 +10,15 @@ from __future__ import annotations
 import pytest
 
 from app.db import ejecutar, obtener_todos, obtener_uno
+from tests.conftest import persona
 from tests.test_reglas_nuevas import (CEDULA_JEFE_R, CEDULA_RRHH_R,  # noqa: F401
                                       auth, jefe_auth, rrhh_auth)
 
 
 @pytest.fixture
 async def admin_auth(cliente, codigos):
-    fila = await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
-           values ('1710034073', 'Admin Panel', 'admin.panel@api.test', 'admin',
-                   current_date() - interval 900 day)
-           on conflict (cedula) do update set rol = 'admin', activo = true
-           returning cedula""")
+    fila = await persona('1710034073', nombre='Admin Panel', email='admin.panel@api.test',
+                         rol='admin', al_existir={"rol": "admin", "activo": True})
     await cliente.post("/auth/solicitar-token", json={"cedula": fila["cedula"]})
     r = await cliente.post("/auth/validar-token",
                            json={"cedula": fila["cedula"], "codigo": codigos[-1]})

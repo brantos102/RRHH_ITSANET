@@ -9,6 +9,7 @@ import pytest
 from app import notificaciones
 from app.db import ejecutar, obtener_todos, obtener_uno
 from tests.conftest import CEDULA_PRUEBA
+from tests.conftest import Sql, persona
 
 CEDULA_JEFE = "0900000001"
 CEDULA_RRHH = "1100000007"
@@ -66,16 +67,8 @@ def correos(monkeypatch) -> list[dict]:
 @pytest.fixture
 async def equipo(empleado):
     """Jefe y personal de Talento Humano, con el empleado a cargo del jefe."""
-    jefe = await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s, 'API Jefe', 'jefe@api.test', 'jefe', current_date() - interval 900 day) returning id""",
-        (CEDULA_JEFE,),
-    )
-    rrhh = await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s, 'API RRHH', 'rrhh@api.test', 'rrhh', current_date() - interval 900 day) returning id""",
-        (CEDULA_RRHH,),
-    )
+    jefe = await persona(CEDULA_JEFE, nombre='API Jefe', email='jefe@api.test', rol='jefe', fecha_ingreso=Sql("current_date() - interval 900 day"))
+    rrhh = await persona(CEDULA_RRHH, nombre='API RRHH', email='rrhh@api.test', rol='rrhh', fecha_ingreso=Sql("current_date() - interval 900 day"))
     await ejecutar("update users set jefe_id = %s where id = %s", (jefe["id"], empleado["id"]))
     await ejecutar(
         """update vacation_periods set fines_semana_consumidos = fines_semana_obligatorios

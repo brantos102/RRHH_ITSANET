@@ -199,7 +199,7 @@ async def insertar(tabla: str, **campos) -> dict:
     from app.db import insertar as _insertar
     assert re.fullmatch(r"[a-z_]+", tabla) and all(re.fullmatch(r"[a-z_]+", c) for c in campos)
     columna_id = await obtener_uno(
-        """SELECT data_type, extra FROM information_schema.columns
+        """SELECT data_type AS data_type, extra AS extra FROM information_schema.columns
             WHERE table_schema = DATABASE() AND table_name = %s AND column_name = 'id'""", (tabla,))
     if columna_id and columna_id["data_type"] == "char" and "id" not in campos:
         campos["id"] = str(_uuid.uuid4())
@@ -212,17 +212,18 @@ async def insertar(tabla: str, **campos) -> dict:
     return await obtener_uno(f"SELECT * FROM {tabla} WHERE id = %s", (clave,))
 
 
-async def persona(cedula: str, **campos) -> dict:
+async def persona(cedula: str, al_existir: dict | None = None, **campos) -> dict:
     """Una persona de prueba por cédula: la crea, o actualiza la que ya está.
 
-    Es el `insert ... on conflict (cedula) do update ... returning id` de las
-    pruebas escritas para PostgreSQL. Por omisión entró hace 900 días.
+    Es el `insert ... on conflict (cedula) do update set <al_existir>
+    returning id` de las pruebas escritas para PostgreSQL: si ya existe, solo
+    cambia lo de `al_existir` (nada, si no se da). Por omisión entró hace 900 días.
     """
     campos.setdefault("fecha_ingreso", Sql("CURRENT_DATE() - INTERVAL 900 DAY"))
     ya = await obtener_uno("SELECT id FROM users WHERE cedula = %s", (cedula,))
     if ya is None:
         return await insertar("users", cedula=cedula, **campos)
-    cambios = {k: v for k, v in campos.items() if k != "fecha_ingreso"}
+    cambios = dict(al_existir or {})
     if cambios:
         asignaciones = ", ".join(f"{c} = {v}" if isinstance(v, Sql) else f"{c} = %s" for c, v in cambios.items())
         await ejecutar(f"UPDATE users SET {asignaciones} WHERE id = %s",

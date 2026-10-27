@@ -22,6 +22,7 @@ import pytest
 
 from app.db import ejecutar, obtener_todos, obtener_uno
 from tests.conftest import CEDULA_PRUEBA
+from tests.conftest import Sql, persona
 
 
 CED_RRHH_SC = "1700000043"
@@ -29,12 +30,7 @@ CED_RRHH_SC = "1700000043"
 
 @pytest.fixture
 async def rrhh_auth(cliente, codigos, empleado):
-    await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
-           values (%s, 'Talento Caducidad', 'caducidad@api.test', 'rrhh',
-                   current_date() - interval 900 day, 'Quito')
-           on conflict (cedula) do update set rol = 'rrhh' returning id""",
-        (CED_RRHH_SC,))
+    await persona(CED_RRHH_SC, al_existir={"rol": 'rrhh'}, nombre='Talento Caducidad', email='caducidad@api.test', rol='rrhh', fecha_ingreso=Sql("current_date() - interval 900 day"), ciudad='Quito')
     await cliente.post("/auth/solicitar-token", json={"cedula": CED_RRHH_SC})
     r = await cliente.post("/auth/validar-token",
                            json={"cedula": CED_RRHH_SC, "codigo": codigos[-1]})

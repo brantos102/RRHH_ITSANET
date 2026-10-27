@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.conftest import Sql, persona
 from app.db import ejecutar, obtener_todos, obtener_uno
 from tests.test_reglas_nuevas import (CEDULA_JEFE_R, CEDULA_RRHH_R,  # noqa: F401
                                       auth, jefe_auth, rrhh_auth)
@@ -24,13 +25,7 @@ CEDULA_OTRA_JEFATURA = "0900000019"
 @pytest.fixture
 async def otra_jefatura():
     """Una segunda jefatura, que es la que recibirá la gente."""
-    fila = await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso, departamento)
-           values (%s, 'API Jefatura Dos', 'jefatura3@api.test', 'jefe',
-                   current_date() - interval 2000 day, 'Bodega')
-           on conflict (cedula) do update set rol = 'jefe' returning id""",
-        (CEDULA_OTRA_JEFATURA,),
-    )
+    fila = await persona(CEDULA_OTRA_JEFATURA, al_existir={"rol": 'jefe'}, nombre='API Jefatura Dos', email='jefatura3@api.test', rol='jefe', fecha_ingreso=Sql("current_date() - interval 2000 day"), departamento='Bodega')
     yield str(fila["id"])
     await ejecutar("update users set jefe_id = null where jefe_id = %s", (fila["id"],))
     await ejecutar("delete from users where cedula = %s", (CEDULA_OTRA_JEFATURA,))

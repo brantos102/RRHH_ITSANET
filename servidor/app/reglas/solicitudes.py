@@ -393,8 +393,8 @@ async def ajustar_ausencia(request_id, inicio: dt.date, fin: dt.date, motivo: st
 
         # El saldo solo se mueve en vacaciones; un permiso no lo toca.
         if sol["tipo"] == "vacacion" and dias != sol["dias_solicitados"]:
-            await ejecutar("CALL reversar_vacaciones(%s, %s, %s, %s, %s)",
-                           (sol["user_id"], sol["dias_solicitados"], sol["id"], sol["fines_semana"], por))
+            await ejecutar("CALL reversar_vacaciones(%s, %s, %s, %s)",
+                           (sol["user_id"], sol["dias_solicitados"], sol["id"], sol["fines_semana"]))
             await ejecutar("CALL consumir_vacaciones(%s, %s, %s, %s, %s)",
                            (sol["user_id"], dias, sol["id"], sol["fines_semana"], por))
 

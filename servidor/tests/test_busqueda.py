@@ -11,6 +11,7 @@ import pytest
 
 from app.db import ejecutar, obtener_uno
 from tests.conftest import CEDULA_PRUEBA
+from tests.conftest import Sql, persona
 from tests.test_reglas_nuevas import CEDULA_RRHH_R, rrhh_auth  # noqa: F401
 
 
@@ -22,12 +23,7 @@ async def gente(empleado):
         ("1700000753", "Bruno Salcedo Vaca", "Chofer", "LOGISTICA", "bruno@itsanet.test"),
     ]:
         await ejecutar("delete from users where cedula = %s", (cedula,))
-        await obtener_uno(
-            """insert into users (cedula, nombre, email, rol, cargo, departamento,
-                                         fecha_ingreso)
-               values (%s, %s, %s, 'empleado', %s, %s, current_date() - interval 900 day) returning id""",
-            (cedula, nombre, correo, cargo, depto),
-        )
+        await persona(cedula, nombre=nombre, email=correo, rol='empleado', cargo=cargo, departamento=depto, fecha_ingreso=Sql("current_date() - interval 900 day"))
     yield
     await ejecutar("delete from users where cedula in ('1700000746','1700000753')")
 

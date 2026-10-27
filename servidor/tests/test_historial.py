@@ -22,6 +22,7 @@ import pytest
 
 from app.db import ejecutar, obtener_todos, obtener_uno
 from tests.conftest import CEDULA_PRUEBA
+from tests.conftest import Sql, persona
 
 
 @pytest.fixture
@@ -128,11 +129,7 @@ async def test_cada_registro_dice_de_donde_viene(cliente, auth, historico):
 
 async def test_nadie_ve_el_historial_de_otro(cliente, auth, empleado, historico):
     """Es la comprobación que importa cuando se carga por nombre."""
-    otro = await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
-           values ('1700000076', 'Otro Con Historial', 'otrohist@api.test',
-                   'empleado', current_date() - interval 800 day)
-           on conflict (cedula) do update set nombre = excluded.nombre returning id""")
+    otro = await persona('1700000076', al_existir={"nombre": 'Otro Con Historial'}, nombre='Otro Con Historial', email='otrohist@api.test', rol='empleado', fecha_ingreso=Sql("current_date() - interval 800 day"))
     await obtener_uno(
         """insert into vacaciones_historicas
              (user_id, fecha_inicio, fecha_fin, dias)

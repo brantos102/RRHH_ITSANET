@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.conftest import Sql, persona
 from app.db import ejecutar, obtener_todos, obtener_uno
 from tests.test_reglas_nuevas import (CEDULA_RRHH_R, auth, rrhh_auth)  # noqa: F401
 
@@ -39,14 +40,7 @@ async def buzones_como_estaban():
 @pytest.fixture
 async def otro_de_rrhh():
     """Una segunda persona en Talento Humano, en la Sierra."""
-    fila = await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso, region)
-           values (%s, 'API Talento Dos', 'talento2@api.test', 'rrhh',
-                   current_date() - interval 1500 day, 'sierra')
-           on conflict (cedula) do update set rol = 'rrhh', region = 'sierra'
-           returning id""",
-        (CEDULA_OTRO_RRHH,),
-    )
+    fila = await persona(CEDULA_OTRO_RRHH, al_existir={"rol": 'rrhh', "region": 'sierra'}, nombre='API Talento Dos', email='talento2@api.test', rol='rrhh', fecha_ingreso=Sql("current_date() - interval 1500 day"), region='sierra')
     yield str(fila["id"])
     await ejecutar("delete from users where cedula = %s", (CEDULA_OTRO_RRHH,))
 

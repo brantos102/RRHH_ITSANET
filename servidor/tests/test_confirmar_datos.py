@@ -23,6 +23,7 @@ import pytest
 
 from app.db import ejecutar, obtener_todos, obtener_uno
 from tests.conftest import CEDULA_PRUEBA
+from tests.conftest import Sql, persona
 
 CED_JEFE = "1700000779"
 CED_RRHH_C = "1700000035"
@@ -41,12 +42,7 @@ async def auth(cliente, codigos, empleado):
 
 @pytest.fixture
 async def rrhh_auth(cliente, codigos, empleado):
-    await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
-           values (%s, 'Talento Confirma', 'confirmarrhh@api.test', 'rrhh',
-                   current_date() - interval 900 day, 'Quito')
-           on conflict (cedula) do update set rol = 'rrhh' returning id""",
-        (CED_RRHH_C,))
+    await persona(CED_RRHH_C, al_existir={"rol": 'rrhh'}, nombre='Talento Confirma', email='confirmarrhh@api.test', rol='rrhh', fecha_ingreso=Sql("current_date() - interval 900 day"), ciudad='Quito')
     await cliente.post("/auth/solicitar-token", json={"cedula": CED_RRHH_C})
     r = await cliente.post("/auth/validar-token",
                            json={"cedula": CED_RRHH_C, "codigo": codigos[-1]})
@@ -56,14 +52,7 @@ async def rrhh_auth(cliente, codigos, empleado):
 
 @pytest.fixture
 async def jefe(empleado):
-    fila = await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, cargo,
-                                     departamento, fecha_ingreso)
-           values (%s, 'Jefa De Area', 'jefa@api.test', 'jefe',
-                   'Jefa de Operaciones', 'OPERACIONES', current_date() - interval 2000 day)
-           on conflict (cedula) do update set rol = 'jefe' returning id""",
-        (CED_JEFE,),
-    )
+    fila = await persona(CED_JEFE, al_existir={"rol": 'jefe'}, nombre='Jefa De Area', email='jefa@api.test', rol='jefe', cargo='Jefa de Operaciones', departamento='OPERACIONES', fecha_ingreso=Sql("current_date() - interval 2000 day"))
     yield {"id": str(fila["id"]), "cedula": CED_JEFE}
     await ejecutar("delete from users where cedula = %s", (CED_JEFE,))
 

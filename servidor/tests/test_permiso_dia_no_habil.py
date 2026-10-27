@@ -117,7 +117,12 @@ async def test_el_permiso_de_un_dia_lo_arregla_el_disparador_no_el_calculo():
     sitios que nadie pidió tocar. El disparador de inserción es el único lugar
     donde hace falta.
     """
-    lunes, domingo = _proximo_lunes(), _proximo_domingo()
+    domingo = _proximo_domingo()
+    # El próximo lunes puede ser feriado (el 2 de noviembre lo es) y entonces
+    # cuenta cero con razón: se toma el primero que no lo sea.
+    lunes = _proximo_lunes()
+    while await obtener_uno("select 1 as x from feriados where fecha = %s and activo", (lunes,)):
+        lunes += timedelta(days=7)
     fila = await obtener_uno(
         """select calcular_dias('permiso', %s, %s) as domingo,
                   calcular_dias('permiso', %s, %s) as lunes""",

@@ -17,6 +17,7 @@ import pytest
 
 from app.db import ejecutar, obtener_todos, obtener_uno
 from tests.conftest import CEDULA_PRUEBA
+from tests.conftest import Sql, persona
 from tests.test_reglas_nuevas import (CEDULA_JEFE_R, CEDULA_RRHH_R,  # noqa: F401
                                       auth, jefe_auth, lunes_sin_feriados,
                                       rrhh_auth)
@@ -35,12 +36,7 @@ async def persona_con_cinco_anios():
     mirar: justo la mitad del desglose que interesa comprobar.
     """
     await ejecutar("delete from users where cedula = %s", (CEDULA_DESGLOSE,))
-    fila = await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s, 'Desglose Prueba', 'desglose@itsanet.test', 'empleado', %s)
-           returning id""",
-        (CEDULA_DESGLOSE, date(2021, 2, 1)),
-    )
+    fila = await persona(CEDULA_DESGLOSE, nombre='Desglose Prueba', email='desglose@itsanet.test', rol='empleado', fecha_ingreso=date(2021, 2, 1))
     user_id = str(fila["id"])
     await obtener_uno("select generar_periodos_vacaciones(%s)", (user_id,))
     await obtener_uno("select caducar_periodos_vencidos()")

@@ -12,6 +12,7 @@ import pytest
 
 from app.db import ejecutar, obtener_todos, obtener_uno
 from tests.conftest import CEDULA_PRUEBA
+from tests.conftest import Sql, persona
 
 CEDULA_RRHH_R = "1100000007"
 CEDULA_JEFE_R = "0900000001"
@@ -46,12 +47,7 @@ async def auth(cliente, codigos, empleado):
 
 @pytest.fixture
 async def rrhh_auth(cliente, codigos, empleado):
-    await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s, 'API Talento', 'talento@api.test', 'rrhh', current_date() - interval 2000 day)
-           on conflict (cedula) do update set rol = 'rrhh' returning id""",
-        (CEDULA_RRHH_R,),
-    )
+    await persona(CEDULA_RRHH_R, al_existir={"rol": 'rrhh'}, nombre='API Talento', email='talento@api.test', rol='rrhh', fecha_ingreso=Sql("current_date() - interval 2000 day"))
     await cliente.post("/auth/solicitar-token", json={"cedula": CEDULA_RRHH_R})
     r = await cliente.post("/auth/validar-token",
                            json={"cedula": CEDULA_RRHH_R, "codigo": codigos[-1]})
@@ -60,12 +56,7 @@ async def rrhh_auth(cliente, codigos, empleado):
 
 @pytest.fixture
 async def jefe_auth(cliente, codigos, empleado):
-    jefe = await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s, 'API Jefatura', 'jefatura2@api.test', 'jefe', current_date() - interval 2000 day)
-           on conflict (cedula) do update set rol = 'jefe' returning id""",
-        (CEDULA_JEFE_R,),
-    )
+    jefe = await persona(CEDULA_JEFE_R, al_existir={"rol": 'jefe'}, nombre='API Jefatura', email='jefatura2@api.test', rol='jefe', fecha_ingreso=Sql("current_date() - interval 2000 day"))
     await ejecutar("update users set jefe_id = %s where id = %s",
                    (jefe["id"], empleado["id"]))
     await cliente.post("/auth/solicitar-token", json={"cedula": CEDULA_JEFE_R})
@@ -250,7 +241,7 @@ async def test_un_feriado_dentro_del_rango_no_invalida_la_semana(cliente, auth):
     feriado = await obtener_uno(
         """select fecha from feriados
             where activo and fecha > current_date() + interval 30 day
-              and extract(isodow from fecha) between 1 and 5
+              and weekday(fecha) between 0 and 4
             order by fecha limit 1"""
     )
     assert feriado, "el seed debe tener feriados futuros entre semana"

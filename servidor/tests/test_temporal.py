@@ -14,6 +14,7 @@ import pytest
 
 from app.db import ejecutar, obtener_todos, obtener_uno
 from tests.conftest import CEDULA_PRUEBA
+from tests.conftest import Sql, persona
 
 CED_GUARDIA_T = "1713175071"
 CED_RRHH_T = "1700000068"
@@ -34,12 +35,7 @@ def salida_de_ayer(hora: int = 17) -> str:
 
 @pytest.fixture
 async def guardia_auth(cliente, codigos, empleado):
-    await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s, 'Guardia Temporal', 'guardiat@api.test', 'guardia',
-                   current_date() - interval 400 day)
-           on conflict (cedula) do update set rol = 'guardia' returning id""",
-        (CED_GUARDIA_T,))
+    await persona(CED_GUARDIA_T, al_existir={"rol": 'guardia'}, nombre='Guardia Temporal', email='guardiat@api.test', rol='guardia', fecha_ingreso=Sql("current_date() - interval 400 day"))
     await cliente.post("/auth/solicitar-token", json={"cedula": CED_GUARDIA_T})
     r = await cliente.post("/auth/validar-token",
                            json={"cedula": CED_GUARDIA_T, "codigo": codigos[-1]})
@@ -48,11 +44,7 @@ async def guardia_auth(cliente, codigos, empleado):
 
 @pytest.fixture
 async def rrhh_auth(cliente, codigos, empleado):
-    await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s, 'Talento Temporal', 'rrhht@api.test', 'rrhh', current_date() - interval 900 day)
-           on conflict (cedula) do update set rol = 'rrhh' returning id""",
-        (CED_RRHH_T,))
+    await persona(CED_RRHH_T, al_existir={"rol": 'rrhh'}, nombre='Talento Temporal', email='rrhht@api.test', rol='rrhh', fecha_ingreso=Sql("current_date() - interval 900 day"))
     await cliente.post("/auth/solicitar-token", json={"cedula": CED_RRHH_T})
     r = await cliente.post("/auth/validar-token",
                            json={"cedula": CED_RRHH_T, "codigo": codigos[-1]})

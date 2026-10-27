@@ -8,6 +8,7 @@ import pytest
 
 from app.db import ejecutar, obtener_todos, obtener_uno
 from tests.conftest import CEDULA_PRUEBA
+from tests.conftest import Sql, persona
 
 CEDULA_COMPA = "0900000001"
 CEDULA_JEFE = "1100000007"
@@ -32,13 +33,7 @@ async def companero(empleado):
     """Un compañero del mismo departamento, candidato a reemplazo."""
     await ejecutar("update users set departamento = 'Operaciones' where id = %s",
                    (empleado["id"],))
-    fila = await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, departamento, fecha_ingreso)
-           values (%s, 'API Compañero', 'compa@api.test', 'empleado', 'Operaciones',
-                   current_date() - interval 800 day)
-           returning id""",
-        (CEDULA_COMPA,),
-    )
+    fila = await persona(CEDULA_COMPA, nombre='API Compañero', email='compa@api.test', rol='empleado', departamento='Operaciones', fecha_ingreso=Sql("current_date() - interval 800 day"))
     return str(fila["id"])
 
 
@@ -62,14 +57,7 @@ async def jefe_auth(cliente, codigos, empleado, companero):
     El compañero creado por el fixture `companero` pasa a ser jefe: así hay
     a quién asignar como reemplazo y quién decida, sin inventar más gente.
     """
-    jefe = await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, departamento, fecha_ingreso)
-           values (%s, 'API Jefatura', 'jefatura@api.test', 'jefe', 'Operaciones',
-                   current_date() - interval 1500 day)
-           on conflict (cedula) do update set rol = 'jefe'
-           returning id""",
-        (CEDULA_JEFE,),
-    )
+    jefe = await persona(CEDULA_JEFE, al_existir={"rol": 'jefe'}, nombre='API Jefatura', email='jefatura@api.test', rol='jefe', departamento='Operaciones', fecha_ingreso=Sql("current_date() - interval 1500 day"))
     await ejecutar("update users set jefe_id = %s where id = %s",
                    (jefe["id"], empleado["id"]))
 
@@ -120,7 +108,7 @@ async def test_el_desglose_explica_de_que_se_componen_los_dias(cliente, auth):
     """Con un feriado dentro del rango, debe decir cuántos días no se descuentan."""
     feriado = await obtener_uno(
         """select fecha from feriados
-           where activo and fecha > current_date() + interval 30 day and extract(isodow from fecha) between 1 and 5
+           where activo and fecha > current_date() + interval 30 day and weekday(fecha) between 0 and 4
            order by fecha limit 1"""
     )
     inicio = feriado["fecha"] - timedelta(days=feriado["fecha"].weekday())

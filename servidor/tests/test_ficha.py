@@ -5,6 +5,7 @@ import pytest
 
 from app.db import ejecutar, obtener_uno
 from tests.conftest import CEDULA_PRUEBA
+from tests.conftest import Sql, persona
 
 CED_RRHH_F = "1700000019"
 
@@ -19,10 +20,7 @@ async def auth(cliente, codigos, empleado):
 
 @pytest.fixture
 async def rrhh_auth(cliente, codigos, empleado):
-    await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
-           values (%s, 'Talento Ficha', 'ficharrhh@api.test', 'rrhh', current_date() - interval 900 day, 'Quito')
-           on conflict (cedula) do update set rol = 'rrhh' returning id""", (CED_RRHH_F,))
+    await persona(CED_RRHH_F, al_existir={"rol": 'rrhh'}, nombre='Talento Ficha', email='ficharrhh@api.test', rol='rrhh', fecha_ingreso=Sql("current_date() - interval 900 day"), ciudad='Quito')
     await cliente.post("/auth/solicitar-token", json={"cedula": CED_RRHH_F})
     r = await cliente.post("/auth/validar-token",
                            json={"cedula": CED_RRHH_F, "codigo": codigos[-1]})
@@ -154,14 +152,7 @@ async def test_el_enlace_de_confirmacion_no_sirve_dos_veces(cliente, auth, emple
 async def test_no_se_puede_reclamar_el_correo_de_otro(cliente, auth):
     """La dirección de otra persona no se toma ni pidiendo la confirmación."""
     ajeno = "1700000761"
-    await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s, 'Otro Colaborador', 'ocupado@itsanet.com.ec', 'empleado',
-                   current_date() - interval 800 day)
-           on conflict (cedula) do update set email = 'ocupado@itsanet.com.ec'
-           returning id""",
-        (ajeno,),
-    )
+    await persona(ajeno, al_existir={"email": 'ocupado@itsanet.com.ec'}, nombre='Otro Colaborador', email='ocupado@itsanet.com.ec', rol='empleado', fecha_ingreso=Sql("current_date() - interval 800 day"))
     try:
         r = await cliente.post("/mi-ficha/correo", headers=auth,
                                json={"email": "ocupado@itsanet.com.ec"})

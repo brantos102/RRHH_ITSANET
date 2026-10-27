@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.conftest import Sql, persona
 from app.db import ejecutar, obtener_uno
 
 CED_SIN_CORREO = "1700000019"
@@ -124,12 +125,7 @@ async def test_no_se_puede_tomar_el_correo_de_otra_persona(cliente, sin_correo, 
     """Registrar el correo de un compañero sería recibir sus códigos."""
     ajeno = "ocupado@itsanet.com.ec"
     # Un tercero, para no alterar al empleado que comparten las demás pruebas.
-    await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
-           values ('1700000027', 'Correo Ocupado', %s, 'empleado', current_date() - interval 900 day)
-           on conflict (cedula) do update set email = excluded.email returning id""",
-        (ajeno,),
-    )
+    await persona('1700000027', al_existir={"email": ajeno}, nombre='Correo Ocupado', email=ajeno, rol='empleado', fecha_ingreso=Sql("current_date() - interval 900 day"))
 
     prueba = await cliente.post("/auth/probar-identidad", json={
         "cedula": CED_SIN_CORREO,

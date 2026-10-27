@@ -13,6 +13,7 @@ import pytest
 from app import notificaciones
 from app.db import ejecutar, obtener_todos, obtener_uno
 from tests.conftest import CEDULA_PRUEBA
+from tests.conftest import Sql, persona
 from tests.test_reglas_nuevas import lunes_sin_feriados
 
 CED_RRHH_SIERRA = "1700000019"
@@ -24,22 +25,11 @@ CED_JEFE_R = "1700000035"
 async def equipo_regional(cliente, codigos, empleado):
     """Un jefe, y Talento Humano en cada región."""
     await ejecutar("update users set ciudad = 'Quito' where id = %s", (empleado["id"],))
-    jefe = await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
-           values (%s, 'Jefe Region', 'jefer@api.test', 'jefe', current_date() - interval 2000 day, 'Quito')
-           on conflict (cedula) do update set rol = 'jefe' returning id""", (CED_JEFE_R,))
+    jefe = await persona(CED_JEFE_R, al_existir={"rol": 'jefe'}, nombre='Jefe Region', email='jefer@api.test', rol='jefe', fecha_ingreso=Sql("current_date() - interval 2000 day"), ciudad='Quito')
     await ejecutar("update users set jefe_id = %s where id = %s",
                    (jefe["id"], empleado["id"]))
-    await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
-           values (%s, 'Talento Sierra', 'sierra@api.test', 'rrhh', current_date() - interval 2000 day, 'Quito')
-           on conflict (cedula) do update set rol='rrhh', ciudad='Quito' returning id""",
-        (CED_RRHH_SIERRA,))
-    await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso, ciudad)
-           values (%s, 'Talento Costa', 'costa@api.test', 'rrhh', current_date() - interval 2000 day, 'Guayaquil')
-           on conflict (cedula) do update set rol='rrhh', ciudad='Guayaquil' returning id""",
-        (CED_RRHH_COSTA,))
+    await persona(CED_RRHH_SIERRA, al_existir={"rol": 'rrhh', "ciudad": 'Quito'}, nombre='Talento Sierra', email='sierra@api.test', rol='rrhh', fecha_ingreso=Sql("current_date() - interval 2000 day"), ciudad='Quito')
+    await persona(CED_RRHH_COSTA, al_existir={"rol": 'rrhh', "ciudad": 'Guayaquil'}, nombre='Talento Costa', email='costa@api.test', rol='rrhh', fecha_ingreso=Sql("current_date() - interval 2000 day"), ciudad='Guayaquil')
     yield jefe
     await ejecutar("delete from users where cedula = any(%s)",
                    ([CED_RRHH_SIERRA, CED_RRHH_COSTA, CED_JEFE_R],))
