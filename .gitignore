@@ -24,3 +24,10 @@ depuracion_base_datos.pdf
 
 # Ajustes de cada máquina (puerto del backend, URL). Ver config.local.js.ejemplo
 frontend/config.local.js
+
+# Datos personales: planillas, hojas y listas de personas no se versionan
+# nunca (LOPDP). La plantilla vacía es la única excepción.
+*.csv
+*.xlsx
+*.xls
+!despliegue/personas_plantilla.csv
