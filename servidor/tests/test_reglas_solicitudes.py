@@ -20,7 +20,7 @@ import pytest
 from app import errores
 from app.db import obtener_todos, obtener_uno
 from app.reglas import solicitudes
-from diferencial import json_normal, muestra, y_deshacer  # noqa: F401
+from tests.diferencial import json_normal, muestra, y_deshacer  # noqa: F401
 
 CALCULADAS = ["dias_solicitados", "saldo_al_solicitar", "jefe_id", "estado", "fines_semana",
               "horas_solicitadas", "es_adelanto", "ruta_aprobacion", "bloque_menor_justificado", "region"]
@@ -28,7 +28,7 @@ CALCULADAS = ["dias_solicitados", "saldo_al_solicitar", "jefe_id", "estado", "fi
 
 def _intentos(pg, n: int, semilla: int = 7):
     azar = random.Random(semilla)
-    hoy = pg.execute("select current_date() as d").fetchone()["d"]
+    hoy = pg.execute("select current_date as d").fetchone()["d"]
     personas = [f["id"] for f in pg.execute(
         "select id from users where rol <> 'guardia' order by cedula").fetchall()]
     tipos = pg.execute("select id, admite_horas from permission_types order by id").fetchall()
@@ -192,7 +192,7 @@ async def test_dos_permisos_por_horas_el_mismo_dia(muestra, segundo, choca):
                                where admite_horas and not requiere_justificacion and activo
                                  and (max_horas is null or max_horas >= 3)
                                order by id limit 1""").fetchone()["id"]
-    dia = muestra.execute("select current_date() + interval 20 day as d").fetchone()["d"]
+    dia = muestra.execute("select current_date + 20 as d").fetchone()["d"]
     while dia.weekday() >= 5:
         dia += dt.timedelta(days=1)
     base = {"user_id": persona, "tipo": "permiso", "permission_type_id": tipo, "fecha_inicio": dia,

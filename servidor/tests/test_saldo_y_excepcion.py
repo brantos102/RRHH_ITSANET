@@ -16,6 +16,7 @@ from datetime import date, timedelta
 import pytest
 
 from app.db import ejecutar, obtener_todos, obtener_uno
+from app.reglas import periodos
 from tests.conftest import CEDULA_PRUEBA
 from tests.conftest import Sql, persona
 from tests.test_reglas_nuevas import (CEDULA_JEFE_R, CEDULA_RRHH_R,  # noqa: F401
@@ -38,16 +39,16 @@ async def persona_con_cinco_anios():
     await ejecutar("delete from users where cedula = %s", (CEDULA_DESGLOSE,))
     fila = await persona(CEDULA_DESGLOSE, nombre='Desglose Prueba', email='desglose@itsanet.test', rol='empleado', fecha_ingreso=date(2021, 2, 1))
     user_id = str(fila["id"])
-    await obtener_uno("select generar_periodos_vacaciones(%s)", (user_id,))
-    await obtener_uno("select caducar_periodos_vencidos()")
+    await periodos.generar_periodos_vacaciones(user_id)
+    await periodos.caducar_periodos_vencidos()
     yield user_id
     await ejecutar("delete from users where cedula = %s", (CEDULA_DESGLOSE,))
 
 
 async def test_el_saldo_separa_lo_ganado_de_lo_que_se_acumula(persona_con_cinco_anios):
     """Cinco años cumplidos y un año en marcha no son la misma bolsa de días."""
-    d = await obtener_uno(
-        "select * from saldo_desglosado(%s)", (persona_con_cinco_anios,))
+    from app.reglas.saldo import saldo_desglosado
+    d = await saldo_desglosado(persona_con_cinco_anios)
 
     # Lo ganado sale de años cumplidos; lo en curso, del año que corre.
     assert float(d["dias_ganados"]) > 0, "cinco años cumplidos dan días exigibles"
@@ -73,7 +74,7 @@ async def test_el_saldo_separa_lo_ganado_de_lo_que_se_acumula(persona_con_cinco_
 
 async def test_el_desglose_llega_por_la_api(cliente, auth, empleado):
     """Las claves nuevas deben verse desde el panel, no solo en la base."""
-    await obtener_uno("select generar_periodos_vacaciones(%s)", (empleado["id"],))
+    await periodos.generar_periodos_vacaciones(empleado["id"])
     r = await cliente.get("/auth/mi-saldo", headers=auth)
     assert r.status_code == 200, r.text
     saldo = r.json()
@@ -87,7 +88,7 @@ async def test_el_desglose_llega_por_la_api(cliente, auth, empleado):
 
 async def test_el_saldo_avisa_si_el_cacheado_no_cuadra(cliente, auth, empleado):
     """Un titular que no coincide con sus períodos miente sin que nadie lo note."""
-    await obtener_uno("select generar_periodos_vacaciones(%s)", (empleado["id"],))
+    await periodos.generar_periodos_vacaciones(empleado["id"])
 
     sano = (await cliente.get("/auth/mi-saldo", headers=auth)).json()
     assert sano["saldo_desalineado"] is False
@@ -99,14 +100,14 @@ async def test_el_saldo_avisa_si_el_cacheado_no_cuadra(cliente, auth, empleado):
     assert roto["saldo_desalineado"] is True, "debe detectarse la diferencia"
 
     # Y se repara.
-    await obtener_uno("select recalcular_saldos(%s)", (empleado["id"],))
+    await periodos.recalcular_saldos(empleado["id"])
     reparado = (await cliente.get("/auth/mi-saldo", headers=auth)).json()
     assert reparado["saldo_desalineado"] is False
 
 
 async def test_la_vista_de_control_lista_a_quien_tenga_el_saldo_torcido(empleado):
-    await obtener_uno("select generar_periodos_vacaciones(%s)", (empleado["id"],))
-    await obtener_uno("select recalcular_saldos(%s)", (empleado["id"],))
+    await periodos.generar_periodos_vacaciones(empleado["id"])
+    await periodos.recalcular_saldos(empleado["id"])
 
     antes = await obtener_todos(
         "select cedula from v_saldos_desalineados where cedula = %s", (CEDULA_PRUEBA,))

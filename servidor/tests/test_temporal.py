@@ -13,6 +13,7 @@ from datetime import date, timedelta
 import pytest
 
 from app.db import ejecutar, obtener_todos, obtener_uno
+from tests.conftest import insertar_con_id
 from tests.conftest import CEDULA_PRUEBA
 from tests.conftest import Sql, persona
 
@@ -147,7 +148,7 @@ async def test_una_sola_jornada_por_dia(cliente, guardia_auth, operario):
 
 # --------------------------------------------------- lo que quedó sin cerrar
 async def test_una_jornada_de_ayer_sin_salida_se_señala(cliente, guardia_auth, operario):
-    await obtener_uno(
+    await insertar_con_id(
         """insert into jornadas_temporales
              (temporal_id, fecha, entrada_en)
            values (%s, current_date() - interval 1 day, now(6) - interval 1 DAY)
@@ -162,7 +163,7 @@ async def test_una_jornada_de_ayer_sin_salida_se_señala(cliente, guardia_auth, 
 
 async def test_el_sistema_no_inventa_una_hora_de_salida(cliente, guardia_auth, operario):
     """Una salida automática convertiría un dato que falta en uno falso."""
-    fila = await obtener_uno(
+    fila = await insertar_con_id(
         """insert into jornadas_temporales (temporal_id, fecha, entrada_en)
            values (%s, current_date() - interval 2 day, now(6) - interval 2 DAY)
            returning id""", (operario["id"],))
@@ -176,7 +177,7 @@ async def test_el_sistema_no_inventa_una_hora_de_salida(cliente, guardia_auth, o
 async def test_talento_humano_cierra_a_mano_y_queda_constancia(
     cliente, rrhh_auth, operario
 ):
-    fila = await obtener_uno(
+    fila = await insertar_con_id(
         """insert into jornadas_temporales (temporal_id, fecha, entrada_en)
            values (%s, current_date() - interval 1 day, (current_date() - interval 1 day) + interval 8 HOUR)
            returning id""", (operario["id"],))
@@ -196,7 +197,7 @@ async def test_talento_humano_cierra_a_mano_y_queda_constancia(
 
 
 async def test_cerrar_a_mano_exige_explicacion(cliente, rrhh_auth, operario):
-    fila = await obtener_uno(
+    fila = await insertar_con_id(
         """insert into jornadas_temporales (temporal_id, fecha, entrada_en)
            values (%s, current_date() - interval 1 day,
                    (current_date() - interval 1 day) + interval 8 HOUR) returning id""",
@@ -207,7 +208,7 @@ async def test_cerrar_a_mano_exige_explicacion(cliente, rrhh_auth, operario):
 
 
 async def test_la_garita_no_cierra_jornadas_a_mano(cliente, guardia_auth, operario):
-    fila = await obtener_uno(
+    fila = await insertar_con_id(
         """insert into jornadas_temporales (temporal_id, fecha, entrada_en)
            values (%s, current_date() - interval 1 day,
                    (current_date() - interval 1 day) + interval 8 HOUR) returning id""",
@@ -227,7 +228,7 @@ async def test_la_semana_cuenta_jornadas_y_horas(cliente, rrhh_auth, operario):
     hace Finanzas. Un importe impreso aquí se toma por la cifra buena, y el
     día que cambie la tarifa sigue saliendo igual de convincente.
     """
-    await obtener_uno(
+    await insertar_con_id(
         """insert into jornadas_temporales
              (temporal_id, fecha, entrada_en, salida_en, horas)
            values (%s, current_date(), now(6) - interval 8 HOUR, now(6), 8)
@@ -247,7 +248,7 @@ async def test_la_semana_cuenta_jornadas_y_horas(cliente, rrhh_auth, operario):
 
 async def test_las_horas_avisan_cuando_estan_incompletas(cliente, rrhh_auth, operario):
     """Dar por buenas unas horas que no cuadran es peor que no darlas."""
-    await obtener_uno(
+    await insertar_con_id(
         """insert into jornadas_temporales (temporal_id, fecha, entrada_en)
            values (%s, current_date(), now(6) - interval 3 HOUR) returning id""",
         (operario["id"],))
@@ -281,13 +282,12 @@ async def test_la_garita_no_ve_la_liquidacion(cliente, guardia_auth, operario):
 # ------------------------------------------------------- informe a Finanzas
 
 async def _jornada(temporal_id, dia: int, horas: float = 8, cerrada: bool = True):
-    from app.db import obtener_uno as uno
-    return await uno(
+    return await insertar_con_id(
         """insert into jornadas_temporales
              (temporal_id, fecha, entrada_en, salida_en, horas)
-           values (%s, current_date() - %s,
-                   (current_date() - %s) + interval 8 HOUR,
-                   case when %s then (current_date() - %s) + interval 16 HOUR end,
+           values (%s, current_date() - interval %s day,
+                   (current_date() - interval %s day) + interval 8 HOUR,
+                   case when %s then (current_date() - interval %s day) + interval 16 HOUR end,
                    case when %s then %s end)
            returning id""",
         (temporal_id, dia, dia, cerrada, dia, cerrada, horas))

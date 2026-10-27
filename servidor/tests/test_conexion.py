@@ -1,35 +1,39 @@
-"""Cómo se abre la conexión a Supabase.
+"""Cómo se abre la conexión a MySQL.
 
-El pooler de Supabase en modo transacción —el puerto 6543, el que la propia
-documentación recomienda— reparte cada consulta por la conexión que tenga
-libre. Cualquier cosa que dé por supuesto que la sesión de PostgreSQL es
-siempre la misma se rompe ahí, y las sentencias preparadas son justamente
-eso. El fallo no aparece al arrancar: espera a que algún bucle repita la
-misma consulta más de cinco veces, que es cuando psycopg decide prepararla.
+Dos cosas que no se ven al arrancar y que rompen datos sin dar error:
+
+  · El juego de caracteres. Un cliente que no declara utf8mb4 guarda
+    «Suárez» corrompido, y después no aparece al buscar «suarez».
+  · La zona horaria. Las fechas se guardan sin zona (DATETIME); si la
+    conexión no está en la hora de Ecuador, un permiso pedido a las 20:00
+    queda anotado al día siguiente y la garita lo valida mal.
 """
 from __future__ import annotations
 
-from app.db import abrir_pool
+from app.db import obtener_uno
 
 
-async def test_el_pool_no_prepara_sentencias():
-    """`prepare_threshold=None` es lo que hace compatible al pooler.
+async def test_la_conexion_habla_utf8mb4():
+    fila = await obtener_uno(
+        "select @@character_set_client as cliente, @@character_set_connection as conexion, "
+        "@@character_set_results as resultados")
+    assert fila == {"cliente": "utf8mb4", "conexion": "utf8mb4", "resultados": "utf8mb4"}
 
-    Sin esto, `verificar.py` reventaba con «prepared statement "_pg3_0"
-    already exists» en cuanto la lista de migraciones pasó de cinco.
-    """
-    pool = await abrir_pool()
-    assert pool.kwargs.get("prepare_threshold", "sin definir") is None, (
-        "El pool debe abrirse con prepare_threshold=None: el pooler de "
-        "Supabase reparte las consultas entre conexiones distintas."
-    )
+
+async def test_una_tilde_va_y_vuelve_intacta():
+    fila = await obtener_uno("select %s as nombre", ("Suárez Ñañez",))
+    assert fila["nombre"] == "Suárez Ñañez"
+
+
+async def test_la_conexion_esta_en_la_hora_de_ecuador():
+    fila = await obtener_uno("select @@session.time_zone as zona")
+    assert fila["zona"] == "-05:00"
 
 
 async def test_una_consulta_repetida_muchas_veces_no_falla():
-    """Ocho repeticiones: más allá del umbral en que psycopg prepararía."""
-    from app.db import obtener_uno
-
+    """Las conexiones se reutilizan entre peticiones: repetir no debe romper."""
     for _ in range(8):
         fila = await obtener_uno(
-            "select to_regclass(%s) is not null as existe", ("users",))
-        assert fila["existe"] is True
+            """select count(*) > 0 as existe from information_schema.tables
+                where table_schema = database() and table_name = %s""", ("users",))
+        assert fila["existe"]

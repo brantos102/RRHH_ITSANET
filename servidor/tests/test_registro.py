@@ -99,7 +99,10 @@ async def test_la_peticion_exitosa_tambien_queda_marcada(cliente_simple, lineas_
     """
     await cliente_simple.get("/glosario", headers={"X-Peticion-Id": REFERENCIA})
 
-    cierres = [ln for ln in lineas_registradas if "/glosario" in ln]
+    # «HTTP Request: …» lo escribe httpx, el cliente de la prueba, no el
+    # servidor: no lleva la referencia y no es lo que se comprueba.
+    cierres = [ln for ln in lineas_registradas
+               if "/glosario" in ln and "HTTP Request:" not in ln]
     assert cierres, f"debía registrarse la petición atendida: {lineas_registradas}"
     assert all(f"[{REFERENCIA}]" in ln for ln in cierres), cierres
 

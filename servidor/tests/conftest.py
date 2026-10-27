@@ -77,7 +77,7 @@ def base_de_pruebas_mysql():
     import asyncio
 
     from app.db import cerrar_pool
-    from semilla import sembrar
+    from tests.semilla import sembrar
 
     async def _sembrar():
         try:
@@ -235,3 +235,22 @@ async def persona(cedula: str, al_existir: dict | None = None, **campos) -> dict
         await ejecutar(f"UPDATE users SET {asignaciones} WHERE id = %s",
                        (*[v for v in cambios.values() if not isinstance(v, Sql)], ya["id"]))
     return await obtener_uno("SELECT * FROM users WHERE id = %s", (ya["id"],))
+
+
+async def insertar_con_id(sql: str, params: tuple = ()) -> dict:
+    """Un `insert into T (...) values (...) returning id` escrito para PostgreSQL.
+
+    MySQL no tiene RETURNING: el id (UUID) se genera aquí, se agrega como
+    primera columna y se devuelve. Solo para tablas cuyo id es un UUID.
+    """
+    import re
+    import uuid as _uuid
+
+    sql = re.sub(r"\s*returning\s+id\s*$", "", sql.strip(), flags=re.I)
+    m = re.match(r"(?is)insert\s+into\s+(\w+)\s*\(", sql)
+    assert m, f"no es un insert reconocible: {sql[:60]}"
+    sql = sql[:m.end()] + "id, " + sql[m.end():]
+    sql = re.sub(r"(?is)\)\s*values\s*\(", ") values (%s, ", sql, count=1)
+    nuevo = _uuid.uuid4()
+    await ejecutar(sql, (str(nuevo), *params))
+    return {"id": nuevo}

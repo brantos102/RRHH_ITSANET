@@ -7,7 +7,7 @@ import datetime as dt
 import pytest
 
 from app.reglas import saldo
-from diferencial import json_normal, muestra  # noqa: F401
+from tests.diferencial import json_normal, muestra  # noqa: F401
 
 
 def _sin_empate(en_pg: dict, en_py: dict, pid, pg, claves_pg: tuple, claves_py: tuple):

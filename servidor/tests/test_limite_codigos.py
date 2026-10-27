@@ -93,8 +93,8 @@ async def test_anular_un_codigo_no_cuenta_como_haber_entrado(cliente, codigos, e
     assert r.status_code == 429, "pedir otro código no puede valer como haber entrado"
 
     fila = await obtener_uno(
-        """select count(*) filter (where anulado_en is not null) as anulados,
-                  count(*) filter (where consumido_en is not null) as usados
+        """select sum(anulado_en is not null) as anulados,
+                  sum(consumido_en is not null) as usados
              from auth_otp where cedula = %s""", (CEDULA_PRUEBA,))
     assert fila["anulados"] >= tope - 1, "los anteriores deberían quedar anulados"
     assert fila["usados"] == 0, "nadie entró: ninguno debería figurar como usado"

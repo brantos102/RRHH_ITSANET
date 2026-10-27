@@ -38,7 +38,7 @@ from collections import Counter
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(RAIZ / "backend"))
+sys.path.insert(0, str(RAIZ / "servidor"))
 
 # psycopg no arranca sobre el bucle de eventos que Windows usa por
 # omisión. La política correcta hay que fijarla antes de crear ningún
@@ -180,7 +180,7 @@ async def principal(archivo: Path, aplicar: bool, informe: Path | None) -> int:
 
     # ---------------------------------------------------------- emparejar
     gente = await obtener_todos(
-        "select id, cedula, nombre from public.users where activo")
+        "select id, cedula, nombre from users where activo")
     porNombre: dict[str, list[dict]] = {}
     for p in gente:
         porNombre.setdefault(clave(p["nombre"]), []).append(p)
@@ -219,9 +219,9 @@ async def principal(archivo: Path, aplicar: bool, informe: Path | None) -> int:
 
     # ----------------------------------------------------------- qué falta
     ya = await obtener_todos(
-        """select user_id::text as user_id, fecha_inicio, fecha_fin
-             from public.vacaciones_historicas""")
-    existentes = {(f["user_id"], f["fecha_inicio"], f["fecha_fin"]) for f in ya}
+        """select user_id, fecha_inicio, fecha_fin
+             from vacaciones_historicas""")
+    existentes = {(str(f["user_id"]), f["fecha_inicio"], f["fecha_fin"]) for f in ya}
     nuevos = [a for a in asignados
               if (str(a["user_id"]), a["inicio"], a["fin"]) not in existentes]
 
@@ -259,16 +259,16 @@ async def principal(archivo: Path, aplicar: bool, informe: Path | None) -> int:
 
     # ------------------------------------------------------------- cargar
     saldo_antes = await obtener_uno(
-        "select coalesce(sum(dias_vacaciones), 0) as total from public.users")
+        "select coalesce(sum(dias_vacaciones), 0) as total from users")
 
     cargados = 0
     for a in nuevos:
         try:
             await ejecutar(
-                """insert into public.vacaciones_historicas
+                """insert into vacaciones_historicas
                      (user_id, fecha_inicio, fecha_fin, dias, fila_origen)
                    values (%s, %s, %s, %s, %s)
-                   on conflict (user_id, fecha_inicio, fecha_fin) do nothing""",
+                   on duplicate key update id = id""",
                 (a["user_id"], a["inicio"], a["fin"], a["dias"], a["fila"]),
             )
             cargados += 1
@@ -276,7 +276,7 @@ async def principal(archivo: Path, aplicar: bool, informe: Path | None) -> int:
             print(f"  {ROJO}fila {a['fila']} ({a['nombre']}): {str(exc)[:110]}{FIN}")
 
     saldo_despues = await obtener_uno(
-        "select coalesce(sum(dias_vacaciones), 0) as total from public.users")
+        "select coalesce(sum(dias_vacaciones), 0) as total from users")
 
     print(f"\n{VERDE}Cargadas {cargados} vacaciones.{FIN}")
     if saldo_antes["total"] != saldo_despues["total"]:
@@ -300,9 +300,9 @@ async def principal(archivo: Path, aplicar: bool, informe: Path | None) -> int:
     porPersona.pop("__vistas__", None)
 
     guardado = await obtener_todos(
-        """select user_id::text as user_id, sum(dias) as dias
-             from public.vacaciones_historicas group by user_id""")
-    enBase = {g["user_id"]: float(g["dias"]) for g in guardado}
+        """select user_id, sum(dias) as dias
+             from vacaciones_historicas group by user_id""")
+    enBase = {str(g["user_id"]): float(g["dias"]) for g in guardado}
 
     descuadres = [(u, d, enBase.get(u, 0)) for u, d in porPersona.items()
                   if abs(d - enBase.get(u, 0)) > 0.001]
@@ -310,7 +310,7 @@ async def principal(archivo: Path, aplicar: bool, informe: Path | None) -> int:
         print(f"\n{ROJO}{len(descuadres)} persona(s) no cuadran con la hoja:{FIN}")
         for u, hoja_d, base_d in descuadres[:15]:
             persona = await obtener_uno(
-                "select cedula, nombre from public.users where id = %s", (u,))
+                "select cedula, nombre from users where id = %s", (u,))
             print(f"   {persona['cedula']}  {persona['nombre'][:34]:<34} "
                   f"hoja {hoja_d:g} · sistema {base_d:g}")
         return 1

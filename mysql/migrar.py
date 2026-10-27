@@ -238,8 +238,8 @@ def principal(aplicar: bool, url: str | None = None) -> int:
                     con.rollback()
                     print(f"\n{VERDE}Se deshizo entera: no quedó nada a medias.{FIN}")
                 return 1
-        cur.execute("INSERT INTO schema_migraciones (archivo, huella) VALUES (%s, %s) "
-                    "ON DUPLICATE KEY UPDATE huella = VALUES(huella), aplicada_en = CURRENT_TIMESTAMP(6)",
+        cur.execute("INSERT INTO schema_migraciones (archivo, huella) VALUES (%s, %s) AS nueva "
+                    "ON DUPLICATE KEY UPDATE huella = nueva.huella, aplicada_en = CURRENT_TIMESTAMP(6)",
                     (ruta.name, huella(ruta)))
         if not con_ddl:
             con.commit()

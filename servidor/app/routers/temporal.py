@@ -25,10 +25,11 @@ from pydantic import BaseModel, Field, field_validator
 
 from ..audit import registrar
 from ..cedula import normalizar_cedula
-from ..db import obtener_todos, obtener_uno
+from ..db import booleanos, ejecutar, lista, nuevo_id, obtener_todos, obtener_uno, para_json
 from ..exportar import Informe, entregar
 from ..deps import exigir_rol
 from ..errores import traducir
+from ..reglas import temporal as reglas_temporal
 
 router = APIRouter(prefix="/temporal", tags=["Personal temporal"])
 
@@ -81,15 +82,15 @@ async def listar(usuario: GARITA, buscar: str | None = None,
         select t.id, t.cedula, t.nombre, t.labor, t.proveedor, t.telefono,
                t.activo, t.observacion,
                j.id as jornada_hoy, j.entrada_en, j.salida_en, j.horas
-          from public.personal_temporal t
-          left join public.jornadas_temporales j
-                 on j.temporal_id = t.id and j.fecha = current_date
+          from personal_temporal t
+          left join jornadas_temporales j
+                 on j.temporal_id = t.id and j.fecha = current_date()
          where (%(inactivos)s or t.activo)
-           and (%(buscar)s::text is null
-                or t.nombre ilike '%%' || %(buscar)s || '%%'
-                or t.cedula like %(buscar)s || '%%'
-                or coalesce(t.labor, '') ilike '%%' || %(buscar)s || '%%'
-                or coalesce(t.proveedor, '') ilike '%%' || %(buscar)s || '%%')
+           and (%(buscar)s is null
+                or t.nombre like concat('%%', %(buscar)s, '%%')
+                or t.cedula like concat(%(buscar)s, '%%')
+                or coalesce(t.labor, '') like concat('%%', %(buscar)s, '%%')
+                or coalesce(t.proveedor, '') like concat('%%', %(buscar)s, '%%'))
          order by t.activo desc, t.nombre
         """,
         {"buscar": (buscar or "").strip() or None, "inactivos": incluir_inactivos},
@@ -108,15 +109,16 @@ async def listar(usuario: GARITA, buscar: str | None = None,
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def registrar_persona(datos: NuevoTemporal, request: Request, usuario: RRHH) -> dict:
+    nuevo = nuevo_id()
     try:
-        fila = await obtener_uno(
-            """insert into public.personal_temporal
-                 (cedula, nombre, labor, proveedor, telefono, observacion)
-               values (%(cedula)s, %(nombre)s, %(labor)s, %(proveedor)s,
-                       %(telefono)s, %(observacion)s)
-               returning id, nombre""",
-            datos.model_dump(),
+        await ejecutar(
+            """insert into personal_temporal
+                 (id, cedula, nombre, labor, proveedor, telefono, observacion)
+               values (%(id)s, %(cedula)s, %(nombre)s, %(labor)s, %(proveedor)s,
+                       %(telefono)s, %(observacion)s)""",
+            {**datos.model_dump(), "id": nuevo},
         )
+        fila = await obtener_uno("select id, nombre from personal_temporal where id = %s", (nuevo,))
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
@@ -135,11 +137,9 @@ async def editar_persona(temporal_id: str, cambios: CambioTemporal,
 
     asignaciones = ", ".join(f"{k} = %({k})s" for k in campos)
     try:
-        fila = await obtener_uno(
-            f"""update public.personal_temporal set {asignaciones}
-                 where id = %(id)s returning nombre""",
-            {**campos, "id": temporal_id},
-        )
+        await ejecutar(f"update personal_temporal set {asignaciones} where id = %(id)s",
+                       {**campos, "id": temporal_id})
+        fila = await obtener_uno("select nombre from personal_temporal where id = %s", (temporal_id,))
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
     if fila is None:
@@ -155,14 +155,11 @@ async def editar_persona(temporal_id: str, cambios: CambioTemporal,
 @router.post("/entrada")
 async def entrada(datos: Movimiento, request: Request, usuario: GARITA) -> dict:
     try:
-        fila = await obtener_uno(
-            "select public.temporal_registrar_entrada(%s, %s, %s) as r",
-            (datos.temporal_id, usuario["id"], datos.observacion),
-        )
+        r = await reglas_temporal.registrar_entrada(datos.temporal_id, usuario["id"],
+                                                    datos.observacion)
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
-    r = fila["r"]
     await registrar(request, "temporal_entrada", user_id=str(usuario["id"]),
                     cedula=usuario["cedula"], entidad="jornadas_temporales",
                     entidad_id=str(r["jornada_id"]))
@@ -172,23 +169,20 @@ async def entrada(datos: Movimiento, request: Request, usuario: GARITA) -> dict:
 @router.post("/salida")
 async def salida(datos: Movimiento, request: Request, usuario: GARITA) -> dict:
     try:
-        fila = await obtener_uno(
-            "select public.temporal_registrar_salida(%s, %s, %s) as r",
-            (datos.temporal_id, usuario["id"], datos.observacion),
-        )
+        r = await reglas_temporal.registrar_salida(datos.temporal_id, usuario["id"],
+                                                   datos.observacion)
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
-    r = fila["r"]
     await registrar(request, "temporal_salida", user_id=str(usuario["id"]),
                     cedula=usuario["cedula"], entidad="jornadas_temporales",
                     entidad_id=str(r["jornada_id"]))
-    return {**r, "mensaje": f"{r['nombre']} salió. Jornada de {r['horas']} horas."}
+    return {**para_json(r), "mensaje": f"{r['nombre']} salió. Jornada de {r['horas']} horas."}
 
 
 @router.get("/dentro")
 async def dentro(usuario: GARITA) -> list[dict]:
-    filas = await obtener_todos("select * from public.v_temporales_dentro")
+    filas = await obtener_todos("select * from v_temporales_dentro")
     return [{**f, "jornada_id": str(f["jornada_id"]), "temporal_id": str(f["temporal_id"]),
              "horas_hasta_ahora": float(f["horas_hasta_ahora"])} for f in filas]
 
@@ -201,7 +195,7 @@ async def sin_cerrar(usuario: GARITA) -> list[dict]:
     tanto a la garita como a Talento Humano: el guardia es quien puede
     recordar qué pasó ese día.
     """
-    filas = await obtener_todos("select * from public.v_jornadas_sin_cerrar")
+    filas = await obtener_todos("select * from v_jornadas_sin_cerrar")
     return [{**f, "jornada_id": str(f["jornada_id"]),
              "temporal_id": str(f["temporal_id"])} for f in filas]
 
@@ -210,10 +204,8 @@ async def sin_cerrar(usuario: GARITA) -> list[dict]:
 async def cerrar(jornada_id: str, datos: CierreManual,
                  request: Request, usuario: RRHH) -> dict:
     try:
-        fila = await obtener_uno(
-            "select public.temporal_cerrar_jornada(%s, %s, %s, %s) as r",
-            (jornada_id, datos.salida, usuario["id"], datos.motivo),
-        )
+        fila = {"r": para_json(await reglas_temporal.cerrar_jornada(
+            jornada_id, datos.salida, usuario["id"], datos.motivo))}
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
@@ -233,8 +225,7 @@ async def semana(usuario: RRHH, desde: date | None = None,
     en la respuesta en vez de dejar que alguien sume una columna que no
     cuadra.
     """
-    filas = await obtener_todos(
-        "select * from public.temporal_semana(%s, %s)", (desde, hasta))
+    filas = await reglas_temporal.semana(desde, hasta)
 
     def numero(v):
         return float(v) if v is not None else None
@@ -283,15 +274,15 @@ class FiltroInforme(BaseModel):
 
 
 def _condiciones(f: FiltroInforme) -> tuple[str, dict]:
-    partes = ["true"]
+    partes = ["TRUE"]
     p: dict = {}
     if f.desde:
         partes.append("fecha >= %(desde)s"); p["desde"] = f.desde
     if f.hasta:
         partes.append("fecha <= %(hasta)s"); p["hasta"] = f.hasta
     if f.temporales:
-        partes.append("temporal_id = any(%(temporales)s::uuid[])")
-        p["temporales"] = f.temporales
+        partes.append("temporal_id in %(temporales)s")
+        p["temporales"] = lista(f.temporales)
     if f.proveedor:
         partes.append("coalesce(proveedor, '') = %(proveedor)s"); p["proveedor"] = f.proveedor
     if f.labor:
@@ -307,14 +298,14 @@ def _condiciones(f: FiltroInforme) -> tuple[str, dict]:
 async def opciones_informe(_: RRHH) -> dict:
     """Los valores que existen de verdad, no una lista escrita a mano."""
     proveedores = await obtener_todos(
-        """select distinct proveedor from public.personal_temporal
-            where proveedor is not null and btrim(proveedor) <> '' order by 1""")
+        """select distinct proveedor from personal_temporal
+            where proveedor is not null and trim(proveedor) <> '' order by 1""")
     labores = await obtener_todos(
-        """select distinct labor from public.personal_temporal
-            where labor is not null and btrim(labor) <> '' order by 1""")
+        """select distinct labor from personal_temporal
+            where labor is not null and trim(labor) <> '' order by 1""")
     gente = await obtener_todos(
         """select id, cedula, nombre, labor, proveedor, activo
-             from public.personal_temporal order by activo desc, nombre""")
+             from personal_temporal order by activo desc, nombre""")
     return {
         "proveedores": [p["proveedor"] for p in proveedores],
         "labores": [l["labor"] for l in labores],
@@ -328,7 +319,7 @@ async def informe(filtro: FiltroInforme, _: RRHH) -> dict:
     filas = await obtener_todos(
         f"""select cedula, nombre, labor, proveedor, fecha, entrada_en, salida_en,
                    horas, sin_cerrar, registro_entrada, registro_salida, observacion
-              from public.v_jornadas_detalle
+              from v_jornadas_detalle
              where {donde}
              order by nombre, fecha""",
         parametros,
@@ -337,9 +328,9 @@ async def informe(filtro: FiltroInforme, _: RRHH) -> dict:
         f"""select cedula, nombre, labor, proveedor,
                    count(*) as jornadas,
                    coalesce(sum(horas), 0) as horas,
-                   count(*) filter (where sin_cerrar) as sin_cerrar,
+                   coalesce(sum(sin_cerrar), 0) as sin_cerrar,
                    min(fecha) as primera, max(fecha) as ultima
-              from public.v_jornadas_detalle
+              from v_jornadas_detalle
              where {donde}
              group by cedula, nombre, labor, proveedor
              order by nombre""",
@@ -351,7 +342,7 @@ async def informe(filtro: FiltroInforme, _: RRHH) -> dict:
 
     abiertas = sum(int(r["sin_cerrar"]) for r in resumen)
     return {
-        "jornadas": [{**f, "horas": n(f["horas"])} for f in filas],
+        "jornadas": [{**f, "horas": n(f["horas"])} for f in booleanos(filas, "sin_cerrar")],
         "resumen": [{**r, "jornadas": int(r["jornadas"]), "horas": n(r["horas"]),
                      "sin_cerrar": int(r["sin_cerrar"])} for r in resumen],
         "total_horas": round(sum(n(r["horas"]) or 0 for r in resumen), 2),

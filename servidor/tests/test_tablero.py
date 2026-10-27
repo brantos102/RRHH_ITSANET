@@ -19,6 +19,8 @@ from datetime import timedelta
 import pytest
 
 from app.db import ejecutar, obtener_todos, obtener_uno
+from app.reglas.tablero import tablero_indicadores
+from tests.conftest import Sql, insertar
 from tests.test_panel_configurable import admin_auth  # noqa: F401
 from tests.test_reglas_nuevas import (CEDULA_JEFE_R, CEDULA_RRHH_R,  # noqa: F401
                                       auth, jefe_auth, lunes_sin_feriados,
@@ -81,9 +83,8 @@ async def test_sin_jefe_cuenta_a_los_que_no_tienen_jefe(cliente, rrhh_auth, jefe
                     (await cliente.get("/tablero", headers=rrhh_auth)).json()["bloques"]}["sin_jefe"]
         assert de_nuevo["cifra"] == real["n"] + 1
     finally:
-        await ejecutar(
-            """update users set jefe_id = (select id from users where cedula = %s)
-                where id = %s""", (CEDULA_JEFE_R, empleado["id"]))
+        jefe = await obtener_uno("select id from users where cedula = %s", (CEDULA_JEFE_R,))
+        await ejecutar("update users set jefe_id = %s where id = %s", (jefe["id"], empleado["id"]))
 
 
 async def test_los_de_hoy_cuentan_hoy(cliente, auth, jefe_auth, rrhh_auth, empleado):
@@ -95,12 +96,15 @@ async def test_los_de_hoy_cuentan_hoy(cliente, auth, jefe_auth, rrhh_auth, emple
     # sistema no deja pedir vacaciones para hoy —hacen falta diez días de
     # anticipación— ni cambiar las fechas de una ya aprobada, y ambas reglas
     # están bien donde están: lo que se mide aquí es el conteo, no ellas.
-    fila = await obtener_uno(
-        """insert into requests
-             (user_id, tipo, fecha_inicio, fecha_fin, descripcion)
-           values (%s, 'vacacion', current_date() + interval 60 day, current_date() + interval 67 day,
-                   'Ausencia de control del tablero')
-           returning id""", (empleado["id"],))
+    # El saldo al solicitar lo anota el sistema al crear la solicitud (en
+    # PostgreSQL lo hacía un disparador); insertando directo hay que darlo.
+    saldo = (await obtener_uno("select dias_vacaciones as s from users where id = %s",
+                               (empleado["id"],)))["s"]
+    fila = await insertar("requests", user_id=empleado["id"], tipo="vacacion",
+                          saldo_al_solicitar=saldo,
+                          fecha_inicio=Sql("CURRENT_DATE() + INTERVAL 60 DAY"),
+                          fecha_fin=Sql("CURRENT_DATE() + INTERVAL 67 DAY"),
+                          descripcion="Ausencia de control del tablero")
     await ejecutar(
         """update requests
               set fecha_inicio = current_date(), fecha_fin = current_date() + interval 7 day
@@ -165,7 +169,7 @@ async def test_apagarlo_tambien_deja_de_calcularlo(cliente, rrhh_auth):
     """Apagar un bloque lo quita de la pantalla Y deja de costarlo."""
     await cliente.patch("/admin/tablero/crecimiento", headers=rrhh_auth,
                         json={"visible": False})
-    filas = await obtener_todos("select clave from tablero_indicadores()")
+    filas = await tablero_indicadores()
     assert "crecimiento" not in {f["clave"] for f in filas}
 
 

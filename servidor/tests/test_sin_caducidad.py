@@ -21,6 +21,7 @@ from __future__ import annotations
 import pytest
 
 from app.db import ejecutar, obtener_todos, obtener_uno
+from app.reglas import periodos, tareas
 from tests.conftest import CEDULA_PRUEBA
 from tests.conftest import Sql, persona
 
@@ -73,12 +74,12 @@ async def test_ante_la_duda_no_se_extingue():
         await ejecutar(
             """insert into app_config (clave, valor, descripcion)
                values ('caducidad_activa', %s, 'restaurada por la prueba')
-               on conflict (clave) do update set valor = excluded.valor""",
+               on duplicate key update valor = values(valor)""",
             (previo["valor"] if previo else "false",))
 
 
 async def test_los_periodos_nacen_sin_fecha_de_vencimiento(empleado):
-    await obtener_uno("select generar_periodos_vacaciones(%s) as n", (empleado["id"],))
+    await periodos.generar_periodos_vacaciones(empleado["id"])
     filas = await obtener_todos(
         "select periodo, vence_en from vacation_periods where user_id = %s",
         (empleado["id"],))
@@ -89,15 +90,13 @@ async def test_los_periodos_nacen_sin_fecha_de_vencimiento(empleado):
 
 async def test_no_se_caduca_nada(empleado):
     """Aunque se fuerce una fecha vencida, no se extingue el período."""
-    await obtener_uno("select generar_periodos_vacaciones(%s) as n", (empleado["id"],))
+    await periodos.generar_periodos_vacaciones(empleado["id"])
     await ejecutar(
         """update vacation_periods
               set vence_en = current_date() - interval 1 day
             where user_id = %s and dias_saldo > 0""", (empleado["id"],))
 
-    fila = await obtener_uno(
-        "select caducar_periodos_de(%s) as n", (empleado["id"],))
-    assert fila["n"] == 0
+    assert await periodos.caducar_periodos_de(empleado["id"]) == 0
 
     caducados = await obtener_uno(
         """select count(*) as n from vacation_periods
@@ -107,14 +106,14 @@ async def test_no_se_caduca_nada(empleado):
 
 async def test_no_se_avisa_de_una_perdida_que_no_va_a_ocurrir(empleado):
     """El aviso decía «Perderá 2,83 días el 07/02/2029», en rojo."""
-    await obtener_uno("select generar_periodos_vacaciones(%s) as n", (empleado["id"],))
+    await periodos.generar_periodos_vacaciones(empleado["id"])
     await ejecutar(
         """update vacation_periods
               set vence_en = current_date() + interval 10 day
             where user_id = %s and dias_saldo > 0""", (empleado["id"],))
     await ejecutar("delete from notifications where user_id = %s", (empleado["id"],))
 
-    await obtener_uno("select generar_alertas_vacaciones() as r")
+    await tareas.generar_alertas_vacaciones()
 
     avisos = await obtener_todos(
         """select titulo from notifications
@@ -132,7 +131,7 @@ async def test_reparar_no_mueve_ningun_saldo(empleado):
     esos días. Des-caducarlos sin más habría devuelto al saldo días que la
     persona sí gozó.
     """
-    await obtener_uno("select generar_periodos_vacaciones(%s) as n", (empleado["id"],))
+    await periodos.generar_periodos_vacaciones(empleado["id"])
     antes = await obtener_uno(
         "select dias_vacaciones from users where id = %s", (empleado["id"],))
 
@@ -205,7 +204,7 @@ async def test_se_avisa_de_la_acumulacion_que_si_hay_que_resolver(empleado):
         """update users set fecha_ingreso = current_date() - interval 5 YEAR
             where id = %s""", (empleado["id"],))
     await ejecutar("delete from vacation_periods where user_id = %s", (empleado["id"],))
-    await obtener_uno("select generar_periodos_vacaciones(%s) as n", (empleado["id"],))
+    await periodos.generar_periodos_vacaciones(empleado["id"])
     await ejecutar("delete from notifications where user_id = %s", (empleado["id"],))
 
     acumula = await obtener_uno(
@@ -214,7 +213,7 @@ async def test_se_avisa_de_la_acumulacion_que_si_hay_que_resolver(empleado):
     assert acumula is not None, "cinco años sin gozar nada deberían figurar"
     assert acumula["periodos_sin_gozar"] >= 3
 
-    await obtener_uno("select generar_alertas_vacaciones() as r")
+    await tareas.generar_alertas_vacaciones()
 
     avisos = await obtener_todos(
         """select titulo, mensaje from notifications
@@ -229,13 +228,13 @@ async def test_se_avisa_de_la_acumulacion_que_si_hay_que_resolver(empleado):
 
 async def test_quien_esta_al_dia_no_recibe_ese_aviso(empleado):
     await ejecutar("delete from notifications where user_id = %s", (empleado["id"],))
-    await obtener_uno("select generar_periodos_vacaciones(%s) as n", (empleado["id"],))
+    await periodos.generar_periodos_vacaciones(empleado["id"])
     # Consumido todo lo de años cumplidos: no arrastra nada.
     await ejecutar(
         """update vacation_periods set dias_consumidos = dias_asignados
             where user_id = %s and devengado""", (empleado["id"],))
 
-    await obtener_uno("select generar_alertas_vacaciones() as r")
+    await tareas.generar_alertas_vacaciones()
     avisos = await obtener_todos(
         """select titulo from notifications
             where user_id = %s and tipo = 'vacaciones_acumuladas'""", (empleado["id"],))

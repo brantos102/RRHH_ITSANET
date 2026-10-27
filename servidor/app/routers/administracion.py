@@ -647,7 +647,7 @@ async def crear_feriado(datos: NuevoFeriado, request: Request, usuario: RRHH) ->
     try:
         await ejecutar(
             """insert into feriados (fecha, nombre) values (%s, %s)
-               on duplicate key update nombre = values(nombre), activo = true""",
+               as nuevo on duplicate key update nombre = nuevo.nombre, activo = true""",
             (datos.fecha, datos.nombre.strip()),
         )
     except Exception as exc:  # noqa: BLE001

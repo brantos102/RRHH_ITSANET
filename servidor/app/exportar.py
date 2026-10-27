@@ -21,6 +21,8 @@ from typing import Any, Sequence
 
 from fastapi import Response
 
+from .db import ZONA_ECUADOR
+
 MIME = {
     "csv": "text/csv; charset=utf-8",
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -75,7 +77,7 @@ def a_csv(informe: Informe) -> Response:
         escritor.writerow([etiqueta, valor])
     if informe.generado_por:
         escritor.writerow(["Generado por", informe.generado_por])
-    escritor.writerow(["Generado el", datetime.now().strftime("%d/%m/%Y %H:%M")])
+    escritor.writerow(["Generado el", datetime.now(ZONA_ECUADOR).strftime("%d/%m/%Y %H:%M")])
     # La nota, arriba y en los tres formatos. Solo salía en el PDF, y es
     # justo lo que tiene que viajar con el archivo: dice qué NO contiene
     # —importes, jornadas sin cerrar— y esa advertencia no puede quedarse en
@@ -110,7 +112,7 @@ def a_excel(informe: Informe) -> Response:
         hoja.append([etiqueta, valor])
     if informe.generado_por:
         hoja.append(["Generado por", informe.generado_por])
-    hoja.append(["Generado el", datetime.now().strftime("%d/%m/%Y %H:%M")])
+    hoja.append(["Generado el", datetime.now(ZONA_ECUADOR).strftime("%d/%m/%Y %H:%M")])
     if informe.nota:
         hoja.append(["Nota", informe.nota])
     hoja.append([])
@@ -176,7 +178,7 @@ def a_pdf(informe: Informe) -> Response:
     piezas: list = [Paragraph(informe.titulo, titulo)]
     linea = " · ".join(f"{e}: {v}" for e, v in informe.filtros) or "Sin filtros"
     piezas.append(Paragraph(linea, menor))
-    pie = f"{len(informe.filas)} registro(s) · {datetime.now():%d/%m/%Y %H:%M}"
+    pie = f"{len(informe.filas)} registro(s) · {datetime.now(ZONA_ECUADOR):%d/%m/%Y %H:%M}"
     if informe.generado_por:
         pie += f" · generado por {informe.generado_por}"
     piezas.append(Paragraph(pie, menor))

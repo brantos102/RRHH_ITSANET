@@ -5,7 +5,7 @@ import re
 
 from app.db import obtener_todos, obtener_uno
 from app.reglas import papeles
-from diferencial import json_normal, muestra, y_deshacer  # noqa: F401
+from tests.diferencial import json_normal, muestra, y_deshacer  # noqa: F401
 
 COLUMNAS = ["user_id", "tipo", "request_id", "autorizado_por", "autorizacion_motivo",
             "emitido_por", "datos", "impresiones"]

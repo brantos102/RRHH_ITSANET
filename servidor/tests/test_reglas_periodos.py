@@ -15,7 +15,7 @@ import itertools
 import pytest
 
 from app.reglas import periodos
-from diferencial import cedula_de_prueba, dos  # noqa: F401
+from tests.diferencial import cedula_de_prueba, dos  # noqa: F401
 
 _n = itertools.count(1)
 

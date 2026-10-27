@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from app.db import obtener_todos, obtener_uno
+from app.reglas import periodos
 from tests.conftest import CEDULA_PRUEBA
 from tests.test_reglas_nuevas import (CEDULA_JEFE_R, CEDULA_RRHH_R,  # noqa: F401
                                       auth, jefe_auth, rrhh_auth)
@@ -19,7 +20,7 @@ MOTIVO = "Tomo sus dos fines de semana en 2024, antes de que existiera el sistem
 
 @pytest.fixture
 async def con_periodos(empleado):
-    await obtener_uno("select generar_periodos_vacaciones(%s)", (empleado["id"],))
+    await periodos.generar_periodos_vacaciones(empleado["id"])
     return empleado
 
 

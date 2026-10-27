@@ -19,8 +19,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..audit import registrar
-from ..db import obtener_todos, obtener_uno
+from ..db import ejecutar, obtener_todos, obtener_uno
 from ..deps import exigir_rol
+from ..reglas.tablero import tablero_indicadores
 
 router = APIRouter(tags=["Tablero de indicadores"])
 
@@ -53,19 +54,19 @@ async def tablero(usuario: RRHH) -> dict:
     bloques = await obtener_todos(
         """select b.clave, b.titulo, b.descripcion, b.pregunta, b.orden, b.ajustes,
                   b.actualizado_en, q.nombre as actualizado_por
-             from public.tablero_bloques b
-             left join public.users q on q.id = b.actualizado_por
+             from tablero_bloques b
+             left join users q on q.id = b.actualizado_por
             where b.visible
             order by b.orden""")
     calculados = {
         f["clave"]: f["datos"]
-        for f in await obtener_todos("select clave, datos from public.tablero_indicadores()")
+        for f in await tablero_indicadores()
     }
     return {
         "bloques": [{**b, **(calculados.get(b["clave"]) or {})} for b in bloques],
         # La hora exacta del cálculo: un tablero sin ella se queda abierto en
         # una pantalla toda la tarde y se lee como si fuera de ahora.
-        "calculado_en": (await obtener_uno("select now() as t"))["t"],
+        "calculado_en": (await obtener_uno("select now(6) as t"))["t"],
     }
 
 
@@ -75,8 +76,8 @@ async def listar_bloques(usuario: RRHH) -> list[dict]:
     return await obtener_todos(
         """select b.clave, b.titulo, b.descripcion, b.pregunta, b.visible, b.orden,
                   b.ajustes, b.actualizado_en, q.nombre as actualizado_por
-             from public.tablero_bloques b
-             left join public.users q on q.id = b.actualizado_por
+             from tablero_bloques b
+             left join users q on q.id = b.actualizado_por
             order by b.orden""")
 
 
@@ -84,7 +85,7 @@ async def listar_bloques(usuario: RRHH) -> list[dict]:
 async def cambiar_bloque(clave: str, cambio: CambioBloque,
                          request: Request, usuario: RRHH) -> dict:
     antes = await obtener_uno(
-        "select titulo, visible, orden, ajustes from public.tablero_bloques where clave = %s",
+        "select titulo, visible, orden, ajustes from tablero_bloques where clave = %s",
         (clave,))
     if antes is None:
         raise HTTPException(status_code=404, detail={"mensaje": "Ese indicador no existe."})
@@ -110,17 +111,18 @@ async def cambiar_bloque(clave: str, cambio: CambioBloque,
                     "mensaje": f"«{nombre}» va entre {minimo} y {maximo}."})
         ajustes = {**ajustes, **cambio.ajustes}
 
-    fila = await obtener_uno(
-        """update public.tablero_bloques
+    await ejecutar(
+        """update tablero_bloques
               set visible = coalesce(%s, visible),
                   orden   = coalesce(%s, orden),
                   titulo  = coalesce(%s, titulo),
                   ajustes = %s,
-                  actualizado_en = now(), actualizado_por = %s
-            where clave = %s
-          returning clave, titulo, visible""",
+                  actualizado_en = now(6), actualizado_por = %s
+            where clave = %s""",
         (cambio.visible, cambio.orden, cambio.titulo, json.dumps(ajustes),
          str(usuario["id"]), clave))
+    fila = await obtener_uno(
+        "select clave, titulo, visible from tablero_bloques where clave = %s", (clave,))
 
     await registrar(request, "tablero_modificado", user_id=str(usuario["id"]),
                     cedula=usuario["cedula"], entidad="tablero_bloques", entidad_id=clave,
