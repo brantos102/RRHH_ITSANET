@@ -20,9 +20,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from ..audit import registrar
-from ..db import obtener_todos, obtener_uno
+from ..db import ejecutar, insertar, nuevo_id, obtener_todos, obtener_uno, transaccion
 from ..deps import exigir_rol, usuario_actual
 from ..errores import traducir
+from ..reglas.personal import rrhh_de_region
 
 router = APIRouter(prefix="/chat", tags=["Chat con Talento Humano"])
 
@@ -47,7 +48,7 @@ def _es_rrhh(usuario: dict) -> bool:
 
 async def _puede_ver(usuario: dict, conversacion_id: str) -> dict:
     conversacion = await obtener_uno(
-        "select id, user_id, region, estado from public.conversaciones where id = %s",
+        "select id, user_id, region, estado from conversaciones where id = %s",
         (conversacion_id,),
     )
     if conversacion is None:
@@ -65,10 +66,10 @@ async def _puede_ver(usuario: dict, conversacion_id: str) -> dict:
 async def mis_conversaciones(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[dict]:
     filas = await obtener_todos(
         """select id, asunto, estado, updated_at, atendida_por, ultimo_mensaje,
-                  (select count(*) from public.mensajes m
+                  (select count(*) from mensajes m
                     where m.conversacion_id = v.id and m.leido_en is null and m.es_rrhh)
                     as sin_leer
-             from public.v_conversaciones_bandeja v
+             from v_conversaciones_bandeja v
             where user_id = %s order by updated_at desc limit 20""",
         (usuario["id"],),
     )
@@ -88,7 +89,7 @@ async def bandeja(usuario: RRHH, estado: str = "abierta") -> list[dict]:
         f"""select id, user_id, persona, cedula, cargo, departamento, ciudad,
                    region, asunto, estado, updated_at, atendida_por, sin_leer,
                    ultimo_mensaje
-              from public.v_conversaciones_bandeja
+              from v_conversaciones_bandeja
              where {filtro} order by sin_leer desc, updated_at desc limit 50""",
         parametros,
     )
@@ -103,15 +104,14 @@ async def leer(
     conversacion = await _puede_ver(usuario, conversacion_id)
     mensajes = await obtener_todos(
         """select m.id, m.texto, m.es_rrhh, m.created_at, u.nombre as autor
-             from public.mensajes m join public.users u on u.id = m.autor_id
+             from mensajes m join users u on u.id = m.autor_id
             where m.conversacion_id = %s order by m.created_at""",
         (conversacion_id,),
     )
     # Se marcan leídos los del otro lado, no los propios.
-    await obtener_uno(
-        """update public.mensajes set leido_en = now()
-            where conversacion_id = %s and leido_en is null and es_rrhh <> %s
-          returning id""",
+    await ejecutar(
+        """update mensajes set leido_en = NOW(6)
+            where conversacion_id = %s and leido_en is null and es_rrhh <> %s""",
         (conversacion_id, _es_rrhh(usuario)),
     )
     return {
@@ -127,37 +127,42 @@ async def escribir(
     usuario: Annotated[dict, Depends(usuario_actual)],
 ) -> dict:
     try:
-        if datos.conversacion_id:
-            conversacion = await _puede_ver(usuario, datos.conversacion_id)
-        elif _es_rrhh(usuario):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={"mensaje": "Talento Humano responde conversaciones, no las inicia."},
-            )
-        else:
-            conversacion = await obtener_uno(
-                """insert into public.conversaciones (user_id, region, asunto)
-                   values (%s, %s, %s) returning id, user_id, region, estado""",
-                (usuario["id"],
-                 datos.region or usuario.get("region") or "sierra",
-                 datos.asunto),
-            )
+        async with transaccion():
+            if datos.conversacion_id:
+                conversacion = await _puede_ver(usuario, datos.conversacion_id)
+            elif _es_rrhh(usuario):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail={"mensaje": "Talento Humano responde conversaciones, no las inicia."},
+                )
+            else:
+                nueva = nuevo_id()
+                await ejecutar(
+                    """insert into conversaciones (id, user_id, region, asunto)
+                       values (%s, %s, %s, %s)""",
+                    (nueva, usuario["id"],
+                     datos.region or usuario.get("region") or "sierra",
+                     datos.asunto),
+                )
+                conversacion = await obtener_uno(
+                    "select id, user_id, region, estado from conversaciones where id = %s", (nueva,))
 
-        # Quien responde queda anotado: para el colaborador es saber con
-        # quién habla, no un nombre genérico.
-        if _es_rrhh(usuario):
-            await obtener_uno(
-                """update public.conversaciones set atendida_por = %s
-                    where id = %s and atendida_por is null returning id""",
-                (usuario["id"], conversacion["id"]),
-            )
+            # Quien responde queda anotado: para el colaborador es saber con
+            # quién habla, no un nombre genérico.
+            if _es_rrhh(usuario):
+                await ejecutar(
+                    """update conversaciones set atendida_por = %s
+                        where id = %s and atendida_por is null""",
+                    (usuario["id"], conversacion["id"]),
+                )
 
-        mensaje = await obtener_uno(
-            """insert into public.mensajes (conversacion_id, autor_id, es_rrhh, texto)
-               values (%s, %s, %s, %s)
-               returning id, texto, es_rrhh, created_at""",
-            (conversacion["id"], usuario["id"], _es_rrhh(usuario), datos.texto.strip()),
-        )
+            mensaje_id = await insertar(
+                """insert into mensajes (conversacion_id, autor_id, es_rrhh, texto)
+                   values (%s, %s, %s, %s)""",
+                (conversacion["id"], usuario["id"], _es_rrhh(usuario), datos.texto.strip()),
+            )
+            mensaje = await obtener_uno(
+                "select id, texto, es_rrhh, created_at from mensajes where id = %s", (mensaje_id,))
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -175,10 +180,10 @@ async def escribir(
 
 @router.post("/conversaciones/{conversacion_id}/cerrar")
 async def cerrar(conversacion_id: str, usuario: RRHH) -> dict:
-    await obtener_uno(
-        """update public.conversaciones
-              set estado = 'cerrada', cerrada_en = now(), atendida_por = coalesce(atendida_por, %s)
-            where id = %s returning id""",
+    await ejecutar(
+        """update conversaciones
+              set estado = 'cerrada', cerrada_en = NOW(6), atendida_por = coalesce(atendida_por, %s)
+            where id = %s""",
         (usuario["id"], conversacion_id),
     )
     return {"mensaje": "Conversación cerrada. Si la persona escribe de nuevo, se reabre."}
@@ -197,16 +202,15 @@ async def contactos(usuario: Annotated[dict, Depends(usuario_actual)],
     propia = usuario.get("region") or "sierra"
     elegida = region or propia
 
-    filas = await obtener_todos(
-        "select nombre, cargo from public.rrhh_de_region(%s)", (elegida,))
+    filas = [{"nombre": f["nombre"], "cargo": f["cargo"]} for f in await rrhh_de_region(elegida)]
     sedes = await obtener_todos(
         """select codigo, nombre, sede,
                   case sede when 'Quito' then 'UIO' when 'Guayaquil' then 'GYE'
                             else upper(left(sede, 3)) end as sigla
-             from public.regiones where activo order by codigo""")
+             from regiones where activo order by codigo""")
 
     datos = await obtener_uno(
-        "select nombre, sede from public.regiones where codigo = %s", (elegida,))
+        "select nombre, sede from regiones where codigo = %s", (elegida,))
     return {
         "region": datos["nombre"] if datos else "Sierra y Oriente",
         "sede": datos["sede"] if datos else "Quito",

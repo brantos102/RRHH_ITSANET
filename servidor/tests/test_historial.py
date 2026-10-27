@@ -45,7 +45,7 @@ async def historico(empleado):
         await obtener_uno(
             """insert into vacaciones_historicas
                  (user_id, fecha_inicio, fecha_fin, dias, fila_origen)
-               values (%s, %s, %s, %s, %s) returning id""",
+               values (%s, %s, %s, %s, %s)""",
             (empleado["id"], ini, fin, dias, fila))
     yield
     await ejecutar("delete from vacaciones_historicas where user_id = %s",
@@ -59,7 +59,7 @@ async def test_el_historial_no_toca_el_saldo(empleado, historico):
     await obtener_uno(
         """insert into vacaciones_historicas
              (user_id, fecha_inicio, fecha_fin, dias)
-           values (%s, '2021-05-03', '2021-05-07', 5) returning id""",
+           values (%s, '2021-05-03', '2021-05-07', 5)""",
         (empleado["id"],))
     despues = await obtener_uno(
         "select dias_vacaciones from users where id = %s", (empleado["id"],))
@@ -75,7 +75,7 @@ async def test_cargar_dos_veces_no_duplica(empleado, historico):
         """insert into vacaciones_historicas
              (user_id, fecha_inicio, fecha_fin, dias)
            values (%s, '2022-01-20', '2022-01-26', 7)
-           on conflict (user_id, fecha_inicio, fecha_fin) do nothing""",
+           on duplicate key update id = id""",
         (empleado["id"],))
     despues = await obtener_uno(
         "select count(*) as n from vacaciones_historicas where user_id = %s",
@@ -133,7 +133,7 @@ async def test_nadie_ve_el_historial_de_otro(cliente, auth, empleado, historico)
     await obtener_uno(
         """insert into vacaciones_historicas
              (user_id, fecha_inicio, fecha_fin, dias)
-           values (%s, '2020-08-01', '2020-08-10', 10) returning id""", (otro["id"],))
+           values (%s, '2020-08-01', '2020-08-10', 10)""", (otro["id"],))
     try:
         r = await cliente.get("/mi-historial", headers=auth)
         fechas = [v["fecha_inicio"] for v in r.json()["vacaciones"]]

@@ -85,7 +85,7 @@ async def test_un_enlace_vencido_no_aplica_nada(cliente, auth, empleado):
             where user_id = %s order by created_at desc limit 1""",
         (empleado["id"],))
 
-    r = await cliente.post("/auth/confirmar-correo", json={"token": token["token"]})
+    r = await cliente.post("/auth/confirmar-correo", json={"token": str(token["token"])})
     assert r.status_code == 410
     assert "venció" in r.json()["detail"]["mensaje"]
 
@@ -106,7 +106,7 @@ async def test_pedirlo_de_nuevo_invalida_el_enlace_anterior(cliente, auth, emple
     await cliente.post("/mi-ficha/correo", headers=auth,
                        json={"email": "segunda@itsanet.com.ec"})
 
-    r = await cliente.post("/auth/confirmar-correo", json={"token": primero["token"]})
+    r = await cliente.post("/auth/confirmar-correo", json={"token": str(primero["token"])})
     assert r.status_code == 410
 
 
@@ -162,7 +162,7 @@ async def test_al_aprobarlo_el_jefe_rige(cliente, auth, empleado, jefe, rrhh_aut
 
     fila = await obtener_uno(
         "select jefe_id as jefe_id from users where id = %s", (empleado["id"],))
-    assert fila["jefe_id"] == jefe["id"]
+    assert str(fila["jefe_id"]) == str(jefe["id"])
 
 
 async def test_decir_que_esta_mal_sin_decir_cual_no_sirve(cliente, auth):
@@ -191,21 +191,13 @@ async def test_nadie_se_ve_a_si_mismo_en_la_lista(cliente, auth, empleado, jefe)
 # ---------------------------------------------------- el alta pregunta lo mismo
 @pytest.fixture
 async def sin_correo(empleado):
-    fila = await obtener_uno(
-        """insert into users
-             (cedula, nombre, email, rol, cargo, fecha_ingreso, fecha_nacimiento,
-              correo_pendiente, ficha_completa, ciudad)
-           values (%s, 'Sin Correo Confirma', %s, 'empleado', 'Bodeguero', %s, %s,
-                   true, false, 'Quito')
-           on conflict (cedula) do update
-             set correo_pendiente = true, ficha_completa = false,
-                 cargo = 'Bodeguero',
-                 fecha_nacimiento = excluded.fecha_nacimiento,
-                 fecha_ingreso = excluded.fecha_ingreso
-           returning id""",
-        (CED_SIN_CORREO_C, f"{CED_SIN_CORREO_C}@pendiente.itsanet.local",
-         INGRESO, NACIMIENTO),
-    )
+    fila = await persona(
+        CED_SIN_CORREO_C,
+        al_existir={"correo_pendiente": True, "ficha_completa": False, "cargo": "Bodeguero",
+                    "fecha_nacimiento": NACIMIENTO, "fecha_ingreso": INGRESO},
+        nombre="Sin Correo Confirma", email=f"{CED_SIN_CORREO_C}@pendiente.itsanet.local",
+        rol="empleado", cargo="Bodeguero", fecha_ingreso=INGRESO, fecha_nacimiento=NACIMIENTO,
+        correo_pendiente=True, ficha_completa=False, ciudad="Quito")
     yield {"id": str(fila["id"]), "cedula": CED_SIN_CORREO_C}
     await ejecutar("delete from users where cedula = %s", (CED_SIN_CORREO_C,))
 

@@ -125,7 +125,7 @@ async def test_confirmar_el_correo_habilita_el_acceso(cliente, auth, empleado):
             where user_id = %s and confirmado_en is null
             order by created_at desc limit 1""",
         (empleado["id"],))
-    r = await cliente.post("/auth/confirmar-correo", json={"token": token["token"]})
+    r = await cliente.post("/auth/confirmar-correo", json={"token": str(token["token"])})
     assert r.status_code == 200, r.text
 
     fila = await obtener_uno(
@@ -144,8 +144,8 @@ async def test_el_enlace_de_confirmacion_no_sirve_dos_veces(cliente, auth, emple
             order by created_at desc limit 1""",
         (empleado["id"],))
     assert (await cliente.post("/auth/confirmar-correo",
-                               json={"token": token["token"]})).status_code == 200
-    repetido = await cliente.post("/auth/confirmar-correo", json={"token": token["token"]})
+                               json={"token": str(token["token"])})).status_code == 200
+    repetido = await cliente.post("/auth/confirmar-correo", json={"token": str(token["token"])})
     assert repetido.status_code == 410
 
 

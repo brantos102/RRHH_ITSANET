@@ -17,11 +17,12 @@ no cambia. Reimprimirlo con los datos de hoy sería falsificar lo que se firmó.
 """
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pytest
 
 from app.db import ejecutar, obtener_todos, obtener_uno
+from app.reglas import papeles
 from tests.conftest import CEDULA_PRUEBA
 from tests.test_panel_configurable import admin_auth  # noqa: F401
 from tests.test_reglas_nuevas import (CEDULA_JEFE_R, CEDULA_RRHH_R,  # noqa: F401
@@ -84,7 +85,10 @@ async def test_la_segunda_solicitud_no_vuelve_a_emitir_la_trazabilidad(
     for etapa in (jefe_auth, rrhh_auth):
         await cliente.post(f"/aprobaciones/{primera['id']}/decidir", headers=etapa,
                            json={"accion": "aprobar"})
-    lunes = await lunes_sin_feriados(semanas=10)
+    lunes = await lunes_sin_feriados(semanas=10,
+                                     desde=date.fromisoformat(str((await obtener_uno(
+                                         "select fecha_fin from requests where id = %s",
+                                         (primera["id"],)))["fecha_fin"])))
     segunda = await cliente.post("/solicitudes", headers=auth, json={
         "tipo": "vacacion", "fecha_inicio": str(lunes),
         "fecha_fin": str(lunes + timedelta(days=7)),
@@ -171,9 +175,8 @@ async def test_la_trazabilidad_guarda_lo_que_decia_y_no_lo_que_dira(
         assert de_nuevo["datos"]["totales"]["veces"] == antes, \
             "el papel firmado no cambia porque cambie la base"
         # Y lo que diría hoy un papel nuevo sí lo incluye.
-        fila = await obtener_uno(
-            "select datos_informe_trazabilidad(%s) as d", (empleado["id"],))
-        assert fila["d"]["totales"]["veces"] == antes + 1
+        hoy = await papeles.datos_informe_trazabilidad(empleado["id"])
+        assert hoy["totales"]["veces"] == antes + 1
     finally:
         await ejecutar(
             "delete from vacaciones_historicas where fila_origen = 9001")
@@ -190,7 +193,7 @@ async def test_el_de_la_solicitud_si_se_actualiza_al_reimprimirlo(
     for etapa in (jefe_auth, rrhh_auth):
         await cliente.post(f"/aprobaciones/{pedida['id']}/decidir", headers=etapa,
                            json={"accion": "aprobar"})
-    await obtener_uno("select informe_solicitud_asegurar(%s)", (pedida["id"],))
+    await papeles.informe_solicitud_asegurar(pedida["id"])
 
     de_nuevo = (await _papeles(empleado, "solicitud"))[0]
     assert de_nuevo["folio"] == papel["folio"], "mismo documento, no uno nuevo"

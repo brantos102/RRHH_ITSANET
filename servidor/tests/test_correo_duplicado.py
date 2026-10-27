@@ -40,7 +40,7 @@ async def dos_fichas():
     con_correo = await persona(CEDULA_A, al_existir={"email": CORREO, "activo": True}, nombre='Quien Tiene El Correo', email=CORREO, rol='empleado', fecha_ingreso=Sql("current_date() - interval 400 day"), departamento='REDES')
     sin_correo = await persona(CEDULA_B, al_existir={"email": None, "activo": True}, nombre='Quien Lo Necesita', email=None, rol='empleado', fecha_ingreso=Sql("current_date() - interval 400 day"))
     yield {"con_correo": con_correo["id"], "sin_correo": sin_correo["id"]}
-    await ejecutar("delete from users where cedula = any(%s)", ([CEDULA_A, CEDULA_B],))
+    await ejecutar("delete from users where cedula in (%s, %s)", (CEDULA_A, CEDULA_B))
 
 
 async def test_el_mensaje_dice_de_quien_es_el_correo(cliente, rrhh_auth, dos_fichas):

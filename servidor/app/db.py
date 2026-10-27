@@ -351,3 +351,18 @@ def lista(valores) -> tuple:
     """
     valores = tuple(str(v) if isinstance(v, uuid.UUID) else v for v in valores)
     return valores if valores else ("\x00sin-valores\x00",)
+
+
+def booleanos(filas: list[dict[str, Any]], *claves: str) -> list[dict[str, Any]]:
+    """Pone como true/false las columnas booleanas CALCULADAS.
+
+    Una columna BOOLEAN de una tabla ya llega como bool (ver _convertir_fila),
+    pero una expresión como `autorizado_por IS NOT NULL AS es_reemision` MySQL
+    la entrega como 1 o 0, sin rastro de que era una condición. PostgreSQL
+    devolvía true/false, y la pantalla compara con eso.
+    """
+    for fila in filas:
+        for clave in claves:
+            if fila.get(clave) is not None:
+                fila[clave] = bool(fila[clave])
+    return filas

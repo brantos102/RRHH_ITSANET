@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from .. import notificaciones, qr
 from ..audit import registrar
 from ..config import get_settings
-from ..db import ejecutar, obtener_todos, obtener_uno
+from ..db import booleanos, ejecutar, obtener_todos, obtener_uno
 from ..deps import exigir_rol, usuario_actual
 from ..errores import traducir
 from ..reglas import personal
@@ -290,7 +290,7 @@ async def pendientes(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[
          "saldo_actual": float(f["saldo_actual"]),
          "hora_inicio": str(f["hora_inicio"])[:5] if f["hora_inicio"] else None,
          "hora_fin": str(f["hora_fin"])[:5] if f["hora_fin"] else None}
-        for f in filas
+        for f in booleanos(filas, "sin_jefe")
     ]
 
 

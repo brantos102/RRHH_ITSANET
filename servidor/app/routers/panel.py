@@ -28,9 +28,10 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from ..audit import registrar
-from ..db import obtener_todos, obtener_uno
+from ..db import obtener_todos
 from ..deps import exigir_rol, usuario_actual
 from ..errores import traducir
+from ..reglas import panel as reglas_panel
 
 router = APIRouter(prefix="/panel", tags=["Pantalla principal"])
 
@@ -57,13 +58,12 @@ class CambioBloque(BaseModel):
 @router.get("/bloques", summary="Los bloques que esta persona debe ver")
 async def mis_bloques(usuario: QUIEN_SEA) -> dict:
     """Ya filtrado por rol, y sin el aviso si está vacío."""
-    filas = await obtener_todos("select * from public.panel_de(%s)", (usuario["id"],))
-    return {"bloques": [dict(f) for f in filas]}
+    return {"bloques": await reglas_panel.panel_de(usuario["id"])}
 
 
 @router.get("/configuracion", summary="Todos los bloques, para administrarlos")
 async def configuracion(_: ADMIN) -> dict:
-    filas = await obtener_todos("select * from public.v_panel_configuracion")
+    filas = await obtener_todos("select * from v_panel_configuracion")
     return {"bloques": [dict(f) for f in filas]}
 
 
@@ -71,12 +71,8 @@ async def configuracion(_: ADMIN) -> dict:
 async def cambiar(clave: str, cambio: CambioBloque, request: Request,
                   admin: ADMIN) -> dict:
     try:
-        fila = await obtener_uno(
-            """select * from public.panel_configurar(
-                   %s, %s, %s, %s::smallint, %s::public.user_role[], %s)""",
-            (clave, admin["id"], cambio.visible, cambio.orden,
-             cambio.roles, cambio.cuerpo),
-        )
+        fila = await reglas_panel.panel_configurar(
+            clave, admin["id"], cambio.visible, cambio.orden, cambio.roles, cambio.cuerpo)
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
@@ -100,15 +96,12 @@ async def reordenar(orden: Orden, request: Request, admin: ADMIN) -> dict:
     """
     for posicion, clave in enumerate(orden.claves, start=1):
         try:
-            await obtener_uno(
-                "select * from public.panel_configurar(%s, %s, null, %s::smallint)",
-                (clave, admin["id"], posicion * 10),
-            )
+            await reglas_panel.panel_configurar(clave, admin["id"], orden=posicion * 10)
         except Exception as exc:  # noqa: BLE001
             raise traducir(exc) from exc
 
     await registrar(request, "panel.reordenar", user_id=admin["id"],
                     cedula=admin["cedula"], entidad="panel_bloques",
                     detalle={"orden": orden.claves})
-    filas = await obtener_todos("select * from public.v_panel_configuracion")
+    filas = await obtener_todos("select * from v_panel_configuracion")
     return {"bloques": [dict(f) for f in filas]}

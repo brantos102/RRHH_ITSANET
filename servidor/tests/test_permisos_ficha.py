@@ -13,6 +13,7 @@ from datetime import date
 import pytest
 
 from app.db import ejecutar, obtener_todos, obtener_uno
+from app.reglas import ficha
 from tests.conftest import CEDULA_PRUEBA
 
 # Los que no se tocan por ninguna vía, con el valor que un atacante pondría.
@@ -127,10 +128,7 @@ async def test_la_base_rechaza_el_campo_aunque_el_backend_lo_dejara_pasar(emplea
     API por descuido, esto es lo único que seguiría frenándolo.
     """
     with pytest.raises(Exception) as fallo:
-        await obtener_uno(
-            "select actualizar_ficha_libre(%s, %s)",
-            (empleado["id"], '{"fecha_ingreso": "2000-01-01"}'),
-        )
+        await ficha.actualizar_ficha_libre(empleado["id"], {"fecha_ingreso": "2000-01-01"})
     assert "Talento Humano" in str(fallo.value) or "no se corrige" in str(fallo.value)
 
     intacta = await obtener_uno(

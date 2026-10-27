@@ -35,15 +35,15 @@ async def _panel_como_de_fabrica():
     yield
     await ejecutar(
         """update panel_bloques
-              set visible = true, roles = '{}', cuerpo = null,
+              set visible = true, roles = json_array(), cuerpo = null,
                   actualizado_en = null, actualizado_por = null""")
     await ejecutar(
-        """update panel_bloques b set orden = d.orden
-             from (values ('anuncio',5),('alertas',10),('saldo',20),('antiguedad',30),
-                          ('fines_semana',40),('acciones',50),('calendario',60),
-                          ('logros',80),('solicitudes',90))
-                  as d(clave, orden)
-            where b.clave = d.clave""")
+        """update panel_bloques
+              set orden = case clave when 'anuncio' then 5 when 'alertas' then 10
+                                     when 'saldo' then 20 when 'antiguedad' then 30
+                                     when 'fines_semana' then 40 when 'acciones' then 50
+                                     when 'calendario' then 60 when 'logros' then 80
+                                     when 'solicitudes' then 90 else orden end""")
 
 
 async def test_de_fabrica_el_panel_esta_entero(cliente, auth):

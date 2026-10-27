@@ -27,9 +27,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from ..audit import registrar
-from ..db import obtener_todos, obtener_uno
+from ..db import booleanos, obtener_todos, obtener_uno
 from ..errores import traducir
 from ..deps import exigir_rol, usuario_actual
+from ..reglas import papeles as reglas_papeles
 from ..documentos import armar
 
 router = APIRouter(tags=["Papeles para firmar"])
@@ -42,7 +43,7 @@ class Reemision(BaseModel):
     motivo: str = Field(..., min_length=15, max_length=400)
 
 
-CAMPOS = """i.id, i.user_id, i.tipo::text as tipo, i.request_id, i.folio,
+CAMPOS = """i.id, i.user_id, i.tipo, i.request_id, i.folio,
             i.emitido_en, i.impresiones, i.ultima_impresion, i.datos,
             i.autorizado_en, i.autorizacion_motivo,
             i.autorizado_por is not null as es_reemision,
@@ -50,30 +51,31 @@ CAMPOS = """i.id, i.user_id, i.tipo::text as tipo, i.request_id, i.folio,
 
 
 async def _buscar(informe_id: uuid.UUID) -> dict | None:
-    return await obtener_uno(
+    fila = await obtener_uno(
         f"""select {CAMPOS}, u.nombre as de_quien, u.cedula
-              from public.informes_firmados i
-              join public.users u on u.id = i.user_id
-              left join public.users a on a.id = i.autorizado_por
+              from informes_firmados i
+              join users u on u.id = i.user_id
+              left join users a on a.id = i.autorizado_por
              where i.id = %s""",
         (str(informe_id),))
+    return booleanos([fila], "es_reemision")[0] if fila else None
 
 
 @router.get("/papeles/mios")
 async def mis_papeles(usuario: Usuario) -> dict:
     """Lo que tengo emitido, para volver a imprimirlo."""
     filas = await obtener_todos(
-        """select id, tipo::text as tipo, folio, request_id, emitido_en,
+        """select id, tipo, folio, request_id, emitido_en,
                   impresiones, ultima_impresion,
                   autorizado_por is not null as es_reemision
-             from public.informes_firmados
+             from informes_firmados
             where user_id = %s
             order by emitido_en desc""",
         (usuario["id"],))
     reemision = await obtener_uno(
-        "select public.cfg_texto('trazabilidad_reemision') as modo")
+        "select cfg_texto('trazabilidad_reemision') as modo")
     return {
-        "papeles": filas,
+        "papeles": booleanos(filas, "es_reemision"),
         # Para que la pantalla sepa si ofrecer el botón o explicar a quién
         # pedírselo, en vez de ofrecerlo y fallar después.
         "trazabilidad_reemision": reemision["modo"],
@@ -88,13 +90,11 @@ async def asegurar_trazabilidad(request: Request, usuario: Usuario) -> dict:
     documento existiera: su primera solicitud no lo generó porque no había
     nada que generar.
     """
-    fila = await obtener_uno(
-        "select id, folio, emitido_en from public.informe_trazabilidad_asegurar(%s)",
-        (usuario["id"],))
+    fila = await reglas_papeles.informe_trazabilidad_asegurar(usuario["id"])
     await registrar(request, "papel_trazabilidad_emitido", user_id=str(usuario["id"]),
                     cedula=usuario["cedula"], entidad="informes_firmados",
                     entidad_id=str(fila["id"]))
-    return dict(fila)
+    return {"id": fila["id"], "folio": fila["folio"], "emitido_en": fila["emitido_en"]}
 
 
 @router.get("/papeles/{informe_id}.html", response_class=Response)
@@ -113,7 +113,7 @@ async def imprimir(informe_id: uuid.UUID, request: Request, usuario: Usuario) ->
     # Cada impresión se cuenta: es la diferencia entre «se emitió una vez» y
     # «se imprimió catorce veces», y la segunda es la que cuenta en una
     # auditoría.
-    await obtener_uno("select public.informe_impreso(%s)", (str(informe_id),))
+    await reglas_papeles.informe_impreso(str(informe_id))
     await registrar(request, "papel_impreso", user_id=str(usuario["id"]),
                     cedula=usuario["cedula"], entidad="informes_firmados",
                     entidad_id=str(informe_id),
@@ -128,7 +128,7 @@ async def imprimir(informe_id: uuid.UUID, request: Request, usuario: Usuario) ->
 async def papel_de_la_solicitud(request_id: uuid.UUID, usuario: Usuario) -> dict:
     """El formulario de una solicitud concreta. Se emite si todavía no existía."""
     duena = await obtener_uno(
-        "select user_id, tipo::text as tipo from public.requests where id = %s",
+        "select user_id, tipo from requests where id = %s",
         (str(request_id),))
     if duena is None:
         raise HTTPException(status_code=404, detail={"mensaje": "Esa solicitud no existe."})
@@ -139,10 +139,8 @@ async def papel_de_la_solicitud(request_id: uuid.UUID, usuario: Usuario) -> dict
         raise HTTPException(status_code=422, detail={
             "mensaje": "Este formulario es de vacaciones; esa solicitud es de otro tipo."})
 
-    fila = await obtener_uno(
-        "select id, folio, emitido_en from public.informe_solicitud_asegurar(%s)",
-        (str(request_id),))
-    return dict(fila)
+    fila = await reglas_papeles.informe_solicitud_asegurar(str(request_id))
+    return {"id": fila["id"], "folio": fila["folio"], "emitido_en": fila["emitido_en"]}
 
 
 # -------------------------------------------------------- Talento Humano
@@ -151,22 +149,23 @@ async def listar_papeles(usuario: RRHH, q: str = "", tipo: str | None = None) ->
     """Quién tiene qué emitido, y cuántas veces lo imprimió."""
     condiciones, parametros = [], []
     if q:
-        condiciones.append("(v.nombre ilike %s or v.cedula like %s or v.folio ilike %s)")
+        condiciones.append("(v.nombre like %s or v.cedula like %s or v.folio like %s)")
         parametros += [f"%{q}%", f"{q}%", f"%{q}%"]
     if tipo in ("trazabilidad", "solicitud"):
         condiciones.append("v.tipo = %s")
         parametros.append(tipo)
     donde = ("where " + " and ".join(condiciones)) if condiciones else ""
-    return await obtener_todos(
+    filas = await obtener_todos(
         f"""select v.id, v.user_id, v.cedula, v.nombre, v.departamento, v.tipo, v.folio,
                    v.solicitud_folio, v.emitido_en, v.emitido_por, v.impresiones,
                    v.ultima_impresion, v.es_reemision, v.es_el_vigente,
                    v.autorizado_por, v.autorizacion_motivo
-              from public.v_informes_firmados v
+              from v_informes_firmados v
               {donde}
              order by v.emitido_en desc
              limit 200""",
         tuple(parametros))
+    return booleanos(filas, "es_reemision", "es_el_vigente")
 
 
 @router.post("/admin/papeles/{user_id}/reemitir-trazabilidad")
@@ -180,13 +179,12 @@ async def reemitir(user_id: uuid.UUID, datos: Reemision,
     hace falta para poder explicar en una auditoría por qué hay dos.
     """
     try:
-        fila = await obtener_uno(
-            "select id, folio from public.informe_trazabilidad_reemitir(%s, %s, %s)",
-            (str(user_id), str(usuario["id"]), datos.motivo))
+        fila = await reglas_papeles.informe_trazabilidad_reemitir(
+            str(user_id), str(usuario["id"]), datos.motivo)
     except Exception as exc:  # la base es la que conoce las reglas
         raise traducir(exc) from exc
 
-    persona = await obtener_uno("select nombre from public.users where id = %s",
+    persona = await obtener_uno("select nombre from users where id = %s",
                                 (str(user_id),))
     await registrar(request, "papel_trazabilidad_reemitido", user_id=str(usuario["id"]),
                     cedula=usuario["cedula"], entidad="informes_firmados",

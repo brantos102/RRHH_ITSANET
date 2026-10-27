@@ -18,12 +18,16 @@ CEDULA_RRHH_R = "1100000007"
 CEDULA_JEFE_R = "0900000001"
 
 
-async def lunes_sin_feriados(semanas: int = 8) -> date:
+async def lunes_sin_feriados(semanas: int = 8, desde: date | None = None) -> date:
     feriados = {
         f["fecha"] for f in await obtener_todos(
             "select fecha from feriados where activo and fecha >= current_date()")
     }
     base = date.today() + timedelta(weeks=semanas)
+    # Diciembre está lleno de feriados: dos llamadas con semanas distintas
+    # pueden dar el mismo lunes de enero. «desde» obliga a ir más allá.
+    if desde is not None and base < desde:
+        base = desde + timedelta(days=7)
     candidato = base - timedelta(days=base.weekday())
     for _ in range(80):
         if not ({candidato + timedelta(days=i) for i in range(10)} & feriados):

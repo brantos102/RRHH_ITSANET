@@ -52,9 +52,11 @@ async def buscar(usuario: MANDO, q: str = "", limite: int = 12) -> list[dict]:
     return await obtener_todos(
         f"""
         select u.id, u.cedula, u.nombre, u.cargo, u.departamento, u.ciudad
-          from public.users u
+          from users u
          where u.activo and {filtro}
-           and (public.sin_tildes(u.nombre) ilike public.sin_tildes(%(like)s)
+           -- La comparación de la base (utf8mb4_0900_ai_ci) ya ignora tildes y
+           -- mayúsculas: «Jose» encuentra a «JOSÉ» sin funciones intermedias.
+           and (u.nombre like %(like)s
                 -- Por cédula solo cuando lo tecleado trae dígitos, y por el
                 -- principio: así «1723» encuentra a quien empieza así y una
                 -- búsqueda de texto no arrastra a toda la planilla.
@@ -74,11 +76,11 @@ async def expediente(user_id: str, usuario: MANDO) -> dict:
         select u.id, u.cedula, u.nombre, u.cargo, u.departamento, u.ciudad,
                u.region, u.fecha_ingreso, u.rol, u.email, u.telefono,
                u.dias_vacaciones as saldo, u.activo,
-               public.anios_cumplidos(u.fecha_ingreso) as anios,
-               public.fines_semana_pendientes(u.id)    as fines_semana_pendientes,
+               anios_cumplidos(u.fecha_ingreso) as anios,
+               fines_semana_pendientes(u.id)    as fines_semana_pendientes,
                j.nombre as jefe_nombre
-          from public.users u
-          left join public.users j on j.id = u.jefe_id
+          from users u
+          left join users j on j.id = u.jefe_id
          where u.id = %(id)s and {filtro}
         """,
         parametros | {"id": user_id},
@@ -96,29 +98,29 @@ async def expediente(user_id: str, usuario: MANDO) -> dict:
         """select r.folio, r.tipo, r.estado, r.fecha_inicio, r.fecha_fin,
                   r.dias_solicitados, r.hora_inicio, r.hora_fin, r.created_at,
                   t.nombre as subtipo
-             from public.requests r
-             left join public.permission_types t on t.id = r.permission_type_id
+             from requests r
+             left join permission_types t on t.id = r.permission_type_id
             where r.user_id = %s
             order by r.created_at desc limit 100""",
         (user_id,),
     )
     vacaciones = await obtener_todos(
         """select folio, fecha_inicio, fecha_fin, dias, procedencia, detalle
-             from public.v_historial_vacaciones
+             from v_historial_vacaciones
             where user_id = %s order by fecha_inicio desc limit 200""",
         (user_id,),
     )
     periodos = await obtener_todos(
         """select periodo, fecha_desde, fecha_hasta, dias_asignados,
                   dias_consumidos, dias_saldo, devengado, caducado
-             from public.vacation_periods
+             from vacation_periods
             where user_id = %s order by periodo""",
         (user_id,),
     )
     devengo = await obtener_uno(
         """select meses_del_periodo, tope_anual_del_periodo, devengado_hoja,
                   devengado_de_anios_cumplidos
-             from public.v_devengo_cotejo where user_id = %s""",
+             from v_devengo_cotejo where user_id = %s""",
         (user_id,),
     )
 

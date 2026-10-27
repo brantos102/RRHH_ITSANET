@@ -18,7 +18,6 @@ y eso lo comprueba el buzón mismo.
 """
 from __future__ import annotations
 
-import json
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
@@ -26,9 +25,11 @@ from pydantic import BaseModel, EmailStr, Field
 
 from .. import notificaciones
 from ..audit import ip_del_cliente, registrar
-from ..db import obtener_todos, obtener_uno
+from ..db import ejecutar, obtener_todos, obtener_uno
 from ..deps import exigir_rol, usuario_actual
 from ..errores import traducir
+from ..reglas import ficha as reglas_ficha
+from ..reglas.personal import rrhh_de_region
 
 router = APIRouter(tags=["Ficha personal"])
 
@@ -76,39 +77,38 @@ class ConfirmacionDatos(BaseModel):
 async def mi_ficha(usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
     """La ficha completa, con qué se puede tocar y qué no, y por qué."""
     persona = await obtener_uno(
-        """select u.cedula, u.nombre, u.email::text as email, u.telefono,
+        """select u.cedula, u.nombre, u.email, u.telefono,
                   u.telefono_alternativo, u.direccion, u.ciudad, u.provincia,
-                  u.tipo_sangre, u.foto_url, u.fecha_nacimiento, u.estado_civil::text
-                    as estado_civil,
+                  u.tipo_sangre, u.foto_url, u.fecha_nacimiento, u.estado_civil,
                   u.fecha_ingreso, u.cargo, u.departamento, u.bodega, u.cliente,
                   u.centro_costo, u.dias_vacaciones, u.tiene_discapacidad,
                   u.porcentaje_discapacidad, coalesce(u.region, 'sierra') as region,
                   r.nombre as region_nombre, r.sede as region_sede,
                   j.nombre as jefe_nombre, u.jefe_id,
                   u.cargo_confirmado_en, u.jefe_confirmado_en, u.correo_pendiente,
-                  (select c.email from public.confirmaciones_correo c
+                  (select c.email from confirmaciones_correo c
                     where c.user_id = u.id and c.confirmado_en is null
-                      and c.expira_en > now()
+                      and c.expira_en > NOW(6)
                     order by c.created_at desc limit 1) as correo_por_confirmar
-             from public.users u
-             left join public.regiones r on r.codigo = coalesce(u.region, 'sierra')
-             left join public.users j on j.id = u.jefe_id
+             from users u
+             left join regiones r on r.codigo = coalesce(u.region, 'sierra')
+             left join users j on j.id = u.jefe_id
             where u.id = %s""",
         (usuario["id"],),
     )
     campos = await obtener_todos(
-        "select campo, etiqueta, nivel, ayuda from public.campos_ficha order by orden"
+        "select campo, etiqueta, nivel, ayuda from campos_ficha order by orden"
     )
     contactos = await obtener_todos(
-        """select id, nombre, parentesco::text as parentesco, telefono, es_principal
-             from public.emergency_contacts where user_id = %s order by es_principal desc""",
+        """select id, nombre, parentesco, telefono, es_principal
+             from emergency_contacts where user_id = %s order by es_principal desc""",
         (usuario["id"],),
     )
     pendientes = await obtener_todos(
         """select c.id, c.campo, f.etiqueta, c.valor_anterior, c.valor_nuevo,
                   c.estado, c.motivo_rechazo, c.created_at
-             from public.cambios_ficha c
-             join public.campos_ficha f on f.campo = c.campo
+             from cambios_ficha c
+             join campos_ficha f on f.campo = c.campo
             where c.user_id = %s order by c.created_at desc limit 20""",
         (usuario["id"],),
     )
@@ -136,10 +136,7 @@ async def corregir_ficha(
         )
 
     try:
-        await obtener_uno(
-            "select public.actualizar_ficha_libre(%s, %s::jsonb) is not null as ok",
-            (usuario["id"], json.dumps(cambios)),
-        )
+        await reglas_ficha.actualizar_ficha_libre(usuario["id"], cambios)
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
@@ -155,17 +152,15 @@ async def pedir_cambio(
 ) -> dict:
     """Lo que Talento Humano debe validar antes de que rija."""
     try:
-        fila = await obtener_uno(
-            "select public.solicitar_cambio_ficha(%s, %s, %s, %s) as id",
-            (usuario["id"], datos.campo, datos.valor, datos.motivo),
-        )
+        nuevo = await reglas_ficha.solicitar_cambio_ficha(
+            usuario["id"], datos.campo, datos.valor, datos.motivo)
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
     await registrar(request, "ficha_cambio_solicitado", user_id=str(usuario["id"]),
                     cedula=usuario["cedula"], detalle={"campo": datos.campo})
     return {
-        "id": int(fila["id"]),
+        "id": int(nuevo),
         "mensaje": "Su solicitud quedó registrada. Talento Humano la revisará; "
                    "mientras tanto sigue vigente el dato anterior.",
     }
@@ -184,10 +179,8 @@ async def cambiar_correo(
     y haría falta que Talento Humano la rescatara a mano.
     """
     try:
-        fila = await obtener_uno(
-            "select (public.pedir_confirmacion_correo(%s, %s, %s)).token as token",
-            (usuario["id"], datos.email, ip_del_cliente(request)),
-        )
+        fila = await reglas_ficha.pedir_confirmacion_correo(
+            usuario["id"], str(datos.email), ip_del_cliente(request))
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
@@ -219,17 +212,13 @@ async def confirmar_cargo_y_jefe(
     errores: list[str] = []
 
     if datos.cargo_correcto:
-        await obtener_uno(
-            "update public.users set cargo_confirmado_en = now() where id = %s returning id",
-            (usuario["id"],),
-        )
+        await ejecutar("update users set cargo_confirmado_en = NOW(6) where id = %s",
+                       (usuario["id"],))
     elif datos.cargo_propuesto and datos.cargo_propuesto.strip():
         try:
-            await obtener_uno(
-                "select public.solicitar_cambio_ficha(%s, 'cargo', %s, %s) as id",
-                (usuario["id"], datos.cargo_propuesto.strip(),
-                 "Corrección declarada al confirmar los datos"),
-            )
+            await reglas_ficha.solicitar_cambio_ficha(
+                usuario["id"], "cargo", datos.cargo_propuesto.strip(),
+                "Corrección declarada al confirmar los datos")
             pedidos.append(("Cargo que indica", datos.cargo_propuesto.strip()))
         except Exception as exc:  # noqa: BLE001
             errores.append(str(getattr(traducir(exc), "detail", exc)))
@@ -237,23 +226,19 @@ async def confirmar_cargo_y_jefe(
         errores.append("Indique cuál es su cargo si el registrado no corresponde.")
 
     if datos.jefe_correcto:
-        await obtener_uno(
-            "update public.users set jefe_confirmado_en = now() where id = %s returning id",
-            (usuario["id"],),
-        )
+        await ejecutar("update users set jefe_confirmado_en = NOW(6) where id = %s",
+                       (usuario["id"],))
     elif datos.jefe_propuesto_id:
         jefe = await obtener_uno(
-            "select nombre from public.v_jefaturas where id = %s", (datos.jefe_propuesto_id,)
+            "select nombre from v_jefaturas where id = %s", (datos.jefe_propuesto_id,)
         )
         if jefe is None:
             errores.append("La jefatura señalada no está en la lista.")
         else:
             try:
-                await obtener_uno(
-                    "select public.solicitar_cambio_ficha(%s, 'jefe_id', %s, %s) as id",
-                    (usuario["id"], datos.jefe_propuesto_id,
-                     "Corrección declarada al confirmar los datos"),
-                )
+                await reglas_ficha.solicitar_cambio_ficha(
+                    usuario["id"], "jefe_id", datos.jefe_propuesto_id,
+                    "Corrección declarada al confirmar los datos")
                 pedidos.append(("Jefe que indica", jefe["nombre"]))
             except Exception as exc:  # noqa: BLE001
                 errores.append(str(getattr(traducir(exc), "detail", exc)))
@@ -267,10 +252,8 @@ async def confirmar_cargo_y_jefe(
         )
 
     if pedidos:
-        destinos = await obtener_todos(
-            "select email, nombre from public.rrhh_de_region(%s)",
-            (usuario.get("region") or "sierra",),
-        )
+        destinos = [{"email": d["email"], "nombre": d["nombre"]}
+                    for d in await rrhh_de_region(usuario.get("region") or "sierra")]
         tareas.add_task(notificaciones.avisar_correccion_de_ficha, destinos,
                         usuario["nombre"], usuario["cedula"], pedidos)
 
@@ -298,7 +281,7 @@ async def jefaturas(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[d
     """
     filas = await obtener_todos(
         """select id, nombre, cargo, departamento, a_cargo
-             from public.v_jefaturas where id <> %s""",
+             from v_jefaturas where id <> %s""",
         (usuario["id"],),
     )
     return [{**f, "id": str(f["id"]), "a_cargo": int(f["a_cargo"] or 0)} for f in filas]
@@ -308,7 +291,7 @@ async def jefaturas(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[d
 async def cambios_pendientes(usuario: RRHH) -> list[dict]:
     """Bandeja de Talento Humano, acotada a su región."""
     if usuario["rol"] == "admin":
-        filtro, parametros = "true", ()
+        filtro, parametros = "TRUE", ()
     else:
         filtro, parametros = "region = %s", (usuario.get("region") or "sierra",)
 
@@ -316,7 +299,7 @@ async def cambios_pendientes(usuario: RRHH) -> list[dict]:
         f"""select id, user_id, cedula, persona, departamento, ciudad, region,
                    campo, etiqueta, valor_anterior, valor_nuevo, motivo, created_at,
                    anterior_legible, nuevo_legible
-              from public.v_cambios_ficha_pendientes where {filtro}""",
+              from v_cambios_ficha_pendientes where {filtro}""",
         parametros,
     )
     return [{**f, "id": int(f["id"]), "user_id": str(f["user_id"])} for f in filas]
@@ -332,10 +315,8 @@ async def resolver_cambio(
             detail={"mensaje": "Indique por qué se rechaza: la persona debe saber qué corregir."},
         )
     try:
-        fila = await obtener_uno(
-            "select (public.resolver_cambio_ficha(%s, %s, %s, %s)).campo as campo",
-            (cambio_id, datos.accion == "aprobar", usuario["id"], datos.motivo),
-        )
+        fila = await reglas_ficha.resolver_cambio_ficha(
+            cambio_id, datos.accion == "aprobar", usuario["id"], datos.motivo)
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
