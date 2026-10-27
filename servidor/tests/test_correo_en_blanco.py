@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.conftest import persona
 from app.db import ejecutar, obtener_todos, obtener_uno
 
 CED_SIN = "1700000050"
@@ -21,17 +22,11 @@ CED_SIN = "1700000050"
 
 @pytest.fixture
 async def sin_correo(empleado):
-    fila = await obtener_uno(
-        """insert into users
-             (cedula, nombre, email, rol, fecha_ingreso, fecha_nacimiento,
-              correo_pendiente, ficha_completa, ciudad)
-           values (%s, 'Sin Correo Real', null, 'empleado', current_date() - interval 900 day,
-                   '1990-05-20', true, false, 'Quito')
-           on conflict (cedula) do update
-             set email = null, correo_pendiente = true, ficha_completa = false
-           returning id""",
-        (CED_SIN,),
-    )
+    fila = await persona(
+        CED_SIN,
+        al_existir={"email": None, "correo_pendiente": True, "ficha_completa": False},
+        nombre="Sin Correo Real", email=None, rol="empleado", fecha_nacimiento="1990-05-20",
+        correo_pendiente=True, ficha_completa=False, ciudad="Quito")
     yield {"id": str(fila["id"]), "cedula": CED_SIN}
     await ejecutar("delete from users where cedula = %s", (CED_SIN,))
 

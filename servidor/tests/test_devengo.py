@@ -7,22 +7,20 @@ esa aritmética y los bordes que aparecieron al cargar la planilla completa.
 """
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 
+from tests.conftest import Sql, persona
 from app.db import ejecutar, obtener_uno
+from app.reglas import periodos
 
 
 async def _crear(cedula: str, meses_antiguedad: int) -> str:
-    fila = await obtener_uno(
-        """insert into users (cedula, nombre, email, rol, fecha_ingreso)
-           values (%s, 'Devengo Prueba', %s, 'empleado',
-                   (current_date() - interval %s MONTH))
-           on conflict (cedula) do update
-             set fecha_ingreso = (current_date() - interval %s MONTH)
-           returning id""",
-        (cedula, f"dev{cedula}@api.test", meses_antiguedad, meses_antiguedad),
-    )
-    await obtener_uno("select generar_periodos_vacaciones(%s)", (fila["id"],))
+    ingreso = Sql(f"CURRENT_DATE() - INTERVAL {int(meses_antiguedad)} MONTH")
+    fila = await persona(cedula, al_existir={"fecha_ingreso": ingreso}, nombre="Devengo Prueba",
+                         email=f"dev{cedula}@api.test", rol="empleado", fecha_ingreso=ingreso)
+    await periodos.generar_periodos_vacaciones(fila["id"])
     return str(fila["id"])
 
 
@@ -73,8 +71,8 @@ async def test_una_antiguedad_larga_no_pierde_dias_por_el_camino():
     assert saldo > 300, f"con 18 años sin gozar nada el saldo debería ser alto: {saldo}"
 
     periodos = await obtener_uno(
-        """select count(*) filter (where caducado) as caducados,
-                  count(*) filter (where vence_en is not null) as con_vencimiento,
+        """select sum(caducado) as caducados,
+                  sum(vence_en is not null) as con_vencimiento,
                   count(*) as total
              from vacation_periods where user_id = %s""", (user_id,))
     assert periodos["total"] >= 18
@@ -86,7 +84,7 @@ async def test_una_antiguedad_larga_no_pierde_dias_por_el_camino():
 
 async def test_la_carga_inicial_respeta_el_saldo_de_la_planilla():
     user_id = await _crear("1700000019", 8)
-    await obtener_uno("select cargar_saldo_inicial(%s, 7.5, 0)", (user_id,))
+    await periodos.cargar_saldo_inicial(user_id, Decimal("7.5"), 0)
     fila = await obtener_uno(
         "select dias_vacaciones from users where id = %s", (user_id,))
     assert float(fila["dias_vacaciones"]) == pytest.approx(7.5, abs=0.01)
@@ -96,7 +94,7 @@ async def test_la_carga_conserva_un_saldo_negativo():
     """Diez personas de la planilla ya adelantaron días. Redondear a cero
     haría perder el registro de esa deuda."""
     user_id = await _crear("1700000019", 8)
-    await obtener_uno("select cargar_saldo_inicial(%s, -1.0, 0)", (user_id,))
+    await periodos.cargar_saldo_inicial(user_id, Decimal("-1.0"), 0)
     fila = await obtener_uno(
         "select dias_vacaciones from users where id = %s", (user_id,))
     assert float(fila["dias_vacaciones"]) == pytest.approx(-1.0, abs=0.01)
@@ -106,5 +104,5 @@ async def test_la_carga_rechaza_un_saldo_imposible():
     """Más días de los devengados no es un saldo: es un dato mal conciliado."""
     user_id = await _crear("1700000019", 3)
     with pytest.raises(Exception) as err:
-        await obtener_uno("select cargar_saldo_inicial(%s, 40, 0)", (user_id,))
+        await periodos.cargar_saldo_inicial(user_id, Decimal("40"), 0)
     assert "supera lo devengado" in str(err.value)

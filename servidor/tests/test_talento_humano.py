@@ -14,7 +14,7 @@ from __future__ import annotations
 import pytest
 
 from tests.conftest import Sql, persona
-from app.db import ejecutar, obtener_todos, obtener_uno
+from app.db import ejecutar, obtener_todos, obtener_uno, lista
 from tests.test_reglas_nuevas import (CEDULA_RRHH_R, auth, rrhh_auth)  # noqa: F401
 
 CEDULA_OTRO_RRHH = "0900000027"
@@ -30,7 +30,7 @@ async def buzones_como_estaban():
     """
     claves = ("rrhh_correo_sierra", "rrhh_correo_costa")
     antes = {c["clave"]: c["valor"] for c in await obtener_todos(
-        "select clave, valor from app_config where clave = any(%s)", (list(claves),))}
+        "select clave, valor from app_config where clave in %s", (lista(claves),))}
     yield
     for clave, valor in antes.items():
         await ejecutar("update app_config set valor = %s where clave = %s",

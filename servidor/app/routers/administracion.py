@@ -14,10 +14,13 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from ..audit import registrar
 from ..cedula import es_cedula_valida, normalizar_cedula
-from ..db import obtener_todos, obtener_uno
+from ..db import booleanos, ejecutar, nuevo_id, obtener_todos, obtener_uno, transaccion
 from ..deps import exigir_rol
 from ..errores import es_unicidad, restriccion_de, traducir
 from ..exportar import Informe, entregar
+from ..reglas import administracion as reglas_admin
+from ..reglas import periodos
+from ..reglas.saldo import saldo_desglosado
 
 router = APIRouter(tags=["Administración"])
 
@@ -96,19 +99,19 @@ class CambioArticulo(BaseModel):
 async def listar_usuarios(usuario: RRHH, q: str = "", incluir_inactivos: bool = False) -> list[dict]:
     return await obtener_todos(
         """
-        select u.id, u.cedula, u.nombre, u.email, u.telefono, u.rol::text, u.cargo,
+        select u.id, u.cedula, u.nombre, u.email, u.telefono, u.rol, u.cargo,
                u.departamento, u.fecha_ingreso, u.fecha_salida, u.activo,
-               u.dias_vacaciones, public.anios_cumplidos(u.fecha_ingreso) as anios_servicio,
+               u.dias_vacaciones, anios_cumplidos(u.fecha_ingreso) as anios_servicio,
                j.nombre as jefe_nombre, u.jefe_id,
-               (select count(*) from public.requests r where r.user_id = u.id) as solicitudes
-        from public.users u
-        left join public.users j on j.id = u.jefe_id
+               (select count(*) from requests r where r.user_id = u.id) as solicitudes
+        from users u
+        left join users j on j.id = u.jefe_id
         where (%(inactivos)s or u.activo)
           and (%(q)s = ''
-               or u.nombre ilike %(like)s
-               or u.cargo ilike %(like)s
-               or u.departamento ilike %(like)s
-               or u.email ilike %(like)s
+               or u.nombre like %(like)s
+               or u.cargo like %(like)s
+               or u.departamento like %(like)s
+               or u.email like %(like)s
                -- Solo si la búsqueda trae dígitos. `normalizar_cedula` los
                -- deja en nada cuando se busca por texto, y el patrón quedaba
                -- siendo el comodín solo, que coincide con toda la planilla:
@@ -150,7 +153,7 @@ async def _choque_de_ficha(exc: Exception, email: str | None = None,
         # tiene que hacerlo igual o diría «no encuentro a nadie».
         duena = await obtener_uno(
             """select nombre, cedula, activo, departamento
-                 from public.users where email = %s""", (email,))
+                 from users where email = %s""", (email,))
         if duena:
             estado = "" if duena["activo"] else " (ficha inactiva)"
             area = f", {duena['departamento']}" if duena["departamento"] else ""
@@ -165,7 +168,7 @@ async def _choque_de_ficha(exc: Exception, email: str | None = None,
 
     if restriccion == "users_cedula_key" and cedula:
         duena = await obtener_uno(
-            "select nombre, activo from public.users where cedula = %s", (cedula,))
+            "select nombre, activo from users where cedula = %s", (cedula,))
         if duena:
             estado = "" if duena["activo"] else " Esa ficha está inactiva: puede reactivarla."
             return HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
@@ -178,25 +181,29 @@ async def _choque_de_ficha(exc: Exception, email: str | None = None,
 
 @router.post("/admin/usuarios", status_code=status.HTTP_201_CREATED)
 async def crear_usuario(datos: NuevoUsuario, request: Request, usuario: RRHH) -> dict:
+    nuevo = nuevo_id()
     try:
-        creado = await obtener_uno(
-            """
-            insert into public.users
-                (cedula, nombre, email, telefono, rol, cargo, departamento, jefe_id, fecha_ingreso)
-            values (%(cedula)s, %(nombre)s, %(email)s, %(telefono)s, %(rol)s,
-                    %(cargo)s, %(depto)s, %(jefe)s, %(ingreso)s)
-            returning id, cedula, nombre
-            """,
-            {"cedula": datos.cedula, "nombre": datos.nombre.strip(), "email": str(datos.email),
-             "telefono": datos.telefono, "rol": datos.rol, "cargo": datos.cargo,
-             "depto": datos.departamento, "jefe": datos.jefe_id, "ingreso": datos.fecha_ingreso},
-        )
-        # El saldo se cuadra con lo que RRHH ya tiene registrado en planilla
-        if datos.saldo_inicial is not None:
-            await obtener_uno("select public.cargar_saldo_inicial(%s, %s::numeric, 0) as saldo",
-                              (creado["id"], datos.saldo_inicial))
-        else:
-            await obtener_uno("select public.generar_periodos_vacaciones(%s) as ok", (creado["id"],))
+        # La ficha y sus períodos van juntos: una persona creada sin períodos
+        # vería saldo cero hasta que alguien lo notara.
+        async with transaccion():
+            await ejecutar(
+                """
+                insert into users
+                    (id, cedula, nombre, email, telefono, rol, cargo, departamento, jefe_id, fecha_ingreso)
+                values (%(id)s, %(cedula)s, %(nombre)s, %(email)s, %(telefono)s, %(rol)s,
+                        %(cargo)s, %(depto)s, %(jefe)s, %(ingreso)s)
+                """,
+                {"id": nuevo, "cedula": datos.cedula, "nombre": datos.nombre.strip(),
+                 "email": str(datos.email), "telefono": datos.telefono, "rol": datos.rol,
+                 "cargo": datos.cargo, "depto": datos.departamento, "jefe": datos.jefe_id,
+                 "ingreso": datos.fecha_ingreso},
+            )
+            # El saldo se cuadra con lo que RRHH ya tiene registrado en planilla
+            if datos.saldo_inicial is not None:
+                await periodos.cargar_saldo_inicial(nuevo, datos.saldo_inicial, 0)
+            else:
+                await periodos.generar_periodos_vacaciones(nuevo)
+        creado = await obtener_uno("select id, cedula, nombre from users where id = %s", (nuevo,))
     except Exception as exc:  # noqa: BLE001
         raise await _choque_de_ficha(exc, email=str(datos.email), cedula=datos.cedula) from exc
 
@@ -227,10 +234,10 @@ async def editar_usuario(user_id: uuid.UUID, cambios: CambioUsuario,
     # obliga a decir a quién pasan las personas y los pendientes.
     if campos.get("rol") is not None and campos["rol"] not in ("jefe", "rrhh", "admin"):
         cuenta = await obtener_uno(
-            """select u.nombre, u.rol::text as rol,
-                      (select count(*) from public.users s
+            """select u.nombre, u.rol,
+                      (select count(*) from users s
                         where s.jefe_id = u.id and s.activo) as a_cargo
-                 from public.users u where u.id = %s""",
+                 from users u where u.id = %s""",
             (user_id,),
         )
         if cuenta and cuenta["rol"] in ("jefe", "rrhh", "admin") and cuenta["a_cargo"]:
@@ -245,10 +252,9 @@ async def editar_usuario(user_id: uuid.UUID, cambios: CambioUsuario,
 
     asignaciones = ", ".join(f"{k} = %({k})s" for k in campos)
     try:
-        actualizado = await obtener_uno(
-            f"update public.users set {asignaciones} where id = %(id)s returning id, nombre",
-            {**campos, "id": user_id},
-        )
+        await ejecutar(f"update users set {asignaciones} where id = %(id)s",
+                       {**campos, "id": user_id})
+        actualizado = await obtener_uno("select id, nombre from users where id = %s", (user_id,))
     except Exception as exc:  # noqa: BLE001
         raise await _choque_de_ficha(exc, email=campos.get("email")) from exc
 
@@ -291,15 +297,15 @@ class CorreoDepartamento(BaseModel):
 @router.get("/admin/talento-humano")
 async def listar_talento_humano(usuario: RRHH) -> dict:
     """Quiénes integran el departamento y a qué buzón llegan sus avisos."""
-    gente = await obtener_todos("select * from public.v_talento_humano")
+    gente = await obtener_todos("select * from v_talento_humano")
     correos = await obtener_todos(
-        """select clave, valor from public.app_config
+        """select clave, valor from app_config
             where clave in ('rrhh_correo_sierra', 'rrhh_correo_costa')""")
     por_clave = {c["clave"]: (c["valor"] or "") for c in correos}
     return {
         "integrantes": [{**f, "id": str(f["id"]),
                          "esperando_en_su_region": int(f["esperando_en_su_region"])}
-                        for f in gente],
+                        for f in booleanos(gente, "puede_recibir")],
         "correos": {"sierra": por_clave.get("rrhh_correo_sierra", ""),
                     "costa": por_clave.get("rrhh_correo_costa", "")},
     }
@@ -309,8 +315,8 @@ async def listar_talento_humano(usuario: RRHH) -> dict:
 async def integrar_a_talento_humano(datos: NuevoIntegranteRRHH, request: Request,
                                     usuario: RRHH) -> dict:
     try:
-        fila = await obtener_uno("select public.rrhh_integrar(%s, %s, %s) as r",
-                                 (datos.persona_id, datos.region, usuario["id"]))
+        fila = {"r": await reglas_admin.rrhh_integrar(datos.persona_id, datos.region,
+                                                      usuario["id"])}
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
@@ -330,8 +336,7 @@ async def retirar_de_talento_humano(user_id: uuid.UUID, datos: BajaRRHH,
     hay un problema, así que la baja tiene que ser tan fácil como el alta.
     """
     try:
-        fila = await obtener_uno("select public.rrhh_retirar(%s, %s, %s) as r",
-                                 (user_id, datos.rol_destino, usuario["id"]))
+        fila = {"r": await reglas_admin.rrhh_retirar(user_id, datos.rol_destino, usuario["id"])}
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
@@ -351,10 +356,8 @@ async def cambiar_correos_departamento(datos: CorreoDepartamento, request: Reque
     cuando los avisos se pierden sin que nadie se entere.
     """
     for region, valor in (("sierra", datos.sierra), ("costa", datos.costa)):
-        await obtener_uno(
-            """update public.app_config set valor = %s
-                where clave = %s returning clave""",
-            (valor, f"rrhh_correo_{region}"))
+        await ejecutar("update app_config set valor = %s where clave = %s",
+                       (valor, f"rrhh_correo_{region}"))
 
     await registrar(request, "rrhh_correo_departamento", user_id=str(usuario["id"]),
                     cedula=usuario["cedula"], entidad="app_config",
@@ -437,10 +440,8 @@ async def dar_de_baja(user_id: uuid.UUID, datos: BajaColaborador,
     devuelve para resolverlo ahora en vez de descubrirlo semanas después.
     """
     try:
-        fila = await obtener_uno(
-            "select public.dar_de_baja(%s, %s, %s, %s, %s) as r",
-            (user_id, datos.fecha_salida, datos.motivo, datos.detalle, usuario["id"]),
-        )
+        fila = {"r": await reglas_admin.dar_de_baja(
+            user_id, datos.fecha_salida, datos.motivo, datos.detalle, usuario["id"])}
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
@@ -456,7 +457,7 @@ async def dar_de_baja(user_id: uuid.UUID, datos: BajaColaborador,
 async def salidas(usuario: RRHH, limite: int = 200) -> list[dict]:
     """Quiénes salieron, cuándo, por qué y con cuántos días por liquidar."""
     filas = await obtener_todos(
-        "select * from public.v_salidas limit %s", (min(limite, 1000),))
+        "select * from v_salidas limit %s", (min(limite, 1000),))
     return [{**f, "id": str(f["id"]),
              "dias_por_liquidar": float(f["dias_por_liquidar"] or 0)} for f in filas]
 
@@ -475,7 +476,7 @@ class BajaJefatura(BaseModel):
 @router.get("/admin/jefaturas")
 async def listar_jefaturas(usuario: RRHH) -> list[dict]:
     """Quiénes tienen mando hoy, con cuánta gente y cuánto les está esperando."""
-    filas = await obtener_todos("select * from public.v_jefaturas_admin")
+    filas = await obtener_todos("select * from v_jefaturas_admin")
     return [{**f, "id": str(f["id"]), "a_cargo": int(f["a_cargo"]),
              "esperando": int(f["esperando"])} for f in filas]
 
@@ -483,8 +484,7 @@ async def listar_jefaturas(usuario: RRHH) -> list[dict]:
 @router.post("/admin/jefaturas", status_code=status.HTTP_201_CREATED)
 async def crear_jefatura(datos: NuevaJefatura, request: Request, usuario: RRHH) -> dict:
     try:
-        fila = await obtener_uno("select public.jefatura_crear(%s, %s) as r",
-                                 (datos.persona_id, usuario["id"]))
+        fila = {"r": await reglas_admin.jefatura_crear(datos.persona_id, usuario["id"])}
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
@@ -506,10 +506,8 @@ async def quitar_jefatura(user_id: uuid.UUID, datos: BajaJefatura,
     ya no puede aprobarle nada.
     """
     try:
-        fila = await obtener_uno(
-            "select public.jefatura_quitar(%s, %s, %s, %s) as r",
-            (user_id, datos.nuevo_jefe_id, datos.rol_destino, usuario["id"]),
-        )
+        fila = {"r": await reglas_admin.jefatura_quitar(
+            user_id, datos.nuevo_jefe_id, datos.rol_destino, usuario["id"])}
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
@@ -526,8 +524,7 @@ async def quitar_jefatura(user_id: uuid.UUID, datos: BajaJefatura,
 async def ajustar_saldo(user_id: uuid.UUID, saldo: float, request: Request, usuario: RRHH) -> dict:
     """Cuadra el saldo con el que Talento Humano tiene en planilla."""
     try:
-        fila = await obtener_uno("select public.cargar_saldo_inicial(%s, %s::numeric, 0) as saldo",
-                                 (user_id, saldo))
+        fila = {"saldo": await periodos.cargar_saldo_inicial(str(user_id), saldo, 0)}
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
@@ -550,7 +547,7 @@ async def periodos_de(user_id: uuid.UUID, usuario: RRHH) -> list[dict]:
         select periodo, fecha_desde, fecha_hasta, dias_asignados, dias_consumidos,
                dias_saldo, fines_semana_obligatorios, fines_semana_consumidos,
                vence_en, caducado, devengado
-        from public.vacation_periods where user_id = %s order by periodo
+        from vacation_periods where user_id = %s order by periodo
         """,
         (user_id,),
     )
@@ -568,10 +565,8 @@ async def corregir_fines_semana(
     arregla, y solo desde aquí: el empleado no toca su propio contador.
     """
     try:
-        await obtener_uno(
-            "select public.corregir_fines_semana(%s, %s, %s, %s, %s) as p",
-            (user_id, datos.periodo, datos.consumidos, datos.motivo, usuario["id"]),
-        )
+        await periodos.corregir_fines_semana(str(user_id), datos.periodo, datos.consumidos,
+                                             datos.motivo, usuario["id"])
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
@@ -589,14 +584,14 @@ async def antiguedades(usuario: RRHH) -> list[dict]:
     return await obtener_todos(
         """
         select u.id, u.cedula, u.nombre, u.departamento, u.fecha_ingreso,
-               public.anios_cumplidos(u.fecha_ingreso) as anios,
-               public.dias_por_antiguedad(greatest(public.anios_cumplidos(u.fecha_ingreso), 1)) as dias_por_anio,
+               anios_cumplidos(u.fecha_ingreso) as anios,
+               dias_por_antiguedad(greatest(anios_cumplidos(u.fecha_ingreso), 1)) as dias_por_anio,
                u.dias_vacaciones as saldo,
-               (select count(*) from public.vacation_periods p
+               (select count(*) from vacation_periods p
                  where p.user_id = u.id and p.caducado and p.dias_saldo > 0) as periodos_caducados
-        from public.users u
+        from users u
         where u.activo
-        order by public.anios_cumplidos(u.fecha_ingreso) desc, u.nombre
+        order by anios_cumplidos(u.fecha_ingreso) desc, u.nombre
         """
     )
 
@@ -606,8 +601,8 @@ async def antiguedades(usuario: RRHH) -> list[dict]:
 async def listar_tipos(usuario: RRHH) -> list[dict]:
     return await obtener_todos(
         """select pt.*, l.norma, l.articulo, l.titulo as articulo_titulo
-           from public.permission_types pt
-           left join public.legal_references l on l.codigo = pt.legal_ref
+           from permission_types pt
+           left join legal_references l on l.codigo = pt.legal_ref
            order by pt.orden"""
     )
 
@@ -621,10 +616,9 @@ async def editar_tipo(tipo_id: int, cambios: CambioTipoPermiso,
 
     asignaciones = ", ".join(f"{k} = %({k})s" for k in campos)
     try:
-        fila = await obtener_uno(
-            f"update public.permission_types set {asignaciones} where id = %(id)s returning nombre",
-            {**campos, "id": tipo_id},
-        )
+        await ejecutar(f"update permission_types set {asignaciones} where id = %(id)s",
+                       {**campos, "id": tipo_id})
+        fila = await obtener_uno("select nombre from permission_types where id = %s", (tipo_id,))
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
@@ -641,8 +635,8 @@ async def editar_tipo(tipo_id: int, cambios: CambioTipoPermiso,
 @router.get("/admin/feriados")
 async def listar_feriados(usuario: RRHH, anio: int | None = None) -> list[dict]:
     return await obtener_todos(
-        """select fecha, nombre, activo from public.feriados
-           where extract(year from fecha) = coalesce(%s, extract(year from current_date))
+        """select fecha, nombre, activo from feriados
+           where year(fecha) = coalesce(%s, year(current_date()))
            order by fecha""",
         (anio,),
     )
@@ -651,10 +645,9 @@ async def listar_feriados(usuario: RRHH, anio: int | None = None) -> list[dict]:
 @router.post("/admin/feriados", status_code=status.HTTP_201_CREATED)
 async def crear_feriado(datos: NuevoFeriado, request: Request, usuario: RRHH) -> dict:
     try:
-        await obtener_uno(
-            """insert into public.feriados (fecha, nombre) values (%s, %s)
-               on conflict (fecha) do update set nombre = excluded.nombre, activo = true
-               returning fecha""",
+        await ejecutar(
+            """insert into feriados (fecha, nombre) values (%s, %s)
+               on duplicate key update nombre = values(nombre), activo = true""",
             (datos.fecha, datos.nombre.strip()),
         )
     except Exception as exc:  # noqa: BLE001
@@ -669,9 +662,9 @@ async def crear_feriado(datos: NuevoFeriado, request: Request, usuario: RRHH) ->
 @router.delete("/admin/feriados/{fecha}")
 async def quitar_feriado(fecha: date, request: Request, usuario: RRHH) -> dict:
     """Se desactiva en vez de borrarse: los cálculos pasados deben seguir cuadrando."""
-    fila = await obtener_uno(
-        "update public.feriados set activo = false where fecha = %s returning nombre", (fecha,)
-    )
+    fila = await obtener_uno("select nombre from feriados where fecha = %s", (fecha,))
+    if fila is not None:
+        await ejecutar("update feriados set activo = false where fecha = %s", (fecha,))
     if fila is None:
         raise HTTPException(status_code=404, detail={"mensaje": "No hay un feriado en esa fecha."})
 
@@ -686,8 +679,8 @@ async def configuracion(usuario: RRHH) -> list[dict]:
     return await obtener_todos(
         """select c.clave, c.valor, c.descripcion, c.updated_at,
                   l.norma, l.articulo, l.texto as articulo_texto
-           from public.app_config c
-           left join public.legal_references l on l.codigo = c.legal_ref
+           from app_config c
+           left join legal_references l on l.codigo = c.legal_ref
            order by c.clave"""
     )
 
@@ -696,14 +689,12 @@ async def configuracion(usuario: RRHH) -> list[dict]:
 async def cambiar_parametro(clave: str, cambio: CambioParametro,
                             request: Request, usuario: Admin) -> dict:
     """Solo administración: estos valores deciden derechos de toda la plantilla."""
-    anterior = await obtener_uno("select valor from public.app_config where clave = %s", (clave,))
+    anterior = await obtener_uno("select valor from app_config where clave = %s", (clave,))
     if anterior is None:
         raise HTTPException(status_code=404, detail={"mensaje": "Ese parámetro no existe."})
 
-    await obtener_uno(
-        "update public.app_config set valor = %s where clave = %s returning clave",
-        (cambio.valor.strip(), clave),
-    )
+    await ejecutar("update app_config set valor = %s where clave = %s",
+                   (cambio.valor.strip(), clave))
     await registrar(request, "parametro_modificado", user_id=str(usuario["id"]),
                     cedula=usuario["cedula"], entidad="app_config", entidad_id=clave,
                     detalle={"antes": anterior["valor"], "ahora": cambio.valor})
@@ -722,18 +713,19 @@ async def cambiar_parametro(clave: str, cambio: CambioParametro,
 async def listar_base_legal(usuario: RRHH, categoria: str | None = None) -> list[dict]:
     """Los artículos con su modo actual y quién lo cambió."""
     condicion = "where l.categoria = %s" if categoria else ""
-    return await obtener_todos(
+    filas = await obtener_todos(
         f"""select l.codigo, l.norma, l.articulo, l.titulo, l.texto, l.categoria,
                    l.visibilidad, l.resumen, l.visibilidad_en,
                    q.nombre as visibilidad_por,
                    l.codigo in ('CT_ART_69','CT_ART_75','CT_ART_73','CT_ART_74')
                      as sale_en_el_panel
-              from public.legal_references l
-              left join public.users q on q.id = l.visibilidad_por
+              from legal_references l
+              left join users q on q.id = l.visibilidad_por
               {condicion}
              order by l.orden""",
         (categoria,) if categoria else (),
     )
+    return booleanos(filas, "sale_en_el_panel")
 
 
 @router.patch("/admin/base-legal/{codigo}")
@@ -741,7 +733,7 @@ async def cambiar_articulo(codigo: str, cambio: CambioArticulo,
                            request: Request, usuario: Admin) -> dict:
     """Solo administración: decide lo que trescientas cincuenta personas leen."""
     antes = await obtener_uno(
-        "select articulo, visibilidad, resumen from public.legal_references where codigo = %s",
+        "select articulo, visibilidad, resumen from legal_references where codigo = %s",
         (codigo,))
     if antes is None:
         raise HTTPException(status_code=404, detail={"mensaje": "Ese artículo no existe."})
@@ -755,15 +747,19 @@ async def cambiar_articulo(codigo: str, cambio: CambioArticulo,
         raise HTTPException(status_code=422, detail={
             "mensaje": f"Para mostrar {antes['articulo']} en resumen hay que escribir el resumen."})
 
+    try:
+        await ejecutar(
+            """update legal_references
+                  set visibilidad     = coalesce(%s, visibilidad),
+                      resumen         = coalesce(%s, resumen),
+                      visibilidad_en  = NOW(6),
+                      visibilidad_por = %s
+                where codigo = %s""",
+            (cambio.visibilidad, resumen, str(usuario["id"]), codigo))
+    except Exception as exc:  # noqa: BLE001
+        raise traducir(exc) from exc
     fila = await obtener_uno(
-        """update public.legal_references
-              set visibilidad     = coalesce(%s, visibilidad),
-                  resumen         = coalesce(%s, resumen),
-                  visibilidad_en  = now(),
-                  visibilidad_por = %s
-            where codigo = %s
-          returning articulo, visibilidad""",
-        (cambio.visibilidad, resumen, str(usuario["id"]), codigo))
+        "select articulo, visibilidad from legal_references where codigo = %s", (codigo,))
 
     await registrar(request, "base_legal_modificada", user_id=str(usuario["id"]),
                     cedula=usuario["cedula"], entidad="legal_references", entidad_id=codigo,
@@ -813,29 +809,34 @@ async def exportar_cotejo(
     if departamento:
         condiciones.append("u.departamento = %(depto)s")
         parametros["depto"] = departamento
-    if solo_revisar:
-        condiciones.append(
-            "(u.correo_pendiente or u.jefe_id is null"
-            " or u.dias_vacaciones is distinct from d.dias_ganados + d.dias_en_curso)")
 
     filas = await obtener_todos(
         f"""
-        select u.cedula, u.nombre, u.email, u.rol::text as rol, u.cargo, u.departamento,
-               u.bodega, u.centro_costo, u.cliente, u.ciudad, u.region::text as region,
-               u.fecha_ingreso, public.anios_cumplidos(u.fecha_ingreso) as anios_servicio,
+        select u.id, u.cedula, u.nombre, u.email, u.rol, u.cargo, u.departamento,
+               u.bodega, u.centro_costo, u.cliente, u.ciudad, u.region,
+               u.fecha_ingreso, anios_cumplidos(u.fecha_ingreso) as anios_servicio,
                j.nombre as jefe_nombre, u.telefono, u.correo_pendiente, u.activo,
                u.dias_vacaciones as saldo_mostrado,
-               d.dias_ganados, d.dias_en_curso, d.dias_caducados,
-               (select count(*) from public.vacation_periods p
+               (select count(*) from vacation_periods p
                  where p.user_id = u.id and not p.caducado) as periodos
-        from public.users u
-        left join public.users j on j.id = u.jefe_id
-        cross join lateral public.saldo_desglosado(u.id) d
+        from users u
+        left join users j on j.id = u.jefe_id
         where {' and '.join(condiciones)}
-        order by u.departamento nulls last, u.nombre
+        order by u.departamento is null, u.departamento, u.nombre
         """,
         parametros,
     )
+    # El desglose es una regla en Python (en PostgreSQL era un LATERAL sobre
+    # una función): se calcula por persona. Son unas 350; no pesa.
+    for fila in filas:
+        d = await saldo_desglosado(fila.pop("id"))
+        fila.update(dias_ganados=d["dias_ganados"], dias_en_curso=d["dias_en_curso"],
+                    dias_caducados=d["dias_caducados"])
+    if solo_revisar:
+        filas = [f for f in filas
+                 if f["correo_pendiente"] or f["jefe_nombre"] is None
+                 or f["saldo_mostrado"] is None
+                 or f["saldo_mostrado"] != f["dias_ganados"] + f["dias_en_curso"]]
 
     informe = Informe(
         titulo="Cotejo de la carga inicial",
@@ -864,9 +865,9 @@ async def bitacora(usuario: RRHH, limite: int = 100, accion: str | None = None) 
         """
         select a.id, a.accion, a.entidad, a.entidad_id, a.ip, a.detalle, a.created_at,
                coalesce(u.nombre, a.cedula, 'sistema') as quien
-        from public.audit_logs a
-        left join public.users u on u.id = a.user_id
-        where (%(accion)s::text is null or a.accion like %(patron)s)
+        from audit_logs a
+        left join users u on u.id = a.user_id
+        where (%(accion)s is null or a.accion like %(patron)s)
         order by a.created_at desc
         limit %(limite)s
         """,
@@ -883,26 +884,27 @@ async def colaboradores(usuario: Annotated[dict, Depends(exigir_rol("jefe", "rrh
     else:
         filtro, parametros = "u.activo", {}
 
-    return await obtener_todos(
+    filas = await obtener_todos(
         f"""
         select u.id, u.cedula, u.nombre, u.cargo, u.departamento, u.fecha_ingreso,
-               public.anios_cumplidos(u.fecha_ingreso) as anios,
+               anios_cumplidos(u.fecha_ingreso) as anios,
                u.dias_vacaciones as saldo,
-               public.fines_semana_pendientes(u.id) as fines_semana_pendientes,
+               fines_semana_pendientes(u.id) as fines_semana_pendientes,
                -- Nulo mientras la caducidad esté apagada, que es lo normal:
                -- la empresa no extingue días y una fecha de vencimiento que
                -- no va a cumplirse asusta sin motivo.
-               (select min(p.vence_en) from public.vacation_periods p
+               (select min(p.vence_en) from vacation_periods p
                  where p.user_id = u.id and not p.caducado and p.dias_saldo > 0) as proximo_vencimiento,
-               public.caducidad_activa() as caducidad_activa,
-               (select count(*) from public.requests r
+               caducidad_activa() as caducidad_activa,
+               (select count(*) from requests r
                  where r.user_id = u.id and r.estado in ('pendiente_jefe','pendiente_rrhh')) as en_tramite
-        from public.users u
+        from users u
         where {filtro} and u.activo
         order by u.nombre
         """,
         parametros,
     )
+    return booleanos(filas, "caducidad_activa")
 
 
 # --------------------------------------------------------------- lineamientos
@@ -924,7 +926,7 @@ class Lineamiento(BaseModel):
 async def lineamientos_listar(
     _: Annotated[dict, Depends(exigir_rol("rrhh", "admin"))]
 ) -> list[dict]:
-    return await obtener_todos("select * from public.v_lineamientos")
+    return await obtener_todos("select * from v_lineamientos")
 
 
 @router.post("/rrhh/lineamientos", status_code=status.HTTP_201_CREATED)
@@ -933,11 +935,8 @@ async def lineamiento_crear(
     usuario: Annotated[dict, Depends(exigir_rol("rrhh", "admin"))],
 ) -> dict:
     try:
-        fila = await obtener_uno(
-            """select * from public.lineamiento_guardar(
-                   null, %s, %s, %s, %s::smallint, %s)""",
-            (usuario["id"], datos.texto, datos.ambito, datos.orden, datos.activo),
-        )
+        fila = await reglas_admin.lineamiento_guardar(
+            None, usuario["id"], datos.texto, datos.ambito, datos.orden, datos.activo)
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
     await registrar(request, "lineamiento.crear", user_id=str(usuario["id"]),
@@ -952,12 +951,8 @@ async def lineamiento_cambiar(
     usuario: Annotated[dict, Depends(exigir_rol("rrhh", "admin"))],
 ) -> dict:
     try:
-        fila = await obtener_uno(
-            """select * from public.lineamiento_guardar(
-                   %s, %s, %s, %s, %s::smallint, %s)""",
-            (lineamiento_id, usuario["id"], datos.texto, datos.ambito,
-             datos.orden, datos.activo),
-        )
+        fila = await reglas_admin.lineamiento_guardar(
+            lineamiento_id, usuario["id"], datos.texto, datos.ambito, datos.orden, datos.activo)
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
     await registrar(request, "lineamiento.cambiar", user_id=str(usuario["id"]),
@@ -982,45 +977,45 @@ async def depuracion(_: Annotated[dict, Depends(exigir_rol("rrhh", "admin"))]) -
     un correo que no existe y con roles de mando que nadie les dio.
     """
     cuentas = await obtener_todos("""
-        select cedula, nombre, email::text as email, rol, cargo, departamento,
-               a_cargo, solicitudes, historicas, que_hacer, user_id::text as user_id
-          from public.v_cuentas_de_prueba""")
+        select cedula, nombre, email, rol, cargo, departamento,
+               a_cargo, solicitudes, historicas, que_hacer, user_id
+          from v_cuentas_de_prueba""")
 
     fichas = await obtener_todos("""
         select cedula, nombre, departamento, cargo, rol, lo_principal, huecos,
                sin_correo, sin_cargo, sin_departamento, sin_nacimiento,
-               sin_telefono, sin_jefe, user_id::text as user_id
-          from public.v_fichas_incompletas limit 400""")
+               sin_telefono, sin_jefe, user_id
+          from v_fichas_incompletas limit 400""")
 
     jerarquia = await obtener_todos("""
         select cedula, nombre, rol, cargo, departamento, jefe_nombre,
-               jefe_activo, a_cargo, problema, user_id::text as user_id
-          from public.v_jerarquia where problema is not null
+               jefe_activo, a_cargo, problema, user_id
+          from v_jerarquia where problema is not null
           order by problema, nombre""")
 
     sin_entrada = await obtener_todos("""
         select cedula, nombre, departamento, motivo, que_hacer
-          from public.v_sin_entrada
+          from v_sin_entrada
          where sin_fecha_nacimiento or sin_fecha_ingreso""")
 
     historicas = await obtener_todos("""
         select u.cedula, u.nombre, u.fecha_ingreso, h.id, h.fecha_inicio,
                h.fecha_fin, h.dias, h.fila_origen,
                case when h.fecha_inicio < u.fecha_ingreso then 'anterior a su ingreso'
-                    when h.fecha_inicio > current_date    then 'con fecha futura'
-                    when h.dias > (h.fecha_fin - h.fecha_inicio + 1) then 'más días que fechas'
+                    when h.fecha_inicio > current_date()  then 'con fecha futura'
+                    when h.dias > (datediff(h.fecha_fin, h.fecha_inicio) + 1) then 'más días que fechas'
                     else 'días cero o negativos' end as problema
-          from public.vacaciones_historicas h
-          join public.users u on u.id = h.user_id
+          from vacaciones_historicas h
+          join users u on u.id = h.user_id
          where h.fecha_inicio < u.fecha_ingreso
-            or h.fecha_inicio > current_date
-            or h.dias > (h.fecha_fin - h.fecha_inicio + 1)
+            or h.fecha_inicio > current_date()
+            or h.dias > (datediff(h.fecha_fin, h.fecha_inicio) + 1)
             or h.dias <= 0
          order by u.nombre, h.fecha_inicio""")
 
     roles = await obtener_todos("""
-        select rol::text as rol, count(*) as personas
-          from public.users where activo group by rol order by 2 desc""")
+        select rol, count(*) as personas
+          from users where activo group by rol order by 2 desc""")
 
     return {
         "cuentas_de_prueba": cuentas,

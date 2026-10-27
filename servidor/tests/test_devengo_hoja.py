@@ -32,8 +32,8 @@ async def test_el_ano_en_curso_acumula_uno_con_veinticinco_al_mes(cliente):
     Es el caso que destapó todo: la hoja decía 83,75 devengados y el panel
     84,33 para la misma persona y el mismo día.
     """
-    hoy = await obtener_uno("select current_date() - interval '5 years 7 months' as f")
-    ingreso = str(hoy["f"].date())
+    hoy = await obtener_uno("select current_date() - interval 67 month as f")
+    ingreso = str(hoy["f"])
     assert await _devengado(ingreso, 6) == Decimal("8.75")
 
 
@@ -74,7 +74,7 @@ async def test_quien_lleva_menos_de_cinco_anos_no_ve_ninguna_diferencia(cliente)
     """
     for anios, meses in ((0, 7), (1, 3), (2, 11), (4, 6)):
         fila = await obtener_uno(
-            """select (current_date() - interval %s, months => %s YEAR) as f""",
+            """select (current_date() - interval %s year - interval %s month) as f""",
             (anios, meses))
         ingreso = str(fila["f"])
         esperado = (BASE * meses).quantize(Decimal("0.01"))
@@ -94,13 +94,13 @@ async def test_se_puede_volver_al_prorrateo_sin_otra_migracion(cliente):
     """
     from app.db import ejecutar
 
-    fila = await obtener_uno("select current_date() - interval '5 years 7 months' as f")
-    ingreso = str(fila["f"].date())
+    fila = await obtener_uno("select current_date() - interval 67 month as f")
+    ingreso = str(fila["f"])
     try:
         await ejecutar(
             """insert into app_config (clave, valor)
                values ('vacaciones_extra_prorrateado', 'true')
-               on conflict (clave) do update set valor = 'true'""")
+               on duplicate key update valor = 'true'""")
         assert await _devengado(ingreso, 6) == Decimal("9.33")
     finally:
         await ejecutar(
@@ -113,13 +113,13 @@ async def test_ante_un_parametro_raro_se_queda_con_el_calculo_de_la_hoja(cliente
     """Ni «sí», ni «1», ni vacío encienden el prorrateo. Solo «true»."""
     from app.db import ejecutar
 
-    fila = await obtener_uno("select current_date() - interval '5 years 7 months' as f")
-    ingreso = str(fila["f"].date())
+    fila = await obtener_uno("select current_date() - interval 67 month as f")
+    ingreso = str(fila["f"])
     for valor in ("si", "1", "", "TRUE.", "verdadero"):
         await ejecutar(
             """insert into app_config (clave, valor)
                values ('vacaciones_extra_prorrateado', %s)
-               on conflict (clave) do update set valor = excluded.valor""", (valor,))
+               on duplicate key update valor = values(valor)""", (valor,))
         assert await _devengado(ingreso, 6) == Decimal("8.75"), f"con «{valor}»"
     await ejecutar(
         """update app_config set valor = 'false'
@@ -152,13 +152,29 @@ async def test_ningun_aviso_dice_que_los_dias_se_pierden(cliente):
     prohibido = ("se pierden", "perderá", "perder sus días", "perderlas",
                  "caducan sus días")
 
-    # Los comodines van como parámetro: psycopg lee el signo de porcentaje
+    # Los comodines van como parámetro: el cliente lee el signo de porcentaje
     # como marcador aunque esté dentro de una cadena SQL.
     funciones = await obtener_todos(
-        """select proname, prosrc from pg_proc
-            where pronamespace = 'public'::regnamespace
-              and (proname like %s or proname like %s or proname like %s)""",
+        """select routine_name as proname, routine_definition as prosrc
+             from information_schema.routines
+            where routine_schema = database()
+              and (routine_name like %s or routine_name like %s or routine_name like %s)""",
         ("%alerta%", "%notific%", "%vacacion%"))
+    # En MySQL buena parte de esas reglas viven en Python. Se revisan las
+    # cadenas que el código le dice a la gente, no sus docstrings ni sus
+    # comentarios, que explican justamente que antes se anunciaba la pérdida.
+    import ast
+    from pathlib import Path
+    app = Path(__file__).resolve().parents[1] / "app"
+    for archivo in [*app.glob("reglas/*.py"), app / "notificaciones.py", app / "correo.py"]:
+        arbol = ast.parse(archivo.read_text(encoding="utf-8"))
+        docstrings = {id(n.body[0].value) for n in ast.walk(arbol)
+                      if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                      and n.body and isinstance(n.body[0], ast.Expr)
+                      and isinstance(n.body[0].value, ast.Constant)}
+        textos = [n.value for n in ast.walk(arbol)
+                  if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docstrings]
+        funciones.append({"proname": archivo.name, "prosrc": "\n".join(textos)})
     def sin_comentarios(fuente: str) -> str:
         """Lo que la función le dice a la gente, sin lo que se dice a sí misma.
 
@@ -195,7 +211,7 @@ async def test_a_este_anio_le_tocan_los_dias_del_periodo_en_curso(cliente, auth,
     a la persona, que es el número que Talento Humano contrasta con su hoja.
     """
     await ejecutar(
-        "update users set fecha_ingreso = current_date() - interval '7 years 6 months' "
+        "update users set fecha_ingreso = current_date() - interval 90 month "
         "where id = %s", (empleado["id"],))
 
     saldo = (await cliente.get("/auth/mi-saldo", headers=auth)).json()
@@ -207,7 +223,7 @@ async def test_a_este_anio_le_tocan_los_dias_del_periodo_en_curso(cliente, auth,
 async def test_por_debajo_de_seis_anios_no_cambia_nada(cliente, auth, empleado):
     """Todos esos períodos valen quince: el día adicional nace en el sexto."""
     await ejecutar(
-        "update users set fecha_ingreso = current_date() - interval '3 years 2 months' "
+        "update users set fecha_ingreso = current_date() - interval 38 month "
         "where id = %s", (empleado["id"],))
     saldo = (await cliente.get("/auth/mi-saldo", headers=auth)).json()
     assert saldo["anios_servicio"] == 3
@@ -218,7 +234,7 @@ async def test_la_correccion_no_mueve_el_saldo(cliente, auth, empleado):
     """El año en curso devenga sobre la base de quince, no sobre el tope del
     período: por eso esto corrige un texto y no un número de días."""
     await ejecutar(
-        "update users set fecha_ingreso = current_date() - interval '7 years 6 months' "
+        "update users set fecha_ingreso = current_date() - interval 90 month "
         "where id = %s", (empleado["id"],))
     saldo = (await cliente.get("/auth/mi-saldo", headers=auth)).json()
     fila = await obtener_uno(

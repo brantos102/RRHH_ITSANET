@@ -1,6 +1,6 @@
 """Que el manual de depuración siga diciendo la verdad.
 
-Los archivos de `supabase/depuracion/` los va a ejecutar una persona contra
+Los archivos de `mysql/depuracion/` los va a ejecutar una persona contra
 datos reales desde DBeaver. Si una consulta de ahí deja de funcionar porque
 una migración renombró algo, nadie se entera hasta que alguien la corre sobre
 la planilla y le sale un error a mitad de una transacción abierta.
@@ -17,7 +17,7 @@ import pytest
 
 from app.db import obtener_todos, obtener_uno
 
-CARPETA = Path(__file__).resolve().parents[2] / "supabase" / "depuracion"
+CARPETA = Path(__file__).resolve().parents[2] / "mysql" / "depuracion"
 
 
 def _consultas_ejecutables(archivo: Path) -> list[str]:
@@ -69,12 +69,11 @@ async def test_borrar_una_persona_sigue_arrastrando_su_expediente(cliente):
     —porque una migración cambió una cascada por SET NULL— el manual estaría
     asustando de más, y eso también se corrige."""
     cascadas = await obtener_todos("""
-        select c.conrelid::regclass as tabla
-          from pg_constraint c
-         where c.contype = 'f' and c.confdeltype = 'c'
-           and c.connamespace = 'public'::regnamespace
-           and c.confrelid = 'users'::regclass""")
-    nombres = {c["tabla"].replace("", "") for c in cascadas}
+        select table_name as tabla
+          from information_schema.referential_constraints
+         where constraint_schema = database()
+           and referenced_table_name = 'users' and delete_rule = 'CASCADE'""")
+    nombres = {c["tabla"] for c in cascadas}
     # Las que de verdad duelen: el expediente y lo que la LOPDP obliga a
     # conservar.
     for tabla in ("requests", "vacation_periods", "vacaciones_historicas",
@@ -87,31 +86,38 @@ async def test_borrar_una_persona_sigue_arrastrando_su_expediente(cliente):
 async def test_el_saldo_lo_recalcula_un_disparador(cliente):
     """La razón por la que el manual prohíbe editar `dias_vacaciones` a mano."""
     fila = await obtener_uno("""
-        select count(*) as n from pg_trigger t
-          join pg_class c on c.oid = t.tgrelid
-          join pg_proc p on p.oid = t.tgfoid
-         where not t.tgisinternal
-           and c.relname = 'vacation_periods'
-           and p.proname = 'tg_vac_periods_sync'""")
-    assert fila["n"] == 1, (
+        select count(*) as n from information_schema.triggers
+         where trigger_schema = database()
+           and event_object_table = 'vacation_periods'
+           and trigger_name in ('vacation_periods_ai_saldo', 'vacation_periods_au_saldo',
+                                'vacation_periods_ad_saldo')""")
+    assert fila["n"] == 3, (
         "desapareció el disparador que recalcula el saldo; el manual dice que "
         "existe y que por eso no se edita `users.dias_vacaciones` a mano")
 
 
 async def test_las_funciones_que_el_manual_manda_ejecutar_existen(cliente):
     """Nombres que la persona va a teclear en DBeaver tal como están escritos."""
-    for nombre in ("recalcular_saldos", "generar_periodos_vacaciones",
-                   "cargar_saldo_inicial", "es_cedula_valida", "anios_cumplidos"):
+    for nombre in ("es_cedula_valida", "anios_cumplidos"):
         fila = await obtener_uno(
-            """select count(*) as n from pg_proc
-                where pronamespace = 'public'::regnamespace and proname = %s""",
+            """select count(*) as n from information_schema.routines
+                where routine_schema = database() and routine_name = %s""",
             (nombre,))
         assert fila["n"] >= 1, f"el manual manda ejecutar «{nombre}» y no existe"
+
+
+def test_las_ordenes_de_saldos_que_cita_el_manual_existen():
+    """En MySQL recalcular, regenerar y cargar saldos van por mysql/saldos.py."""
+    herramienta = (CARPETA.parent / "saldos.py").read_text(encoding="utf-8")
+    manual = "".join(a.read_text(encoding="utf-8") for a in CARPETA.glob("*.sql"))
+    for orden in ("recalcular", "regenerar", "cargar", "explicar"):
+        assert f"mysql/saldos.py {orden}" in manual, f"el manual ya no cita «{orden}»"
+        assert f'add_parser("{orden}"' in herramienta, f"saldos.py perdió la orden «{orden}»"
 
 
 async def test_las_vistas_que_usa_el_manual_existen(cliente):
     for vista in ("v_sin_entrada", "v_fines_semana"):
         fila = await obtener_uno(
             """select count(*) as n from information_schema.views
-                where table_schema = 'public' and table_name = %s""", (vista,))
+                where table_schema = database() and table_name = %s""", (vista,))
         assert fila["n"] == 1, f"el manual consulta «{vista}» y no existe"

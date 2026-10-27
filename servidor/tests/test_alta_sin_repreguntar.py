@@ -17,6 +17,7 @@ from datetime import date
 
 import pytest
 
+from tests.conftest import persona
 from app.db import ejecutar, obtener_uno
 
 CEDULA_COMPLETO = "0914723788"
@@ -25,25 +26,21 @@ CEDULA_COMPLETO = "0914723788"
 @pytest.fixture
 async def ficha_completa_sin_correo():
     """Alguien con TODO menos el correo: el caso de la planilla real."""
-    fila = await obtener_uno(
-        """insert into users
-             (cedula, nombre, email, correo_pendiente, ficha_completa, rol,
-              fecha_ingreso, fecha_nacimiento, telefono, direccion, cargo, departamento)
-           values (%s, 'Prueba Expediente Completo', null, true, false, 'empleado',
-                   date '2019-03-11', date '1990-07-22', '0987654321',
-                   'Av. Siempre Viva 742', 'Estibador', 'ALMACENAMIENTO')
-           on conflict (cedula) do update
-             set correo_pendiente = true, ficha_completa = false, email = null,
-                 telefono = '0987654321', direccion = 'Av. Siempre Viva 742'
-           returning id""",
-        (CEDULA_COMPLETO,),
-    )
+    fila = await persona(
+        CEDULA_COMPLETO,
+        al_existir={"correo_pendiente": True, "ficha_completa": False, "email": None,
+                    "telefono": "0987654321", "direccion": "Av. Siempre Viva 742"},
+        nombre="Prueba Expediente Completo", email=None, correo_pendiente=True,
+        ficha_completa=False, rol="empleado", fecha_ingreso="2019-03-11",
+        fecha_nacimiento="1990-07-22", telefono="0987654321",
+        direccion="Av. Siempre Viva 742", cargo="Estibador", departamento="ALMACENAMIENTO")
+    # El índice único parcial de PostgreSQL (un principal por persona) es en
+    # MySQL una columna generada con índice único: choca igual y se actualiza.
     await ejecutar(
         """insert into emergency_contacts
              (user_id, nombre, parentesco, telefono, es_principal)
            values (%s, 'Contacto Ya Registrado', 'madre', '0991112223', true)
-           on conflict (user_id) where es_principal do update
-             set nombre = excluded.nombre""",
+           on duplicate key update nombre = values(nombre)""",
         (fila["id"],),
     )
     yield {"id": str(fila["id"]), "cedula": CEDULA_COMPLETO}

@@ -175,10 +175,16 @@ async def _limpiar() -> None:
     await ejecutar("DELETE FROM visitors WHERE nombre LIKE %s", ("Proveedor de prueba%",))
     # También por cédula: una prueba que cambie el correo de un usuario de
     # prueba lo dejaba fuera de esta limpieza y rompía a las siguientes.
+    de_prueba = lista([CEDULA_PRUEBA, "0900000001", "1100000007", "1200000006",
+                       "1700000019", "1700000027", "1700000035"])
+    # PostgreSQL comprueba una clave foránea al final de la sentencia; MySQL,
+    # fila por fila. Borrar juntos a quien dio de baja y a quien fue dado de
+    # baja falla según el orden, así que esa referencia se suelta antes.
     await ejecutar(
-        "DELETE FROM users WHERE cedula IN %s",
-        (lista([CEDULA_PRUEBA, "0900000001", "1100000007", "1200000006",
-                "1700000019", "1700000027", "1700000035"]),))
+        """UPDATE users SET salida_registrada_por = NULL
+            WHERE salida_registrada_por IN (SELECT id FROM (SELECT id FROM users WHERE cedula IN %s) x)""",
+        (de_prueba,))
+    await ejecutar("DELETE FROM users WHERE cedula IN %s", (de_prueba,))
     await ejecutar("DELETE FROM users WHERE email LIKE %s", ("%@api.test",))
     await ejecutar("DELETE FROM users WHERE email LIKE %s", ("%@empresa-prueba.com",))
 

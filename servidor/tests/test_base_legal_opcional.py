@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.db import ejecutar, obtener_todos, obtener_uno
+from app.db import ejecutar, obtener_todos, obtener_uno, lista
 from tests.test_panel_configurable import admin_auth  # noqa: F401
 from tests.test_reglas_nuevas import (CEDULA_JEFE_R, CEDULA_RRHH_R,  # noqa: F401
                                       auth, jefe_auth, rrhh_auth)
@@ -124,8 +124,8 @@ async def test_resumen_reemplaza_el_texto_y_lo_dice(cliente, auth):
 async def test_el_resumen_del_75_y_del_76_vienen_escritos():
     """Para no tener que redactarlos en la reunión con Talento Humano."""
     filas = await obtener_todos(
-        "select codigo, resumen from legal_references where codigo = any(%s)",
-        (["CT_ART_69", "CT_ART_73", "CT_ART_74", "CT_ART_75", "CT_ART_76"],))
+        "select codigo, resumen from legal_references where codigo in %s",
+        (lista(["CT_ART_69", "CT_ART_73", "CT_ART_74", "CT_ART_75", "CT_ART_76"]),))
     for f in filas:
         assert (f["resumen"] or "").strip(), f["codigo"]
 

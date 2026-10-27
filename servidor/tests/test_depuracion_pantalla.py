@@ -33,7 +33,7 @@ async def test_una_cuenta_de_prueba_con_historial_se_marca_como_persona_real(
         """insert into vacaciones_historicas
              (user_id, fecha_inicio, fecha_fin, dias, origen)
            values (%s, current_date() - interval 400 day, current_date() - interval 396 day, 5, 'prueba')
-           on conflict do nothing""", (empleado["id"],))
+           on duplicate key update id = id""", (empleado["id"],))
     try:
         r = await cliente.get("/admin/depuracion", headers=rrhh_auth)
         cuentas = r.json()["cuentas_de_prueba"]
@@ -78,11 +78,15 @@ async def test_nadie_puede_llegar_a_ser_su_propio_jefe(cliente, empleado):
     persona quedara autorizándose a sí misma sus propias vacaciones.
     """
     import pytest
-    from psycopg import errors
 
-    with pytest.raises(errors.CheckViolation):
+    from app.errores import numero_de_error, restriccion_de
+
+    with pytest.raises(Exception) as fallo:
         await ejecutar("update users set jefe_id = id where id = %s",
                        (empleado["id"],))
+    # 3819 es el número de MySQL para una restricción CHECK violada.
+    assert numero_de_error(fallo.value) == 3819
+    assert restriccion_de(fallo.value) == "users_no_es_su_propio_jefe"
 
 
 async def test_solo_talento_humano_ve_la_depuracion(cliente, auth, jefe_auth):

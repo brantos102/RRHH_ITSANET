@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from tests.conftest import Sql, persona
-from app.db import ejecutar, obtener_uno
+from app.db import ejecutar, obtener_uno, lista
 
 CED_SIN_CORREO = "1700000019"
 NACIMIENTO = "1990-03-15"
@@ -19,21 +19,16 @@ INGRESO = "2022-06-01"
 
 @pytest.fixture
 async def sin_correo(empleado):
-    fila = await obtener_uno(
-        """insert into users
-             (cedula, nombre, email, rol, fecha_ingreso, fecha_nacimiento,
-              correo_pendiente, ficha_completa, ciudad)
-           values (%s, 'Sin Correo Prueba', %s, 'empleado', %s, %s, true, false, 'Quito')
-           on conflict (cedula) do update
-             set correo_pendiente = true, ficha_completa = false,
-                 fecha_nacimiento = excluded.fecha_nacimiento,
-                 fecha_ingreso = excluded.fecha_ingreso
-           returning id""",
-        (CED_SIN_CORREO, f"{CED_SIN_CORREO}@pendiente.itsanet.local", INGRESO, NACIMIENTO),
-    )
+    fila = await persona(
+        CED_SIN_CORREO,
+        al_existir={"correo_pendiente": True, "ficha_completa": False,
+                    "fecha_nacimiento": NACIMIENTO, "fecha_ingreso": INGRESO},
+        nombre="Sin Correo Prueba", email=f"{CED_SIN_CORREO}@pendiente.itsanet.local",
+        rol="empleado", fecha_ingreso=INGRESO, fecha_nacimiento=NACIMIENTO,
+        correo_pendiente=True, ficha_completa=False, ciudad="Quito")
     yield {"id": str(fila["id"]), "cedula": CED_SIN_CORREO}
-    await ejecutar("delete from users where cedula = any(%s)",
-                   ([CED_SIN_CORREO, "1700000027"],))
+    await ejecutar("delete from users where cedula in %s",
+                   (lista([CED_SIN_CORREO, "1700000027"]),))
 
 
 async def test_se_detecta_a_quien_debe_completar_su_ficha(cliente, sin_correo):

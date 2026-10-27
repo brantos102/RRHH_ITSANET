@@ -11,7 +11,7 @@ from datetime import timedelta
 import pytest
 
 from app import notificaciones
-from app.db import ejecutar, obtener_todos, obtener_uno
+from app.db import ejecutar, obtener_todos, obtener_uno, lista
 from tests.conftest import CEDULA_PRUEBA
 from tests.conftest import Sql, persona
 from tests.test_reglas_nuevas import lunes_sin_feriados
@@ -31,8 +31,8 @@ async def equipo_regional(cliente, codigos, empleado):
     await persona(CED_RRHH_SIERRA, al_existir={"rol": 'rrhh', "ciudad": 'Quito'}, nombre='Talento Sierra', email='sierra@api.test', rol='rrhh', fecha_ingreso=Sql("current_date() - interval 2000 day"), ciudad='Quito')
     await persona(CED_RRHH_COSTA, al_existir={"rol": 'rrhh', "ciudad": 'Guayaquil'}, nombre='Talento Costa', email='costa@api.test', rol='rrhh', fecha_ingreso=Sql("current_date() - interval 2000 day"), ciudad='Guayaquil')
     yield jefe
-    await ejecutar("delete from users where cedula = any(%s)",
-                   ([CED_RRHH_SIERRA, CED_RRHH_COSTA, CED_JEFE_R],))
+    await ejecutar("delete from users where cedula in %s",
+                   (lista([CED_RRHH_SIERRA, CED_RRHH_COSTA, CED_JEFE_R]),))
 
 
 async def _sesion(cliente, codigos, cedula):
