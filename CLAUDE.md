@@ -21,15 +21,26 @@ fuente oficial: todo cambio se hace aquí, se sube, y el servidor lo trae con
 Si en la carpeta de Windows hay un clon del repositorio, los Excel y CSV que se
 guarden ahí no se suben: `.gitignore` los excluye.
 
-Para llevar un archivo de Windows al servidor, desde «Windows PowerShell» (no la
+## Cómo se trabaja
+
+**Principalmente en VS Code conectado al servidor** (Remote-SSH a
+`enicolalde@192.168.4.94`, carpeta `/home/enicolalde/bryan` abierta). Todos los
+comandos de Linux (`.venv/bin/python …`, `git pull`, `bash despliegue/…`) van en
+la terminal de VS Code, cuya línea empieza con `enicolalde@apps`. Nunca en
+PowerShell.
+
+Para llevar un archivo de Windows al servidor: en el Explorer de VS Code, clic
+derecho sobre `rrhh_datos` → «Upload…», y elegirlo en
+`C:\Users\IMORETA\Documents\AP\MOD_RRHH` (o arrastrarlo desde Windows a esa
+carpeta). Nunca se escribe `scp` con una ruta de Windows en la terminal del
+servidor: el servidor no ve los discos de Windows.
+
+PowerShell solo si hace falta, y la de 64 bits («Windows PowerShell», no la
 «(x86)», que no ve `scp`):
 
 ```powershell
 scp "C:\Users\IMORETA\Documents\AP\MOD_RRHH\ARCHIVO.xlsx" enicolalde@192.168.4.94:bryan/rrhh_datos/
 ```
-
-Los comandos de Linux (`.venv/bin/python …`, `git pull`, `bash despliegue/…`) se
-ejecutan en la terminal del servidor (`enicolalde@apps:~$`), nunca en PowerShell.
 
 ## No tocar en el servidor
 
