@@ -29,10 +29,10 @@ comandos de Linux (`.venv/bin/python …`, `git pull`, `bash despliegue/…`) va
 la terminal de VS Code, cuya línea empieza con `enicolalde@apps`. Nunca en
 PowerShell.
 
-Para llevar un archivo de Windows al servidor: en el Explorer de VS Code, clic
-derecho sobre `rrhh_datos` → «Upload…», y elegirlo en
-`C:\Users\IMORETA\Documents\AP\MOD_RRHH` (o arrastrarlo desde Windows a esa
-carpeta). Nunca se escribe `scp` con una ruta de Windows en la terminal del
+Para llevar un archivo de Windows al servidor: arrastrarlo desde el Explorador de
+Windows (`C:\Users\IMORETA\Documents\AP\MOD_RRHH`) y soltarlo sobre `rrhh_datos`
+en el Explorer de VS Code. (El VS Code del responsable no ofrece «Upload…» en el
+menú contextual.) Nunca se escribe `scp` con una ruta de Windows en la terminal del
 servidor: el servidor no ve los discos de Windows.
 
 PowerShell solo si hace falta, y la de 64 bits («Windows PowerShell», no la
