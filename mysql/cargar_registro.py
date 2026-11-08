@@ -236,7 +236,16 @@ async def _cargar(personas: list[dict], hoy: dt.date) -> dict:
         # devenga entre la fecha de la hoja y hoy (normalmente, cero).
         saldo = p["disponible"]
         if p["corte"] < hoy:
-            saldo += await _devengado_al(p["ingreso"], hoy) - await _devengado_al(p["ingreso"], p["corte"])
+            extra = await _devengado_al(p["ingreso"], hoy) - await _devengado_al(p["ingreso"], p["corte"])
+            saldo += extra
+            # Una fila con la FECHA ACTUAL escrita a mano dejó de actualizarse:
+            # el número de la hoja es de esa fecha. Se carga al día, pero se
+            # lista, porque no coincide con lo que la hoja muestra.
+            if extra and (hoy - p["corte"]).days > 7:
+                problemas.append({**p, "motivo": f"cargada; FECHA ACTUAL de la hoja es {p['corte']:%d/%m/%Y} "
+                                                 f"(escrita a mano): se sumaron {extra} día(s) devengados desde "
+                                                 f"entonces. Hoja {p['disponible']}, sistema {saldo}"})
+                cuenta["al día desde una fecha antigua"] += 1
         try:
             await periodos.cargar_saldo_inicial(user_id, saldo, 0)
         except ReglaDeNegocio as exc:
@@ -311,6 +320,9 @@ async def principal(args) -> int:
         if c["saldo por conciliar"] or c["saldo respetado"]:
             print(f"  {AMARILLO}saldo por conciliar: {c['saldo por conciliar']} · saldo respetado por "
                   f"vacaciones ya aprobadas: {c['saldo respetado']}{FIN}")
+        if c["al día desde una fecha antigua"]:
+            print(f"  {AMARILLO}{c['al día desde una fecha antigua']} persona(s) con la FECHA ACTUAL escrita a "
+                  f"mano: se cargaron al día y quedan listadas para revisar{FIN}")
 
         informe = archivo.with_name(archivo.stem + "_NO_CARGADOS.csv")
         _escribir(informe, [*fuera, *resultado["problemas"]], ["fila", "nombre", "cedula", "motivo"])
