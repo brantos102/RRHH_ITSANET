@@ -59,13 +59,18 @@ CERT=/ruta/certificado.pem LLAVE=/ruta/llave.key bash despliegue/instalar.sh
 
 ## Cargar los datos reales del registro de vacaciones
 
-El Excel de Talento Humano se copia al servidor, a `~/bryan/rrhh_datos/` (nunca
-al repositorio). Desde VS Code: arrastrarlo a esa carpeta en el explorador de
-archivos remoto.
+El Excel de Talento Humano se guarda en Windows en
+`C:\Users\IMORETA\Documents\AP\MOD_RRHH` y se copia al servidor, a
+`~/bryan/rrhh_datos/` (nunca al repositorio). Desde «Windows PowerShell» (no la
+«(x86)»):
+
+```powershell
+scp "C:\Users\IMORETA\Documents\AP\MOD_RRHH\REGISTRO_DE_VACACIONES_081126.xlsx" enicolalde@192.168.4.94:bryan/rrhh_datos/
+```
 
 ```bash
 cd ~/bryan/RRHH_ITSANET
-X=~/bryan/rrhh_datos/REGISTRO_DE_VACACIONES_4.xlsx
+X=~/bryan/rrhh_datos/REGISTRO_DE_VACACIONES_081126.xlsx
 
 .venv/bin/python mysql/cargar_registro.py "$X"               # revisa; no escribe
 .venv/bin/python mysql/cargar_registro.py "$X" --aplicar     # personas activas y saldos
