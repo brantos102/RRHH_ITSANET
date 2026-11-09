@@ -12,7 +12,30 @@
 import { api, sesion, esc, fechaHora } from "./api.js";
 
 const $ = (id) => document.getElementById(id);
-const estado = { abierto: false, conversacion: null, contactos: null, sede: null, sondeo: null };
+const estado = { abierto: false, conversacion: null, contactos: null, sede: null, sondeo: null,
+                 vivo: null, vistos: 0 };
+
+/* Con la ventana abierta, la conversación se mantiene al día.
+
+   Antes, si Talento Humano respondía mientras el colaborador tenía el chat
+   abierto, la respuesta no aparecía hasta cerrarlo y volver a abrirlo: quien
+   esperaba la respuesta mirando la pantalla no la veía nunca. Se pregunta
+   cada diez segundos —solo mientras la ventana está abierta— y se vuelve a
+   dibujar únicamente si llegó algo, para no mover lo que se está leyendo. */
+const CADA = 10000;
+
+function seguirEnVivo(activo) {
+  clearInterval(estado.vivo);
+  estado.vivo = activo ? setInterval(refrescarHilo, CADA) : null;
+}
+
+async function refrescarHilo() {
+  if (!estado.abierto || !estado.conversacion || document.hidden) return;
+  try {
+    const hilo = await api.leerConversacion(estado.conversacion);
+    if (hilo.mensajes.length !== estado.vistos) pintar(hilo.mensajes);
+  } catch { /* sin conexión se reintenta en la próxima vuelta */ }
+}
 
 const ES_RRHH = ["rrhh", "admin"].includes(sesion.perfil?.rol);
 
@@ -123,6 +146,7 @@ function alternar() {
   $("chat-panel").classList.toggle("hidden", !estado.abierto);
   $("chat-panel").classList.toggle("flex", estado.abierto);
   $("chat-burbuja").classList.toggle("hidden", estado.abierto);
+  seguirEnVivo(estado.abierto);
   if (estado.abierto) cargar();
 }
 
@@ -195,6 +219,7 @@ function pintarSedes() {
 
 function pintar(mensajes) {
   const caja = $("chat-mensajes");
+  estado.vistos = mensajes.length;
   if (!mensajes.length) {
     caja.innerHTML = `
       <div class="px-2 py-6 text-center">
@@ -378,6 +403,11 @@ function alternarBandeja() {
   $("chat-panel").classList.toggle("hidden", !estado.abierto);
   $("chat-panel").classList.toggle("flex", estado.abierto);
   $("chat-burbuja").classList.toggle("hidden", estado.abierto);
+  // En la lista, cada vuelta trae las consultas nuevas; en un hilo, sus mensajes.
+  clearInterval(estado.vivo);
+  estado.vivo = estado.abierto
+    ? setInterval(() => (estado.conversacion ? refrescarHilo() : cargarBandeja()), CADA)
+    : null;
   if (estado.abierto) { mostrarLista(); cargarBandeja(); }
 }
 

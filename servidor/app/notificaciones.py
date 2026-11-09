@@ -406,3 +406,54 @@ async def avisar_correccion_de_ficha(destinatarios: list[dict], nombre: str,
     for destino in destinatarios:
         if destino.get("email"):
             await correo.enviar(destino["email"], titulo, texto, _marco(titulo, cuerpo))
+
+
+# ------------------------------------------------------------------- chat
+# El aviso NO lleva el texto del mensaje. Una consulta a Talento Humano puede
+# hablar de una enfermedad o de un problema familiar; el correo se reenvía,
+# se queda en bandejas compartidas y en el teléfono de cualquiera. El aviso
+# dice que hay algo que leer y dónde: la conversación se queda en el sistema
+# (LOPDP, Art. 10: minimización).
+
+async def avisar_chat_a_rrhh(destinatarios: list[dict], region: str | None,
+                             nombre: str, sede: str, nueva: bool) -> None:
+    """A Talento Humano de la sede: hay una consulta que espera respuesta."""
+    url = f"{get_settings().app_url.rstrip('/')}/mensajes.html"
+    titulo = (f"Consulta nueva de {nombre}" if nueva
+              else f"{nombre} escribió de nuevo en el chat")
+    cuerpo = (
+        '<p style="margin:0 0 16px;font-size:14px;color:#475569">'
+        f"Hay un mensaje para Talento Humano de {sede} esperando respuesta. "
+        "Por confidencialidad, el texto no viaja en este correo: se lee y se "
+        "responde dentro del sistema.</p>"
+    )
+    texto = (f"{titulo}\n\nHay un mensaje para Talento Humano de {sede} esperando "
+             f"respuesta. Léalo y respóndalo aquí:\n{url}\n")
+    html = _marco(titulo, cuerpo, ("Abrir la bandeja", url))
+
+    buzon = await _buzon_del_departamento(region)
+    enviados: set[str] = set()
+    for destino in ([buzon] if buzon else []) + [p.get("email") for p in destinatarios]:
+        if not destino or destino.lower() in enviados:
+            continue
+        enviados.add(destino.lower())
+        try:
+            await correo.enviar(destino, titulo, texto, html)
+        except Exception:  # noqa: BLE001
+            log.exception("No se pudo avisar del chat a %s", destino)
+    if not enviados:
+        log.warning("Consulta de chat sin nadie a quien avisar en la región %s", region)
+
+
+async def avisar_respuesta_de_chat(destino: str, nombre: str, quien: str) -> None:
+    """Al colaborador: Talento Humano le respondió."""
+    url = f"{get_settings().app_url.rstrip('/')}/dashboard.html"
+    titulo = "Talento Humano respondió su consulta"
+    cuerpo = (
+        f'<p style="margin:0 0 16px;font-size:14px;color:#475569">Hola {nombre}: '
+        f"{quien} le respondió en el chat del sistema. Entre para leer la respuesta "
+        "(el botón del globo, abajo a la derecha).</p>"
+    )
+    texto = (f"{titulo}\n\nHola {nombre}: {quien} le respondió en el chat del sistema. "
+             f"Entre para leerla:\n{url}\n")
+    await correo.enviar(destino, titulo, texto, _marco(titulo, cuerpo, ("Ver la respuesta", url)))

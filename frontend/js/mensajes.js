@@ -95,7 +95,10 @@ async function cargarBandeja({ silencioso = false } = {}) {
 
 /* -------------------------------------------------------- la conversación */
 
+let vistos = 0;
+
 function pintarMensajes(mensajes) {
+  vistos = mensajes.length;
   const caja = $("hilo-mensajes");
   caja.innerHTML = mensajes.map((m) => `
     <div class="flex ${m.es_rrhh ? "justify-end" : "justify-start"}">
@@ -233,3 +236,14 @@ cargarBandeja();
 // Un minuto: el chat no pretende ser mensajería instantánea, pero nadie
 // debería tener que recargar la página para ver que alguien escribió.
 estado.sondeo = setInterval(() => cargarBandeja({ silencioso: true }), 60000);
+
+/* La conversación abierta, al día cada diez segundos: si el colaborador
+   escribe mientras se le responde, se ve sin recargar. Solo se vuelve a
+   dibujar si llegó algo, para no mover lo que se está leyendo. */
+setInterval(async () => {
+  if (!estado.abierta || document.hidden) return;
+  try {
+    const hilo = await api.leerConversacion(estado.abierta);
+    if (hilo.mensajes.length !== vistos) pintarMensajes(hilo.mensajes);
+  } catch { /* se reintenta en la próxima vuelta */ }
+}, 10000);

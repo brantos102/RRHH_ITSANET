@@ -16,9 +16,10 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from .. import notificaciones
 from ..audit import registrar
 from ..db import ejecutar, insertar, nuevo_id, obtener_todos, obtener_uno, transaccion
 from ..deps import exigir_rol, usuario_actual
@@ -123,9 +124,10 @@ async def leer(
 
 @router.post("/mensajes", status_code=status.HTTP_201_CREATED)
 async def escribir(
-    datos: NuevoMensaje, request: Request,
+    datos: NuevoMensaje, request: Request, tareas: BackgroundTasks,
     usuario: Annotated[dict, Depends(usuario_actual)],
 ) -> dict:
+    nueva_conversacion = False
     try:
         async with transaccion():
             if datos.conversacion_id:
@@ -146,6 +148,14 @@ async def escribir(
                 )
                 conversacion = await obtener_uno(
                     "select id, user_id, region, estado from conversaciones where id = %s", (nueva,))
+                nueva_conversacion = True
+
+            # El mensaje anterior decide si hay que avisar por correo: se avisa
+            # al cambiar de turno, no por cada mensaje. Tres mensajes seguidos
+            # del colaborador son una sola consulta, y un solo correo.
+            anterior = await obtener_uno(
+                """select es_rrhh from mensajes where conversacion_id = %s
+                    order by id desc limit 1""", (conversacion["id"],))
 
             # Quien responde queda anotado: para el colaborador es saber con
             # quién habla, no un nombre genérico.
@@ -171,11 +181,39 @@ async def escribir(
     await registrar(request, "chat_mensaje", user_id=str(usuario["id"]),
                     cedula=usuario["cedula"], entidad="conversaciones",
                     entidad_id=str(conversacion["id"]))
+    await _avisar_por_correo(tareas, usuario, conversacion, anterior, nueva_conversacion)
 
     return {
         "conversacion_id": str(conversacion["id"]),
         "mensaje": {**mensaje, "id": int(mensaje["id"]), "autor": usuario["nombre"]},
     }
+
+
+async def _avisar_por_correo(tareas: BackgroundTasks, usuario: dict, conversacion: dict,
+                             anterior: dict | None, nueva: bool) -> None:
+    """Quien no tiene el sistema abierto se entera por correo de que le escribieron.
+
+    Sin esto, una consulta esperaba hasta que alguien de Talento Humano entrara
+    por otro motivo, y el colaborador no sabía que ya tenía respuesta.
+    """
+    region = conversacion.get("region") or "sierra"
+    if not _es_rrhh(usuario):
+        if not (nueva or anterior is None or anterior["es_rrhh"] or conversacion.get("estado") == "cerrada"):
+            return
+        fila = await obtener_uno("select sede from regiones where codigo = %s", (region,))
+        destinatarios = [{"email": f["email"]} for f in await rrhh_de_region(region)]
+        tareas.add_task(notificaciones.avisar_chat_a_rrhh, destinatarios, region,
+                        usuario["nombre"], (fila or {}).get("sede") or region, nueva)
+        return
+    if anterior is None or anterior["es_rrhh"]:
+        return
+    persona = await obtener_uno(
+        """select nombre, email from users
+            where id = %s and email is not null and not correo_pendiente""",
+        (conversacion["user_id"],))
+    if persona:
+        tareas.add_task(notificaciones.avisar_respuesta_de_chat, persona["email"],
+                        persona["nombre"], usuario["nombre"])
 
 
 @router.post("/conversaciones/{conversacion_id}/cerrar")

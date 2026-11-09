@@ -121,3 +121,53 @@ async def test_los_contactos_son_los_de_su_region(cliente, auth, rrhh_auth):
     assert r.status_code == 200
     assert r.json()["sede"] == "Quito"
     assert any(p["nombre"] == "Talento Chat" for p in r.json()["equipo"])
+
+
+# --------------------------------------------------------- avisos por correo
+@pytest.fixture
+def correos(monkeypatch) -> list[dict]:
+    """Los correos que saldrían, en vez de enviarlos."""
+    from app import correo
+    enviados: list[dict] = []
+
+    async def falso(destino, asunto, texto, html=None, **_):
+        enviados.append({"para": destino, "asunto": asunto, "texto": texto})
+
+    monkeypatch.setattr(correo, "enviar", falso)
+    return enviados
+
+
+async def test_una_consulta_nueva_avisa_a_talento_humano_de_la_sede(
+        cliente, auth, rrhh_auth, correos):
+    """Sin el aviso, la consulta esperaba a que alguien entrara por otro motivo."""
+    await cliente.post("/chat/mensajes", headers=auth, json={
+        "texto": "Tengo una cita médica delicada y necesito saber qué permiso pedir"})
+    avisos = [c for c in correos if c["para"] == "chatrrhh@api.test"]
+    assert len(avisos) == 1 and "Consulta nueva" in avisos[0]["asunto"]
+    # Lo que la persona escribió no sale del sistema: puede ser un dato de salud.
+    assert all("cita médica" not in c["texto"] for c in correos)
+
+
+async def test_varios_mensajes_seguidos_son_un_solo_aviso(cliente, auth, rrhh_auth, correos):
+    r = await cliente.post("/chat/mensajes", headers=auth, json={"texto": "Hola"})
+    conv = r.json()["conversacion_id"]
+    for texto in ("¿Me ayudan?", "Es sobre mis vacaciones"):
+        await cliente.post("/chat/mensajes", headers=auth,
+                           json={"texto": texto, "conversacion_id": conv})
+    assert len([c for c in correos if c["para"] == "chatrrhh@api.test"]) == 1
+
+
+async def test_la_respuesta_avisa_al_colaborador_una_vez(cliente, auth, rrhh_auth, correos):
+    r = await cliente.post("/chat/mensajes", headers=auth, json={"texto": "Consulta de saldo"})
+    conv = r.json()["conversacion_id"]
+    for texto in ("Le quedan ocho días.", "Puede pedirlos desde su panel."):
+        await cliente.post("/chat/mensajes", headers=rrhh_auth,
+                           json={"texto": texto, "conversacion_id": conv})
+    respuestas = [c for c in correos if c["asunto"] == "Talento Humano respondió su consulta"]
+    assert len(respuestas) == 1
+    assert all("ocho días" not in c["texto"] for c in respuestas)
+
+    # Si después vuelve a escribir, es un turno nuevo: Talento Humano se entera.
+    await cliente.post("/chat/mensajes", headers=auth,
+                       json={"texto": "Gracias, una duda más", "conversacion_id": conv})
+    assert any("escribió de nuevo" in c["asunto"] for c in correos)
