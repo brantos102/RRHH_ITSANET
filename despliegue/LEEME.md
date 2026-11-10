@@ -90,6 +90,19 @@ X=~/bryan/rrhh_datos/REGISTRO_DE_VACACIONES_081126.xlsx
 - Para borrar todo lo cargado y empezar de nuevo:
   `.venv/bin/python mysql/cargar_registro.py "$X" --quitar --aplicar`
 
+### Transición desde Google Sheets (decisión: opción A, manual)
+
+Hasta el día de la publicación, la hoja de Google Sheets sigue siendo la
+fuente: cuando haga falta tener datos al día, se descarga como Excel, se lleva a
+`~/bryan/rrhh_datos/` y se vuelven a correr `cargar_registro.py` y
+`cargar_historial.py`. Recargar no duplica nada.
+
+**Desde la publicación, la hoja queda de solo lectura** (histórico para las
+jefaturas) y todo se registra en el aplicativo. **No se vuelve a cargar**:
+recargar reemplaza el saldo de cada persona por el de la hoja y borraría los
+ajustes hechos en el aplicativo (solo se respeta el saldo de quien ya tenga
+vacaciones aprobadas en él).
+
 ## Cargar personas para probar
 
 Las personas se cargan desde un CSV que se prepara **en el servidor, fuera del
