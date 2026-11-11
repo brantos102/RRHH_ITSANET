@@ -64,7 +64,9 @@ app.add_middleware(
     # solo en el navegador, en el vuelo previo, que es de los fallos más
     # caros de encontrar.
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    # X-Dispositivo: identificador aleatorio que guarda el navegador para
+    # reconocer el mismo equipo al volver a entrar (reglas/sesiones.py).
+    allow_headers=["Authorization", "Content-Type", "X-Dispositivo"],
     # Sin esto el navegador oculta la cabecera a JavaScript cuando el frontend
     # y la API están en orígenes distintos, que es justo el caso en desarrollo.
     # `X-Peticion-Id` para poder leer el código de la petición desde las

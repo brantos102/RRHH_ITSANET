@@ -273,4 +273,37 @@ $("form-correo").addEventListener("submit", async (e) => {
 
 $("buscar-campo").addEventListener("input", (e) => pintarExpediente(e.target.value));
 
+/* ---------------------------------------------------------- dispositivos */
+const CIERRE = {
+  salida: "cerró sesión", otro_dispositivo: "se cerró al entrar desde otro dispositivo",
+  mismo_dispositivo: "renovada", cerrada_por_usuario: "la cerró usted",
+  talento_humano: "la cerró Talento Humano",
+};
+
+async function cargarDispositivos() {
+  try {
+    const lista = await api.misSesiones();
+    $("mf-dispositivos").innerHTML = lista.length ? lista.map((s) => `
+      <li class="flex flex-wrap items-center gap-2 px-3 py-2.5 text-sm">
+        <span class="min-w-0 flex-1">
+          <b>${esc(s.dispositivo || "Dispositivo")}</b>
+          ${s.actual ? '<span class="ml-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800">este</span>' : ""}
+          <span class="block text-xs text-slate-500">
+            ${s.abierta ? "Abierta" : esc(CIERRE[s.motivo_cierre] || "cerrada")} ·
+            entró ${fechaHora(s.creada_en)} · último uso ${fechaHora(s.ultimo_uso)}${s.ip ? ` · IP ${esc(s.ip)}` : ""}
+          </span>
+        </span>
+        ${s.abierta && !s.actual ? `<button type="button" data-cerrar-sesion="${esc(s.id)}"
+            class="rounded-lg px-2.5 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50">Cerrar</button>` : ""}
+      </li>`).join("")
+      : '<li class="px-3 py-3 text-sm text-slate-500">Sin registros.</li>';
+    $("mf-dispositivos").querySelectorAll("[data-cerrar-sesion]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        try { avisar((await api.cerrarMiSesion(b.dataset.cerrarSesion)).mensaje); cargarDispositivos(); }
+        catch (err) { avisar(err.message, true); }
+      }));
+  } catch { /* la ficha sigue sirviendo sin esta lista */ }
+}
+
 cargar();
+cargarDispositivos();

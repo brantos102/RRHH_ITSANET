@@ -62,9 +62,11 @@ async def pendientes(user_id) -> list[str]:
                   EXISTS (SELECT 1 FROM cambios_ficha c WHERE c.user_id = u.id
                              AND c.campo = 'fecha_ingreso' AND c.estado = 'pendiente') AS ingreso_pedido,
                   EXISTS (SELECT 1 FROM cambios_ficha c WHERE c.user_id = u.id
-                             AND c.campo = 'jefe_id' AND c.estado = 'pendiente') AS jefe_pedido,
+                             AND c.campo IN ('jefe_id', 'jefe_por_registrar')
+                             AND c.estado = 'pendiente') AS jefe_pedido,
                   EXISTS (SELECT 1 FROM cambios_ficha c WHERE c.user_id = u.id
-                             AND c.campo = 'cargo' AND c.estado = 'pendiente') AS cargo_pedido
+                             AND c.campo IN ('cargo', 'departamento')
+                             AND c.estado = 'pendiente') AS cargo_pedido
              FROM users u WHERE u.id = %s""", (str(user_id),))
     if u is None:
         return []

@@ -116,6 +116,18 @@ conserva el saldo cargado; las filas con el correo vacío se omiten.
 .venv/bin/python mysql/cargar_personas.py ~/bryan/rrhh_datos/ARCHIVO.csv --quitar --aplicar   # borra a esas personas (solo pruebas)
 ```
 
+### Sesiones y dispositivos
+
+Una cédula tiene una sola sesión abierta: entrar desde otro dispositivo cierra
+la anterior y avisa por correo. Si alguien pierde el celular o se lo roban:
+**Administración › Usuarios › «Cerrar sesiones»**. Cada colaborador ve los
+suyos en **Mi ficha › Mis dispositivos**. Desde la terminal:
+
+```bash
+sudo mysql rrhh -e "SELECT u.nombre, s.dispositivo, s.ip, s.creada_en, s.ultimo_uso FROM sesiones s JOIN users u ON u.id = s.user_id WHERE s.cerrada_en IS NULL AND s.expira_en > NOW() ORDER BY s.ultimo_uso DESC"
+sudo mysql rrhh -e "UPDATE app_config SET valor = '2' WHERE clave = 'sesiones_simultaneas'"   # permitir 2 (por ejemplo, celular y computadora)
+```
+
 ## 9. Saldos de una persona
 
 ```bash

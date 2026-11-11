@@ -38,7 +38,8 @@ def comparar_hash(a: str, b: str) -> bool:
 AUDIENCIA = "rrhh-itsanet"
 
 
-def emitir_token(user_id: str, cedula: str, rol: str) -> tuple[str, datetime]:
+def emitir_token(user_id: str, cedula: str, rol: str, sid: str | None = None,
+                 expira: datetime | None = None) -> tuple[str, datetime]:
     """Firma la sesión del colaborador.
 
     `sub` es el id de la ficha (users.id). Con Supabase era el id de
@@ -50,7 +51,7 @@ def emitir_token(user_id: str, cedula: str, rol: str) -> tuple[str, datetime]:
     """
     settings = get_settings()
     ahora = datetime.now(timezone.utc)
-    expira = ahora + timedelta(hours=settings.jwt_expira_horas)
+    expira = expira or (ahora + timedelta(hours=settings.jwt_expira_horas))
 
     payload: dict[str, Any] = {
         "sub": user_id,
@@ -60,7 +61,15 @@ def emitir_token(user_id: str, cedula: str, rol: str) -> tuple[str, datetime]:
         "cedula": cedula,
         "rol": rol,
     }
+    if sid:
+        # La sesión registrada (tabla `sesiones`): cada petición comprueba que
+        # siga abierta, y así se puede cerrar a distancia.
+        payload["sid"] = sid
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256"), expira
+
+
+def expiracion_nueva() -> datetime:
+    return datetime.now(timezone.utc) + timedelta(hours=get_settings().jwt_expira_horas)
 
 
 def leer_token(token: str) -> dict[str, Any]:

@@ -527,3 +527,23 @@ async def avisar_reemplazo_cambiado(destinatarios: list[dict], solicitud: dict,
                 await correo.enviar(destino, titulo, texto, html)
             except Exception:  # noqa: BLE001
                 log.exception("No se pudo avisar del cambio de reemplazo a %s", destino)
+
+
+async def avisar_sesion_en_otro_dispositivo(destino: str, nombre: str, nuevo: str, ip: str | None,
+                                            cerradas: list[str]) -> None:
+    """Al colaborador: su cédula entró desde otro dispositivo y se cerró la
+    sesión anterior. Si no fue él, tiene que saberlo ya."""
+    titulo = "Ingreso desde otro dispositivo"
+    filas = [("Nuevo ingreso", f"{nuevo}" + (f" · IP {ip}" if ip else "")),
+             ("Sesión cerrada en", ", ".join(c or "otro dispositivo" for c in cerradas))]
+    cuerpo = (
+        '<p style="margin:0 0 16px;font-size:14px;color:#475569">'
+        f"{nombre}, se ingresó al sistema con su cédula desde otro dispositivo y, por "
+        "seguridad, se cerró la sesión que tenía abierta. Si fue usted, no tiene que hacer nada.</p>"
+        + _tabla(filas)
+        + '<p style="margin:16px 0 0;font-size:14px;color:#9a3412;font-weight:600">'
+          "Si no fue usted, avise de inmediato a Talento Humano para que cierre el acceso.</p>"
+    )
+    texto = (f"{titulo}\n\n" + "\n".join(f"{e}: {v}" for e, v in filas)
+             + "\n\nSi no fue usted, avise de inmediato a Talento Humano.\n")
+    await correo.enviar(destino, titulo, texto, _marco(titulo, cuerpo))

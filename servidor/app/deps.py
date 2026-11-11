@@ -37,6 +37,12 @@ async def usuario_actual(
 
     datos = leer_token(credenciales.credentials)
     perfil = await obtener_uno(SQL_PERFIL, (datos["sub"],))
+    if perfil is not None:
+        # La sesión tiene que seguir abierta: se cierra al salir, al entrar
+        # desde otro dispositivo o cuando Talento Humano la corta.
+        from .reglas import sesiones
+        await sesiones.verificar(datos.get("sid"), datos["sub"])
+        perfil["sid"] = datos.get("sid")
 
     if perfil is None:
         raise HTTPException(

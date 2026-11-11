@@ -210,3 +210,44 @@ async def test_al_aprobar_la_fecha_de_ingreso_queda_confirmada(
     u = await obtener_uno("select fecha_ingreso, fecha_ingreso_confirmada_en from users "
                           "where cedula = %s", (CED,))
     assert str(u["fecha_ingreso"]) == "2020-11-15" and u["fecha_ingreso_confirmada_en"]
+
+
+# ------------------------------------------- jefe no registrado y área
+async def test_un_jefe_que_no_esta_registrado_se_pide_por_nombre(
+        cliente, codigos, sin_correo, avisos, rrhh_auth):
+    auth = await _sesion(cliente, codigos)
+    await ejecutar("update app_config set valor = 'jefe,cargo' where clave = 'ficha_inicial_campos'")
+    r = await cliente.post("/mi-ficha/inicial", headers=auth, json={
+        "jefe_correcto": False, "jefe_nombre_propuesto": "  Pedro   Inventado Pérez ",
+        "cargo_correcto": False, "cargo_propuesto": "Supervisor de bodega",
+        "departamento_propuesto": "Logística"})
+    assert r.status_code == 200, r.text
+    assert r.json()["pendientes"] == []
+    pedidos = {f["campo"]: f["valor_nuevo"] for f in await obtener_todos(
+        "select campo, valor_nuevo from cambios_ficha where user_id = %s", (sin_correo["id"],))}
+    assert pedidos == {"jefe_por_registrar": "Pedro Inventado Pérez",
+                       "cargo": "Supervisor de bodega", "departamento": "Logística"}
+
+    # Aprobarlo solo lo marca como atendido: no toca ninguna columna.
+    cambio = await obtener_uno("select id from cambios_ficha where user_id = %s "
+                               "and campo = 'jefe_por_registrar'", (sin_correo["id"],))
+    r = await cliente.post(f"/rrhh/cambios-ficha/{cambio['id']}", headers=rrhh_auth,
+                           json={"accion": "aprobar"})
+    assert r.status_code == 200, r.text
+
+
+async def test_un_jefe_sin_apellido_no_alcanza(cliente, codigos, sin_correo, avisos):
+    auth = await _sesion(cliente, codigos)
+    await ejecutar("update app_config set valor = 'jefe' where clave = 'ficha_inicial_campos'")
+    r = await cliente.post("/mi-ficha/inicial", headers=auth, json={
+        "jefe_correcto": False, "jefe_nombre_propuesto": "Pedro"})
+    assert r.status_code == 422
+
+
+async def test_el_catalogo_sugiere_cargos_y_areas_sin_datos_personales(cliente, codigos, sin_correo,
+                                                                      avisos):
+    auth = await _sesion(cliente, codigos)
+    r = await cliente.get("/catalogos/cargos", headers=auth)
+    assert r.status_code == 200
+    assert set(r.json()) == {"cargos", "areas"}
+    assert all(set(c) == {"cargo", "area"} for c in r.json()["cargos"])

@@ -109,6 +109,9 @@ function tablaUsuarios(usuarios) {
               <button data-editar="${u.id}" class="text-xs font-medium text-slate-700 hover:underline">Editar</button>
               <button data-saldo="${u.id}" data-nombre="${esc(u.nombre)}"
                       class="ml-2 text-xs font-medium text-slate-700 hover:underline">Saldo</button>
+              <button data-cerrar-sesiones="${u.id}" data-nombre="${esc(u.nombre)}"
+                      title="Para quien perdió o le robaron el celular o la computadora"
+                      class="ml-2 text-xs font-medium text-rose-700 hover:underline">Cerrar sesiones</button>
               <button data-activo="${u.id}" data-valor="${u.activo ? 0 : 1}"
                       class="ml-2 text-xs font-medium ${u.activo ? "text-rose-600" : "text-emerald-700"} hover:underline">
                 ${u.activo ? "Desactivar" : "Reactivar"}</button>
@@ -861,6 +864,15 @@ document.addEventListener("click", async (e) => {
     } catch (err) {
       avisar(err.message, true);
     }
+    return;
+  }
+
+  const cortar = e.target.closest("[data-cerrar-sesiones]");
+  if (cortar) {
+    if (!confirm(`¿Cerrar todas las sesiones abiertas de ${cortar.dataset.nombre}? ` +
+                 "Tendrá que volver a ingresar con el código de su correo.")) return;
+    try { avisar((await api.cerrarSesionesDe(cortar.dataset.cerrarSesiones)).mensaje); }
+    catch (err) { avisar(err.message, true); }
     return;
   }
 

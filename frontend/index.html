@@ -322,7 +322,13 @@ if (window.RRHH_CONFIG?.EMPRESA) {
   $("titulo-empresa").textContent = `${window.RRHH_CONFIG.SISTEMA} · ${window.RRHH_CONFIG.EMPRESA}`;
   document.title = `Ingreso · ${window.RRHH_CONFIG.EMPRESA}`;
 }
-if (new URLSearchParams(location.search).has("expirada")) $("aviso-expirada").classList.remove("hidden");
+if (new URLSearchParams(location.search).has("expirada")) {
+  $("aviso-expirada").classList.remove("hidden");
+  try {
+    const motivo = sessionStorage.getItem("rrhh_motivo_salida");
+    if (motivo) { $("aviso-expirada").textContent = motivo; sessionStorage.removeItem("rrhh_motivo_salida"); }
+  } catch { /* se queda el aviso genérico */ }
+}
 if (sesion.vigente) location.replace("dashboard.html");
 
 function mostrarError(campo, mensaje) {
@@ -631,6 +637,11 @@ pasoCodigo.addEventListener("submit", async (e) => {
   try {
     const nueva = await api.validarToken(cedulaActual, codigo);
     sesion.guardar(nueva);
+    if (nueva.sesiones_cerradas?.length) {
+      // Se le avisa también por correo; aquí, para que lo sepa ya.
+      alert("Por seguridad se cerró su sesión en: " + nueva.sesiones_cerradas.join(", ") +
+            ".\nSolo puede tener una sesión abierta a la vez.");
+    }
     // Si falta completar la ficha, eso va primero.
     location.href = nueva.perfil?.pendientes?.length ? "bienvenida.html" : "dashboard.html";
   } catch (err) {

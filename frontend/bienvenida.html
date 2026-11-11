@@ -74,11 +74,15 @@
         <label class="flex items-center gap-2"><input type="radio" name="jefe-ok" value="si" class="h-4 w-4"> Es correcto</label>
         <label class="flex items-center gap-2"><input type="radio" name="jefe-ok" value="no" class="h-4 w-4"> No es mi jefe actual</label>
       </div>
-      <select id="b-jefe-nuevo"
-              class="mt-3 hidden w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 text-sm ring-1
-                     ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
-        <option value="">Elija a su jefe actual…</option>
-      </select>
+      <div id="b-jefe-otro" class="mt-3 hidden">
+        <label for="b-jefe-buscar" class="text-sm font-medium text-slate-700">¿Quién es su jefe actual?</label>
+        <input id="b-jefe-buscar" autocomplete="off" maxlength="120"
+               placeholder="Escriba su nombre o apellido"
+               class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+        <ul id="b-jefe-sugerencias" class="mt-1 hidden max-h-56 overflow-y-auto rounded-xl bg-white ring-1 ring-slate-200"></ul>
+        <p id="b-jefe-estado" class="mt-1.5 text-xs text-slate-500">
+          Mientras escribe le mostramos las jefaturas registradas.</p>
+      </div>
     </section>
 
     <section data-seccion="cargo" class="hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
@@ -88,9 +92,24 @@
         <label class="flex items-center gap-2"><input type="radio" name="cargo-ok" value="si" class="h-4 w-4"> Es correcto</label>
         <label class="flex items-center gap-2"><input type="radio" name="cargo-ok" value="no" class="h-4 w-4"> No es correcto</label>
       </div>
-      <input id="b-cargo-nuevo" maxlength="120" placeholder="Escriba su cargo"
-             class="mt-3 hidden w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 text-sm ring-1
-                    ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+      <div id="b-cargo-otro" class="mt-3 hidden space-y-3">
+        <div>
+          <label for="b-area" class="text-sm font-medium text-slate-700">Área donde trabaja</label>
+          <select id="b-area" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+            <option value="">La misma que consta</option>
+          </select>
+          <input id="b-area-otra" maxlength="120" placeholder="Escriba el área"
+                 class="mt-2 hidden w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+        </div>
+        <div>
+          <label for="b-cargo-nuevo" class="text-sm font-medium text-slate-700">Su cargo</label>
+          <input id="b-cargo-nuevo" autocomplete="off" maxlength="120" placeholder="Escriba su cargo"
+                 class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+          <ul id="b-cargo-sugerencias" class="mt-1 hidden max-h-56 overflow-y-auto rounded-xl bg-white ring-1 ring-slate-200"></ul>
+          <p class="mt-1.5 text-xs text-slate-500">
+            Le sugerimos los cargos que ya existen en su área. Talento Humano lo revisa antes de que rija.</p>
+        </div>
+      </div>
     </section>
 
     <section data-seccion="telefono" class="hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">

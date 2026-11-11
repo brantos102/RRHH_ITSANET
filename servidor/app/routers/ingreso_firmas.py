@@ -65,7 +65,7 @@ async def ver_ingreso(usuario: RRHH) -> dict:
     }
 
 
-@router.put("/admin/ingreso")
+@router.patch("/admin/ingreso")
 async def cambiar_ingreso(datos: ConfigIngreso, request: Request, usuario: RRHH) -> dict:
     antes = {"modo": await ingreso.modo_alta(), "campos": await ingreso.campos_ficha_inicial()}
     campos = [c for c in ingreso.CAMPOS if c in datos.campos]     # orden fijo, sin repetidos

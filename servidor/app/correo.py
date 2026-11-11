@@ -1,6 +1,7 @@
 """Envío de correo. Con Google Workspace basta SMTP con contraseña de aplicación."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from email.message import EmailMessage
 
@@ -150,6 +151,7 @@ async def enviar(
     adjuntos: list[tuple[str, bytes, str]] | None = None,
     responder_a: str | None = None,
     copia: list[str] | None = None,
+    intentos: int = 4,
 ) -> None:
     """Envía un correo.
 
@@ -195,8 +197,47 @@ async def enviar(
         principal, _, secundario = mime.partition("/")
         mensaje.add_attachment(contenido, maintype=principal, subtype=secundario, filename=nombre)
 
-    await aiosmtplib.send(mensaje, recipients=[destinatario, *(copia or [])],
-                          **parametros_smtp(settings))
+    await _enviar_con_reintentos(mensaje, [destinatario, *(copia or [])], settings,
+                                 intentos=intentos)
+
+
+# Lo que conviene volver a intentar: el servidor cortó, tardó o pidió que se
+# insista luego (respuestas 4xx: «421 inténtelo más tarde», «451 error
+# temporal»). Gmail y Microsoft 365 devuelven 421 cuando reciben varias
+# conexiones seguidas, y eso era el «intente en unos minutos» que veía la
+# gente: el segundo intento, segundos después, casi siempre pasa.
+#
+# Lo que NO se reintenta: clave rechazada (535), remitente no permitido
+# (550/553). Insistir no lo arregla y solo demora el aviso.
+ESPERAS = (2, 5, 10)
+
+
+def es_transitorio(error: Exception) -> bool:
+    if isinstance(error, (aiosmtplib.SMTPServerDisconnected, aiosmtplib.SMTPConnectError,
+                          aiosmtplib.SMTPTimeoutError, asyncio.TimeoutError,
+                          ConnectionError, TimeoutError)):
+        return True
+    codigo = getattr(error, "code", None)
+    if isinstance(codigo, int):
+        return 400 <= codigo < 500
+    return isinstance(error, OSError) and not isinstance(error, aiosmtplib.SMTPException)
+
+
+async def _enviar_con_reintentos(mensaje: EmailMessage, destinatarios: list[str], settings,
+                                 *, intentos: int) -> None:
+    for intento in range(1, intentos + 1):
+        try:
+            await aiosmtplib.send(mensaje, recipients=destinatarios, **parametros_smtp(settings))
+            if intento > 1:
+                log.info("Correo enviado en el intento %s de %s", intento, intentos)
+            return
+        except Exception as exc:  # noqa: BLE001
+            if intento >= intentos or not es_transitorio(exc):
+                raise
+            espera = ESPERAS[min(intento - 1, len(ESPERAS) - 1)]
+            log.warning("El servidor de correo falló (%s: %s). Reintento %s de %s en %s s",
+                        type(exc).__name__, exc, intento + 1, intentos, espera)
+            await asyncio.sleep(espera)
 
 
 def parametros_smtp(settings) -> dict:
@@ -218,7 +259,9 @@ def parametros_smtp(settings) -> dict:
         "port": settings.smtp_port,
         "username": settings.smtp_user or None,
         "password": settings.smtp_password or None,
-        "timeout": 20,
+        # Por intento. El código de acceso se reintenta con 12 s para que la
+        # pantalla no espere más de lo que Apache tolera (60 s en total).
+        "timeout": getattr(settings, "smtp_timeout", 12),
     }
     if settings.smtp_port == 465:
         return {**comun, "use_tls": True, "start_tls": False}
@@ -228,4 +271,6 @@ def parametros_smtp(settings) -> dict:
 async def enviar_otp(destinatario: str, nombre: str, codigo: str) -> None:
     settings = get_settings()
     texto, html = _plantilla_otp(nombre, codigo, settings.otp_vigencia_minutos, settings.app_nombre)
-    await enviar(destinatario, f"Código de acceso: {codigo}", texto, html)
+    # Tres intentos, cada uno con un plazo corto: quien espera su código está
+    # mirando la pantalla, y Apache corta la petición a los 60 s.
+    await enviar(destinatario, f"Código de acceso: {codigo}", texto, html, intentos=3)

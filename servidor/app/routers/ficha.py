@@ -345,8 +345,12 @@ class FichaInicialSesion(BaseModel):
     fecha_ingreso_motivo: str | None = Field(None, max_length=300)
     jefe_correcto: bool | None = None
     jefe_propuesto_id: str | None = Field(None, max_length=40)
+    # Si su jefe no está en la lista: nombres y apellidos, para que Talento
+    # Humano lo registre.
+    jefe_nombre_propuesto: str | None = Field(None, max_length=120)
     cargo_correcto: bool | None = None
     cargo_propuesto: str | None = Field(None, max_length=120)
+    departamento_propuesto: str | None = Field(None, max_length=120)
     telefono: str | None = Field(None, max_length=20)
     emergencia_nombre: str | None = Field(None, max_length=120)
     emergencia_parentesco: Literal[
@@ -358,6 +362,23 @@ class FichaInicialSesion(BaseModel):
 
 def _digitos(v: str | None) -> str:
     return re.sub(r"\D", "", v or "")
+
+
+@router.get("/catalogos/cargos")
+async def catalogo_cargos(usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
+    """Los cargos y áreas que existen en la empresa, para sugerirlos al
+    escribir. No son datos personales: no dice quién ocupa cada uno."""
+    cargos = await obtener_todos(
+        """select trim(cargo) as cargo, trim(coalesce(departamento, '')) as area, count(*) as n
+             from users where activo and nullif(trim(coalesce(cargo, '')), '') is not null
+            group by trim(cargo), trim(coalesce(departamento, ''))
+            order by n desc, cargo""")
+    areas = await obtener_todos(
+        """select trim(departamento) as area, count(*) as n from users
+            where activo and nullif(trim(coalesce(departamento, '')), '') is not null
+            group by trim(departamento) order by area""")
+    return {"cargos": [{"cargo": c["cargo"], "area": c["area"] or None} for c in cargos],
+            "areas": [a["area"] for a in areas]}
 
 
 @router.get("/mi-ficha/inicial")
@@ -409,13 +430,15 @@ async def guardar_ficha_inicial(
     if "jefe" in falta:
         if datos.jefe_correcto is None:
             errores.append("si su jefe inmediato es correcto")
-        elif datos.jefe_correcto is False and not datos.jefe_propuesto_id:
-            errores.append("quién es su jefe inmediato")
+        elif datos.jefe_correcto is False and not datos.jefe_propuesto_id \
+                and len((datos.jefe_nombre_propuesto or "").split()) < 2:
+            errores.append("quién es su jefe inmediato (elíjalo o escriba nombres y apellidos)")
     if "cargo" in falta:
         if datos.cargo_correcto is None:
             errores.append("si su cargo es correcto")
-        elif datos.cargo_correcto is False and not (datos.cargo_propuesto or "").strip():
-            errores.append("cuál es su cargo")
+        elif datos.cargo_correcto is False and not ((datos.cargo_propuesto or "").strip()
+                                                    or (datos.departamento_propuesto or "").strip()):
+            errores.append("cuál es su cargo o su área")
     if "telefono" in falta and len(_digitos(datos.telefono)) < 7:
         errores.append("su teléfono personal")
     if "emergencia" in falta and not ((datos.emergencia_nombre or "").strip()
@@ -457,7 +480,7 @@ async def guardar_ficha_inicial(
         if "jefe" in falta:
             if datos.jefe_correcto:
                 await ejecutar("update users set jefe_confirmado_en = NOW(6) where id = %s", (uid,))
-            else:
+            elif datos.jefe_propuesto_id:
                 jefe = await obtener_uno("select nombre from v_jefaturas where id = %s",
                                          (datos.jefe_propuesto_id,))
                 if jefe is None:
@@ -467,14 +490,34 @@ async def guardar_ficha_inicial(
                     uid, "jefe_id", datos.jefe_propuesto_id,
                     "Corrección declarada por el colaborador al ingresar")
                 pedidos.append(("Jefe que indica", jefe["nombre"]))
+            else:
+                await reglas_ficha.pedir_registro_de_jefe(
+                    uid, datos.jefe_nombre_propuesto,
+                    "Jefe que el colaborador indicó al ingresar y no está registrado")
+                pedidos.append(("Jefe que indica (no está registrado)",
+                                " ".join(datos.jefe_nombre_propuesto.split())))
         if "cargo" in falta:
             if datos.cargo_correcto:
                 await ejecutar("update users set cargo_confirmado_en = NOW(6) where id = %s", (uid,))
             else:
-                await reglas_ficha.solicitar_cambio_ficha(
-                    uid, "cargo", datos.cargo_propuesto.strip(),
-                    "Corrección declarada por el colaborador al ingresar")
-                pedidos.append(("Cargo que indica", datos.cargo_propuesto.strip()))
+                actual = await obtener_uno("select cargo, departamento from users where id = %s", (uid,))
+                cargo = (datos.cargo_propuesto or "").strip()
+                area = (datos.departamento_propuesto or "").strip()
+                pidio = False
+                if cargo and cargo != (actual["cargo"] or ""):
+                    await reglas_ficha.solicitar_cambio_ficha(
+                        uid, "cargo", cargo, "Corrección declarada por el colaborador al ingresar")
+                    pedidos.append(("Cargo que indica", cargo))
+                    pidio = True
+                if area and area != (actual["departamento"] or ""):
+                    await reglas_ficha.solicitar_cambio_ficha(
+                        uid, "departamento", area,
+                        "Área declarada por el colaborador al ingresar", permitir_bloqueado=True)
+                    pedidos.append(("Área que indica", area))
+                    pidio = True
+                if not pidio:
+                    # Lo que escribió es lo que ya constaba: queda confirmado.
+                    await ejecutar("update users set cargo_confirmado_en = NOW(6) where id = %s", (uid,))
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001

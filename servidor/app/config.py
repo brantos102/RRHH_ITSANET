@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_remitente: str = "Talento Humano <no-responder@localhost>"
     smtp_starttls: bool = True
+    # Segundos por intento de conexión al servidor de correo.
+    smtp_timeout: int = 12
     email_backend: str = "smtp"  # smtp | console
 
     # Enlaces de aprobación enviados por correo

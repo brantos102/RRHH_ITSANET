@@ -33,7 +33,7 @@ async def test_talento_humano_ve_la_cobertura_y_cambia_el_modo(cliente, rrhh_aut
     r = await cliente.get("/admin/ingreso", headers=_h(rrhh_auth))
     assert r.status_code == 200, r.text
     assert r.json()["modo"] == "correo" and "pct_nacimiento" in r.json()["cobertura"]
-    r = await cliente.put("/admin/ingreso", headers=_h(rrhh_auth),
+    r = await cliente.patch("/admin/ingreso", headers=_h(rrhh_auth),
                           json={"modo": "nacimiento", "campos": ["telefono", "fecha_nacimiento"]})
     assert r.status_code == 200, r.text
     cfg = (await cliente.get("/admin/ingreso", headers=_h(rrhh_auth))).json()
@@ -42,7 +42,7 @@ async def test_talento_humano_ve_la_cobertura_y_cambia_el_modo(cliente, rrhh_aut
 
 
 async def test_un_colaborador_no_cambia_la_configuracion(cliente, auth):
-    r = await cliente.put("/admin/ingreso", headers=auth, json={"modo": "correo", "campos": []})
+    r = await cliente.patch("/admin/ingreso", headers=auth, json={"modo": "correo", "campos": []})
     assert r.status_code == 403
 
 

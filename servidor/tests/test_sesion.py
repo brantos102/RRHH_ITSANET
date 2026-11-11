@@ -42,6 +42,7 @@ def test_un_token_firmado_con_otro_secreto_no_abre_sesion():
 def test_el_token_no_lleva_datos_personales_de_mas():
     """El token viaja en cada petición y el navegador lo guarda: lleva lo
     justo para identificar la sesión, no el correo ni el nombre."""
-    token, _ = emitir_token("0f8fad5b-d9cb-469f-a165-70867728950e", "1750000000", "jefe")
+    token, _ = emitir_token("0f8fad5b-d9cb-469f-a165-70867728950e", "1750000000", "jefe",
+                            sid="9b2f6a40-0000-4000-8000-000000000001")
     datos = jwt.decode(token, options={"verify_signature": False})
-    assert set(datos) == {"sub", "aud", "iat", "exp", "cedula", "rol"}
+    assert set(datos) == {"sub", "aud", "iat", "exp", "cedula", "rol", "sid"}

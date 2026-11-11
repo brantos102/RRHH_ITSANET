@@ -64,3 +64,5 @@ class Sesion(BaseModel):
     token_type: str = "bearer"
     expira_en: datetime
     perfil: Perfil
+    # Dispositivos en que la cédula estaba abierta y se cerraron al entrar.
+    sesiones_cerradas: list[str] = []

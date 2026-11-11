@@ -24,10 +24,10 @@ from ..cedula import normalizar_cedula
 from ..config import get_settings
 from ..db import ejecutar, nuevo_id, obtener_todos, obtener_uno, para_json, transaccion
 from ..errores import traducir
-from ..reglas import acceso, ficha, ingreso, periodos, personal, saldo
-from ..deps import usuario_actual
+from ..reglas import acceso, ficha, ingreso, periodos, personal, saldo, sesiones
+from ..deps import exigir_rol, usuario_actual
 from ..schemas import Perfil, RespuestaEnvio, Sesion, SolicitudToken, ValidacionToken
-from ..security import comparar_hash, emitir_token, generar_otp, hash_otp
+from ..security import comparar_hash, emitir_token, expiracion_nueva, generar_otp, hash_otp
 
 log = logging.getLogger("rrhh.auth")
 router = APIRouter(prefix="/auth", tags=["Autenticación"])
@@ -249,14 +249,30 @@ async def validar_token(datos: ValidacionToken, request: Request,
         (usuario["id"],),
     )
 
-    token, expira = emitir_token(str(usuario["id"]), usuario["cedula"], usuario["rol"])
+    # La sesión se registra con su dispositivo. Si la cédula ya estaba abierta
+    # en otro equipo, esa se cierra y se avisa al correo de la persona.
+    expira = expiracion_nueva()
+    sid, cerradas = await sesiones.abrir(str(usuario["id"]), request, expira,
+                                         request.headers.get("x-dispositivo"))
+    token, expira = emitir_token(str(usuario["id"]), usuario["cedula"], usuario["rol"],
+                                 sid=sid, expira=expira)
+    if cerradas and usuario["email"]:
+        tareas.add_task(notificaciones.avisar_sesion_en_otro_dispositivo, usuario["email"],
+                        usuario["nombre"], sesiones.describir_dispositivo(
+                            request.headers.get("user-agent")), ip_del_cliente(request),
+                        [c["dispositivo"] for c in cerradas])
 
     await registrar(request, "sesion_iniciada", user_id=str(usuario["id"]),
-                    cedula=usuario["cedula"], detalle={"rol": usuario["rol"]})
+                    cedula=usuario["cedula"],
+                    detalle={"rol": usuario["rol"], "sesion": sid,
+                             "dispositivo": sesiones.describir_dispositivo(
+                                 request.headers.get("user-agent")),
+                             "cerradas_en_otros": len(cerradas)})
 
     return Sesion(
         access_token=token,
         expira_en=expira,
+        sesiones_cerradas=[c["dispositivo"] or "otro dispositivo" for c in cerradas],
         perfil=Perfil(
             id=str(usuario["id"]),
             cedula=usuario["cedula"],
@@ -343,9 +359,50 @@ async def marcar_notificaciones_leidas(
 # cuerpo, cosa que un 204 prohíbe. El módulo entero fallaba al importarse.
 @router.post("/cerrar-sesion", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def cerrar_sesion(request: Request, usuario: Annotated[dict, Depends(usuario_actual)]) -> None:
-    """El token es sin estado: el cliente lo descarta. Aquí queda el registro."""
+    """Cierra la sesión de este dispositivo: el token deja de valer aquí mismo."""
+    if usuario.get("sid"):
+        await sesiones.cerrar(usuario["sid"], "salida")
     await registrar(request, "sesion_cerrada", user_id=str(usuario["id"]),
                     cedula=usuario["cedula"])
+
+
+# ------------------------------------------------------------- dispositivos
+@router.get("/mis-sesiones")
+async def mis_sesiones(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[dict]:
+    """Desde qué dispositivos entró, y cuáles siguen abiertos."""
+    return await sesiones.listar(str(usuario["id"]), usuario.get("sid"))
+
+
+@router.post("/mis-sesiones/{sid}/cerrar")
+async def cerrar_mi_sesion(sid: uuid.UUID, request: Request,
+                           usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
+    propia = await obtener_uno("SELECT 1 AS x FROM sesiones WHERE id = %s AND user_id = %s",
+                               (str(sid), str(usuario["id"])))
+    if propia is None:
+        raise HTTPException(status_code=404, detail={"mensaje": "Esa sesión no existe."})
+    await sesiones.cerrar(str(sid), "cerrada_por_usuario", str(usuario["id"]))
+    await registrar(request, "sesion_cerrada_a_distancia", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], detalle={"sesion": str(sid)})
+    return {"mensaje": "Sesión cerrada en ese dispositivo."}
+
+
+RRHH = Annotated[dict, Depends(exigir_rol("rrhh", "admin"))]
+
+
+@router.get("/admin/usuarios/{user_id}/sesiones", tags=["Administración"])
+async def sesiones_de(user_id: uuid.UUID, usuario: RRHH) -> list[dict]:
+    return await sesiones.listar(str(user_id))
+
+
+@router.post("/admin/usuarios/{user_id}/cerrar-sesiones", tags=["Administración"])
+async def cerrar_sesiones_de(user_id: uuid.UUID, request: Request, usuario: RRHH) -> dict:
+    """Para quien perdió el celular o se lo robaron: corta todo acceso."""
+    n = await sesiones.cerrar_todas(str(user_id), "talento_humano", str(usuario["id"]))
+    persona = await obtener_uno("SELECT nombre, cedula FROM users WHERE id = %s", (str(user_id),))
+    await registrar(request, "sesiones_cerradas_por_rrhh", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="users", entidad_id=str(user_id),
+                    detalle={"de": (persona or {}).get("cedula"), "cerradas": n})
+    return {"mensaje": f"Se cerraron {n} sesión(es) de {(persona or {}).get('nombre', 'la persona')}."}
 
 
 # ---------------------------------------------------------------- alta guiada

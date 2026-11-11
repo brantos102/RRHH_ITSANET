@@ -70,8 +70,23 @@ export class ErrorApi extends Error {
   }
 }
 
+/* Identificador aleatorio de ESTE navegador. No dice nada de la persona: solo
+   permite reconocer que vuelve a entrar desde el mismo equipo, para no tratarlo
+   como «otro dispositivo». El servidor guarda solo su huella. */
+function idDispositivo() {
+  try {
+    let id = localStorage.getItem("rrhh_dispositivo");
+    if (!id) { id = uuid(); localStorage.setItem("rrhh_dispositivo", id); }
+    return id;
+  } catch {
+    return "";
+  }
+}
+
 async function peticion(ruta, opciones = {}) {
   const cabeceras = { ...(opciones.headers || {}) };
+  const dispositivo = idDispositivo();
+  if (dispositivo) cabeceras["X-Dispositivo"] = dispositivo;
   if (!(opciones.body instanceof FormData)) cabeceras["Content-Type"] = "application/json";
   if (sesion.token) cabeceras["Authorization"] = `Bearer ${sesion.token}`;
 
@@ -83,7 +98,12 @@ async function peticion(ruta, opciones = {}) {
   }
 
   if (respuesta.status === 401 && sesion.leer()) {
+    // El motivo importa: «ingresó desde otro dispositivo» es un aviso de
+    // seguridad, no un simple vencimiento.
+    const motivo = await respuesta.json().then((c) => c.detail).catch(() => null);
     sesion.borrar();
+    try { if (typeof motivo === "string") sessionStorage.setItem("rrhh_motivo_salida", motivo); }
+    catch { /* sin almacenamiento, se muestra el aviso genérico */ }
     location.href = "index.html?expirada=1";
     return;
   }
@@ -135,7 +155,7 @@ export const api = {
     peticion("/mi-ficha/inicial", { method: "POST", body: JSON.stringify(datos) }),
   ingresoConfig: () => peticion("/admin/ingreso"),
   guardarIngresoConfig: (datos) =>
-    peticion("/admin/ingreso", { method: "PUT", body: JSON.stringify(datos) }),
+    peticion("/admin/ingreso", { method: "PATCH", body: JSON.stringify(datos) }),
   firmantes: () => peticion("/admin/firmantes"),
   agregarFirmante: (datos) =>
     peticion("/admin/firmantes", { method: "POST", body: JSON.stringify(datos) }),
@@ -381,6 +401,12 @@ export const api = {
     setTimeout(() => URL.revokeObjectURL(url), 120000);
     return ventana;
   },
+  misSesiones: () => peticion("/auth/mis-sesiones"),
+  cerrarMiSesion: (id) => peticion(`/auth/mis-sesiones/${id}/cerrar`, { method: "POST" }),
+  sesionesDe: (userId) => peticion(`/auth/admin/usuarios/${userId}/sesiones`),
+  cerrarSesionesDe: (userId) =>
+    peticion(`/auth/admin/usuarios/${userId}/cerrar-sesiones`, { method: "POST" }),
+  catalogoCargos: () => peticion("/catalogos/cargos"),
   registrarFirma: (id) => peticion(`/admin/papeles/${id}/firmado`, { method: "POST" }),
 
   panelConfiguracion: () => peticion("/panel/configuracion"),

@@ -123,6 +123,34 @@ async def solicitar_cambio_ficha(user_id, campo: str, valor, motivo: str | None,
             (user_id, campo, anterior, nuevo, _limpio(motivo) or None))
 
 
+# Pedidos que no cambian una columna: solo avisan a Talento Humano de algo que
+# tiene que hacer a mano. Aprobarlos los marca como atendidos.
+CAMPOS_INFORMATIVOS = ("jefe_por_registrar",)
+
+
+async def pedir_registro_de_jefe(user_id, nombre: str, motivo: str | None) -> int:
+    """El colaborador indica un jefe que no está en el sistema: nombre y
+    apellidos para que Talento Humano lo registre en Jefaturas."""
+    nombre = " ".join(_limpio(nombre).split())
+    if len(nombre) < 5 or len(nombre.split()) < 2:
+        raise ReglaDeNegocio("Escriba nombres y apellidos de su jefe.")
+    from ..db import insertar
+    async with transaccion():
+        actual = await obtener_uno(
+            "SELECT j.nombre FROM users u LEFT JOIN users j ON j.id = u.jefe_id WHERE u.id = %s",
+            (user_id,))
+        await ejecutar(
+            """UPDATE cambios_ficha
+                  SET estado = 'rechazado', motivo_rechazo = 'Reemplazado por una solicitud posterior',
+                      resuelto_en = NOW(6)
+                WHERE user_id = %s AND campo IN ('jefe_por_registrar', 'jefe_id') AND estado = 'pendiente'""",
+            (user_id,))
+        return await insertar(
+            """INSERT INTO cambios_ficha (user_id, campo, valor_anterior, valor_nuevo, motivo)
+               VALUES (%s, 'jefe_por_registrar', %s, %s, %s)""",
+            (user_id, (actual or {}).get("nombre"), nombre, _limpio(motivo) or None))
+
+
 async def resolver_cambio_ficha(cambio_id: int, aprobar: bool, por, motivo: str | None) -> dict[str, Any]:
     """Talento Humano aprueba (y aplica) o rechaza un pedido de cambio."""
     async with transaccion():
@@ -131,7 +159,9 @@ async def resolver_cambio_ficha(cambio_id: int, aprobar: bool, por, motivo: str 
             raise ReglaDeNegocio("El cambio no existe")
         if cambio["estado"] != "pendiente":
             raise ReglaDeNegocio("Este cambio ya fue resuelto")
-        if aprobar:
+        if aprobar and cambio["campo"] in CAMPOS_INFORMATIVOS:
+            pass        # atendido: lo que pedía se hace a mano (registrar al jefe)
+        elif aprobar:
             # MySQL convierte el texto al tipo de la columna (fecha, id...)
             # al asignarlo; en PostgreSQL hacía falta un cast explícito.
             columna = await _columna_de_users(cambio["campo"])
