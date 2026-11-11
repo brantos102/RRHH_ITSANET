@@ -17,7 +17,10 @@ no cambia. Reimprimirlo con los datos de hoy sería falsificar lo que se firmó.
 """
 from __future__ import annotations
 
+import io
 from datetime import date, timedelta
+
+from pypdf import PdfReader
 
 import pytest
 
@@ -28,6 +31,12 @@ from tests.test_panel_configurable import admin_auth  # noqa: F401
 from tests.test_reglas_nuevas import (CEDULA_JEFE_R, CEDULA_RRHH_R,  # noqa: F401
                                       auth, jefe_auth, lunes_sin_feriados,
                                       rrhh_auth)
+
+
+def texto_pdf(contenido: bytes) -> str:
+    """El texto del PDF, en una línea, para buscar lo que tiene que decir."""
+    paginas = PdfReader(io.BytesIO(contenido)).pages
+    return " ".join(" ".join(p.extract_text().split()) for p in paginas)
 
 
 @pytest.fixture(autouse=True)
@@ -204,33 +213,33 @@ async def test_el_de_la_solicitud_si_se_actualiza_al_reimprimirlo(
 async def test_la_constancia_sale_imprimible_y_completa(cliente, auth, empleado):
     await _pedir_vacaciones(cliente, auth)
     papel = (await _papeles(empleado, "trazabilidad"))[0]
-    r = await cliente.get(f"/papeles/{papel['id']}.html", headers=auth)
+    r = await cliente.get(f"/papeles/{papel['id']}.pdf", headers=auth)
     assert r.status_code == 200
-    assert r.headers["content-type"].startswith("text/html")
-    html = r.text
-    # Las cuatro cosas que tiene que llevar un papel que se firma.
-    assert "Constancia de goce de vacaciones" in html
-    assert papel["folio"] in html
-    assert "Registro de vacaciones gozadas" in html.replace("REGISTRO", "Registro")
-    for rol in ("Jefe inmediato", "Trabajador", "Responsable de Talento Humano"):
-        assert rol in html, rol
-    assert "Art. 326" in html, "la firma no renuncia a ningún derecho, y el papel lo dice"
-    # Autosuficiente: en una bodega sin red, un papel a medias no sirve.
-    assert "src=\"http" not in html and "href=\"http" not in html
+    assert r.headers["content-type"] == "application/pdf"
+    texto = texto_pdf(r.content)
+    # Lo que tiene que llevar, con el formato de Talento Humano.
+    assert "CONSTANCIA DE GOCE Y REGISTRO DE VACACIONES" in texto
+    assert papel["folio"] in texto
+    assert "REGISTRO DE VACACIONES GOZADAS" in texto
+    assert CEDULA_PRUEBA in texto
+    for rol in ("JEFE INMEDIATO", "TRABAJADOR/A", "RESPONSABLE DE TALENTO HUMANO"):
+        assert rol in texto, rol
+    assert "Art. 326" in texto, "la firma no renuncia a ningún derecho, y el papel lo dice"
 
 
 async def test_el_formulario_de_la_solicitud_lleva_sus_cuatro_secciones(
         cliente, auth, empleado):
     pedida = await _pedir_vacaciones(cliente, auth)
     papel = (await _papeles(empleado, "solicitud"))[0]
-    html = (await cliente.get(f"/papeles/{papel['id']}.html", headers=auth)).text
-    for seccion in ("Identificación del colaborador", "Programación y aprobación",
-                    "Constancia de goce efectivo", "Declaración y firmas"):
-        assert seccion in html, seccion
-    assert "Nota de control interno" in html
-    assert str(pedida["folio"]) in html
-    # La casilla de Ordinarias marcada y la de Adelantadas vacía, o al revés.
-    assert html.count('class="marca"') == 4
+    texto = texto_pdf((await cliente.get(f"/papeles/{papel['id']}.pdf", headers=auth)).content)
+    assert "SOLICITUD, APROBACIÓN Y CONSTANCIA DE GOCE DE VACACIONES" in texto
+    for seccion in ("IDENTIFICACIÓN DEL COLABORADOR", "PROGRAMACIÓN Y APROBACIÓN",
+                    "CONSTANCIA DE GOCE EFECTIVO", "DECLARACIÓN Y FIRMAS"):
+        assert seccion in texto, seccion
+    assert "NOTA DE CONTROL INTERNO" in texto
+    assert str(pedida["folio"]) in texto
+    for firma in ("COLABORADOR(A)", "JEFE INMEDIATO", "RECURSOS HUMANOS"):
+        assert firma in texto, firma
 
 
 async def test_cada_impresion_queda_contada(cliente, auth, empleado):
@@ -238,7 +247,7 @@ async def test_cada_impresion_queda_contada(cliente, auth, empleado):
     papel = (await _papeles(empleado, "trazabilidad"))[0]
     assert papel["impresiones"] == 0
     for _ in range(3):
-        await cliente.get(f"/papeles/{papel['id']}.html", headers=auth)
+        await cliente.get(f"/papeles/{papel['id']}.pdf", headers=auth)
     fila = await obtener_uno(
         "select impresiones, ultima_impresion from informes_firmados where id = %s",
         (papel["id"],))
@@ -250,7 +259,7 @@ async def test_la_impresion_queda_en_la_bitacora(cliente, auth, empleado):
     """Quién vio el historial de quién: es un dato personal de 350 personas."""
     await _pedir_vacaciones(cliente, auth)
     papel = (await _papeles(empleado, "trazabilidad"))[0]
-    await cliente.get(f"/papeles/{papel['id']}.html", headers=auth)
+    await cliente.get(f"/papeles/{papel['id']}.pdf", headers=auth)
     reg = await obtener_uno(
         """select detalle from audit_logs
             where accion = 'papel_impreso' and entidad_id = %s
@@ -266,20 +275,20 @@ async def test_el_jefe_inmediato_no_ve_el_historial_de_su_reporte(
     """Para autorizar cinco días no hace falta el historial completo de la persona."""
     await _pedir_vacaciones(cliente, auth)
     papel = (await _papeles(empleado, "trazabilidad"))[0]
-    r = await cliente.get(f"/papeles/{papel['id']}.html", headers=jefe_auth)
+    r = await cliente.get(f"/papeles/{papel['id']}.pdf", headers=jefe_auth)
     assert r.status_code == 403
 
 
 async def test_talento_humano_si_lo_ve(cliente, auth, rrhh_auth, empleado):
     await _pedir_vacaciones(cliente, auth)
     papel = (await _papeles(empleado, "trazabilidad"))[0]
-    r = await cliente.get(f"/papeles/{papel['id']}.html", headers=rrhh_auth)
+    r = await cliente.get(f"/papeles/{papel['id']}.pdf", headers=rrhh_auth)
     assert r.status_code == 200
 
 
 async def test_un_documento_inventado_da_404(cliente, auth):
     r = await cliente.get(
-        "/papeles/00000000-0000-0000-0000-000000000000.html", headers=auth)
+        "/papeles/00000000-0000-0000-0000-000000000000.pdf", headers=auth)
     assert r.status_code == 404
 
 
@@ -309,10 +318,10 @@ async def test_la_reemision_dice_en_el_papel_quien_la_autorizo(
     r = await cliente.post(
         f"/admin/papeles/{empleado['id']}/reemitir-trazabilidad", headers=rrhh_auth,
         json={"motivo": "Se corrigió un registro de 2019 y hay que volver a firmar."})
-    html = (await cliente.get(f"/papeles/{r.json()['id']}.html", headers=rrhh_auth)).text
-    assert "Reemisión autorizada por" in html
-    assert "API Talento" in html
-    assert "registro de 2019" in html
+    texto = texto_pdf((await cliente.get(f"/papeles/{r.json()['id']}.pdf", headers=rrhh_auth)).content)
+    assert "Reemisión autorizada por" in texto
+    assert "API Talento" in texto
+    assert "registro de 2019" in texto
 
 
 async def test_una_reemision_sin_explicar_no_pasa(cliente, auth, rrhh_auth, empleado):
@@ -371,7 +380,7 @@ async def test_quien_ya_pedia_vacaciones_antes_puede_emitir_la_suya(
 async def test_talento_humano_ve_quien_imprimio_que(cliente, auth, rrhh_auth, empleado):
     await _pedir_vacaciones(cliente, auth)
     papel = (await _papeles(empleado, "trazabilidad"))[0]
-    await cliente.get(f"/papeles/{papel['id']}.html", headers=auth)
+    await cliente.get(f"/papeles/{papel['id']}.pdf", headers=auth)
 
     r = await cliente.get("/admin/papeles", headers=rrhh_auth,
                           params={"tipo": "trazabilidad"})

@@ -59,20 +59,51 @@
       </p>
     </form>
 
+    <!-- Alta por correo: registrar dónde recibir el código ----------------- -->
+    <form id="paso-correo" class="hidden" novalidate>
+      <button type="button" data-volver-acceso
+              class="mb-3 text-sm text-slate-500 hover:text-slate-900">← Volver</button>
+      <h2 class="font-semibold text-slate-900">Registre su correo</h2>
+      <p class="mt-1 text-sm leading-relaxed text-slate-600">
+        Su expediente está en el sistema, pero <b>todavía no tiene un correo</b>
+        donde enviarle el código de acceso. Escriba el suyo —de preferencia el
+        institucional—: le enviaremos un código para confirmar que es suyo, y con
+        ese código entra.
+      </p>
+      <label for="alta-email" class="mt-4 block text-sm font-medium text-slate-700">Correo</label>
+      <input id="alta-email" type="email" required autocomplete="email" inputmode="email"
+             class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+      <label for="alta-email2" class="mt-3 block text-sm font-medium text-slate-700">
+        Escríbalo otra vez
+      </label>
+      <input id="alta-email2" type="email" required autocomplete="off" inputmode="email"
+             class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+      <p id="error-correo" class="mt-3 hidden text-sm text-rose-600" role="alert"></p>
+      <button type="submit" id="btn-correo"
+              class="mt-5 w-full rounded-xl bg-slate-900 px-4 py-3 font-medium text-white
+                     hover:bg-slate-800 disabled:opacity-50">
+        Enviarme el código
+      </button>
+      <p class="mt-4 text-center text-xs leading-relaxed text-slate-500">
+        Use un correo al que solo usted tenga acceso. Talento Humano recibe aviso
+        de cada correo registrado.
+      </p>
+    </form>
+
     <!-- Alta: probar identidad ------------------------------------------- -->
     <form id="paso-identidad" class="hidden" novalidate>
       <button type="button" data-volver-acceso
               class="mb-3 text-sm text-slate-500 hover:text-slate-900">← Volver</button>
       <h2 class="font-semibold text-slate-900">Comprobemos que es usted</h2>
       <p class="mt-1 text-sm leading-relaxed text-slate-600">
-        Su expediente ya está en el sistema —con su cargo, su jefe y su fecha
-        de ingreso—, pero <b>no tiene un correo</b> donde enviarle el código.
+        Su expediente ya está en el sistema, pero <b>no tiene un correo</b>
+        donde enviarle el código.
       </p>
       <p class="mt-2 text-sm leading-relaxed text-slate-600">
-        Como no hay a dónde escribirle, lo único que puede acreditar que es
-        usted son dos datos que ya constan en su expediente. <b>No se los
-        estamos pidiendo para registrarlos</b>: los tenemos, y los usamos
-        para compararlos.
+        Para acreditar que es usted, escriba su fecha de nacimiento: la
+        comparamos con la que consta en su expediente.
       </p>
 
       <label for="nacimiento" class="mt-4 block text-sm font-medium text-slate-700">
@@ -82,12 +113,6 @@
              class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 ring-1 ring-slate-300
                     focus:bg-white focus:ring-2 focus:ring-slate-900">
 
-      <label for="ingreso" class="mt-3 block text-sm font-medium text-slate-700">
-        Fecha de ingreso a la empresa
-      </label>
-      <input id="ingreso" type="date" required
-             class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 ring-1 ring-slate-300
-                    focus:bg-white focus:ring-2 focus:ring-slate-900">
 
       <p id="error-identidad" class="mt-3 hidden text-sm text-rose-600" role="alert"></p>
 
@@ -97,7 +122,7 @@
         Continuar
       </button>
       <p class="mt-4 text-center text-xs leading-relaxed text-slate-500">
-        ¿No recuerda alguna fecha? Comuníquese con Talento Humano.
+        ¿No coincide? Comuníquese con Talento Humano.
       </p>
     </form>
 
@@ -289,6 +314,9 @@ import { api, sesion, validarCedula, ErrorApi, esc } from "./js/api.js";
 const $ = (id) => document.getElementById(id);
 const pasoCedula = $("paso-cedula"), pasoCodigo = $("paso-codigo");
 let cedulaActual = null, temporizador = null;
+// En el primer ingreso por correo, el código va al correo declarado: el
+// reenvío tiene que ir ahí también, no al expediente, que todavía no lo tiene.
+let correoDeclarado = null;
 
 if (window.RRHH_CONFIG?.EMPRESA) {
   $("titulo-empresa").textContent = `${window.RRHH_CONFIG.SISTEMA} · ${window.RRHH_CONFIG.EMPRESA}`;
@@ -343,12 +371,19 @@ pasoCedula.addEventListener("submit", async (e) => {
        parte de la planilla llegó sin correo, y sin esto se quedaría esperando
        un mensaje que no puede llegar a ninguna parte. La respuesta es la
        misma —falso— si la cédula no existe, así que no revela nada. */
-    const { necesita } = await api.necesitaFicha(cedula);
+    const { necesita, modo } = await api.necesitaFicha(cedula);
     if (necesita) {
       cedulaActual = cedula;
       pasoCedula.classList.add("hidden");
-      $("paso-identidad").classList.remove("hidden");
-      $("nacimiento").focus();
+      // Cómo se comprueba la identidad lo decide Talento Humano: con el
+      // correo (recibir el código lo prueba) o con la fecha de nacimiento.
+      if (modo === "correo") {
+        $("paso-correo").classList.remove("hidden");
+        $("alta-email").focus();
+      } else {
+        $("paso-identidad").classList.remove("hidden");
+        $("nacimiento").focus();
+      }
       return;
     }
 
@@ -372,6 +407,7 @@ let tokenAlta = null;
 
 document.querySelectorAll("[data-volver-acceso]").forEach((b) =>
   b.addEventListener("click", () => {
+    $("paso-correo").classList.add("hidden");
     $("paso-identidad").classList.add("hidden");
     $("paso-ficha").classList.add("hidden");
     pasoCedula.classList.remove("hidden");
@@ -379,12 +415,40 @@ document.querySelectorAll("[data-volver-acceso]").forEach((b) =>
   })
 );
 
+$("paso-correo").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  mostrarError("correo", "");
+  const email = $("alta-email").value.trim(), otra = $("alta-email2").value.trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    return mostrarError("correo", "Escriba un correo válido: ahí llegará su código.");
+  }
+  if (email.toLowerCase() !== otra.toLowerCase()) {
+    return mostrarError("correo", "Los dos correos no coinciden. Revíselos.");
+  }
+  $("btn-correo").disabled = true;
+  $("btn-correo").textContent = "Enviando…";
+  try {
+    const r = await api.registrarCorreo(cedulaActual, email);
+    correoDeclarado = email;
+    $("correo-destino").textContent = r.correo || email;
+    $("paso-correo").classList.add("hidden");
+    pasoCodigo.classList.remove("hidden");
+    $("codigo").focus();
+    cuentaRegresiva(45);
+  } catch (err) {
+    mostrarError("correo", err instanceof ErrorApi ? err.message : "No se pudo enviar el código.");
+  } finally {
+    $("btn-correo").disabled = false;
+    $("btn-correo").textContent = "Enviarme el código";
+  }
+});
+
 $("paso-identidad").addEventListener("submit", async (e) => {
   e.preventDefault();
   mostrarError("identidad", "");
-  const nacimiento = $("nacimiento").value, ingreso = $("ingreso").value;
-  if (!nacimiento || !ingreso) {
-    return mostrarError("identidad", "Complete las dos fechas.");
+  const nacimiento = $("nacimiento").value, ingreso = null;
+  if (!nacimiento) {
+    return mostrarError("identidad", "Escriba su fecha de nacimiento.");
   }
 
   $("btn-identidad").disabled = true;
@@ -565,8 +629,10 @@ pasoCodigo.addEventListener("submit", async (e) => {
   $("btn-validar").disabled = true;
   $("btn-validar").textContent = "Verificando…";
   try {
-    sesion.guardar(await api.validarToken(cedulaActual, codigo));
-    location.href = "dashboard.html";
+    const nueva = await api.validarToken(cedulaActual, codigo);
+    sesion.guardar(nueva);
+    // Si falta completar la ficha, eso va primero.
+    location.href = nueva.perfil?.pendientes?.length ? "bienvenida.html" : "dashboard.html";
   } catch (err) {
     mostrarError("codigo", err.message);
     $("codigo").value = "";
@@ -579,7 +645,8 @@ pasoCodigo.addEventListener("submit", async (e) => {
 
 $("btn-reenviar").addEventListener("click", async () => {
   try {
-    await api.solicitarToken(cedulaActual);
+    if (correoDeclarado) await api.registrarCorreo(cedulaActual, correoDeclarado);
+    else await api.solicitarToken(cedulaActual);
     cuentaRegresiva(45);
     mostrarError("codigo", "");
   } catch (err) {

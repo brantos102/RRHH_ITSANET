@@ -25,6 +25,7 @@ from ..config import get_settings
 from ..db import booleanos, ejecutar, obtener_todos, obtener_uno
 from ..deps import exigir_rol, usuario_actual
 from ..errores import traducir
+from ..reglas import papeles as reglas_papeles
 from ..reglas import personal
 from ..reglas import solicitudes as reglas_solicitudes
 
@@ -233,7 +234,8 @@ async def _aplicar(solicitud: dict, rol: str, decision: Decision,
         # vacaciones, la solicitud igual se resuelve.
         personal_rrhh = [{"email": d["email"], "nombre": d["nombre"]}
                          for d in await personal.rrhh_de_region(completa.get("region") or "sierra")]
-        tareas.add_task(notificaciones.avisar_a_rrhh, personal_rrhh, completa, quien)
+        adjuntos = await _documentos_para_rrhh(completa) if completa["tipo"] == "vacacion" else []
+        tareas.add_task(notificaciones.avisar_a_rrhh, personal_rrhh, completa, quien, adjuntos)
 
     elif actualizada["estado"] == "pendiente_jefe":
         # Solo ocurre en la ruta invertida: Talento Humano ya autorizó la
@@ -246,7 +248,10 @@ async def _aplicar(solicitud: dict, rol: str, decision: Decision,
             tareas.add_task(notificaciones.avisar_al_jefe, jefe, completa)
 
     elif actualizada["estado"] == "aprobado":
-        tareas.add_task(notificaciones.avisar_aprobacion, empleado, completa)
+        sede = None
+        if completa["tipo"] == "vacacion":
+            sede = await _avisar_que_firme(completa)
+        tareas.add_task(notificaciones.avisar_aprobacion, empleado, completa, sede)
 
     elif actualizada["estado"] == "rechazado":
         tareas.add_task(notificaciones.avisar_rechazo, empleado, completa, quien, decision.motivo.strip())
@@ -262,6 +267,49 @@ async def _aplicar(solicitud: dict, rol: str, decision: Decision,
             "rechazado": "Solicitud rechazada. Se avisó al empleado.",
         }[actualizada["estado"]],
     }
+
+
+async def _documentos_para_rrhh(solicitud: dict) -> list[tuple[str, bytes, str]]:
+    """La solicitud y la constancia de goce, en PDF, para el correo a Talento
+    Humano cuando el jefe ya aprobó: las imprime, las firma, y el colaborador
+    solo tiene que acercarse a firmar.
+
+    Un fallo aquí no detiene la aprobación: el aviso sale igual, sin adjuntos,
+    y los documentos siguen disponibles en el sistema.
+    """
+    from ..documentos import armar, nombre_archivo
+    try:
+        sol = await reglas_papeles.informe_solicitud_asegurar(str(solicitud["id"]))
+        traz = await reglas_papeles.informe_trazabilidad_asegurar(str(solicitud["user_id"]))
+        firmante = await reglas_papeles.firmante_por_defecto(solicitud["user_id"])
+        return [(nombre_archivo(i), armar(i, firmante), "application/pdf") for i in (sol, traz)]
+    except Exception:  # noqa: BLE001
+        log.exception("No se pudieron preparar los documentos de la solicitud %s",
+                      solicitud.get("folio"))
+        return []
+
+
+async def _avisar_que_firme(solicitud: dict) -> str | None:
+    """Aprobada por Talento Humano: el colaborador tiene que acercarse a firmar
+    para concluir. Queda como aviso dentro del sistema; el correo lo dice también."""
+    fila = await obtener_uno("SELECT sede FROM regiones WHERE codigo = %s",
+                             (solicitud.get("region") or "sierra",))
+    sede = (fila or {}).get("sede")
+    try:
+        await reglas_papeles.informe_solicitud_asegurar(str(solicitud["id"]))
+        await ejecutar(
+            """INSERT INTO notifications (user_id, tipo, severidad, titulo, mensaje,
+                                          entidad, entidad_id, clave_dedupe, accion_url)
+               VALUES (%s, 'documento_faltante', 'advertencia', %s, %s, 'requests', %s, %s,
+                       'dashboard.html#papeles')
+               ON DUPLICATE KEY UPDATE clave_dedupe = clave_dedupe""",
+            (str(solicitud["user_id"]), "Acérquese a firmar sus vacaciones",
+             f"Su solicitud N.º {solicitud['folio']} fue aprobada. Acérquese a Talento Humano"
+             + (f" de {sede}" if sede else "") + " a firmar la solicitud y la constancia para "
+             "concluir el proceso.", str(solicitud["id"]), f"firmar-{solicitud['id']}"))
+    except Exception:  # noqa: BLE001
+        log.exception("No se pudo dejar el aviso de firma de la solicitud %s", solicitud.get("folio"))
+    return sede
 
 
 # ------------------------------------------------- camino 1: con sesión

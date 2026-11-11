@@ -68,11 +68,20 @@ async def actualizar_ficha_libre(user_id, campos: dict[str, Any]) -> dict[str, A
         return await obtener_uno("SELECT * FROM users WHERE id = %s", (user_id,))
 
 
-async def solicitar_cambio_ficha(user_id, campo: str, valor, motivo: str | None) -> int:
-    """Registra un pedido de cambio para que Talento Humano lo revise."""
+async def solicitar_cambio_ficha(user_id, campo: str, valor, motivo: str | None,
+                                 *, permitir_bloqueado: bool = False) -> int:
+    """Registra un pedido de cambio para que Talento Humano lo revise.
+
+    `permitir_bloqueado` lo usa solo la ficha inicial, para que quien no está de
+    acuerdo con su fecha de ingreso —un campo bloqueado— pueda pedir que
+    Talento Humano la revise. Sigue siendo un pedido: nada cambia hasta que
+    Talento Humano lo aprueba.
+    """
     nivel = await _nivel(campo)
     if nivel is None:
         raise ReglaDeNegocio(f'El campo "{campo}" no forma parte de la ficha')
+    if nivel == "bloqueado" and permitir_bloqueado:
+        nivel = "revisado"
     if nivel == "bloqueado":
         raise ReglaDeNegocio(f'El campo "{campo}" no se modifica desde la ficha. '
                              "Escriba a Talento Humano si hay un error.")
@@ -130,6 +139,13 @@ async def resolver_cambio_ficha(cambio_id: int, aprobar: bool, por, motivo: str 
                            (cambio["valor_nuevo"], cambio["user_id"]))
             if cambio["campo"] == "email":
                 await ejecutar("UPDATE users SET correo_pendiente = FALSE WHERE id = %s",
+                               (cambio["user_id"],))
+            # Lo que Talento Humano revisó y aprobó queda confirmado.
+            confirmada = {"fecha_ingreso": "fecha_ingreso_confirmada_en",
+                          "jefe_id": "jefe_confirmado_en",
+                          "cargo": "cargo_confirmado_en"}.get(cambio["campo"])
+            if confirmada:
+                await ejecutar(f"UPDATE users SET `{confirmada}` = NOW(6) WHERE id = %s",
                                (cambio["user_id"],))
         elif len(_limpio(motivo)) < 5:
             raise ReglaDeNegocio("Indique por qué se rechaza: la persona debe saber qué corregir")

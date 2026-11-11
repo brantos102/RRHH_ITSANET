@@ -2,6 +2,7 @@
 import { api, sesion, esc, fecha, fechaHora, validarCedula } from "./api.js";
 import { montarNavegacion, ROL_TEXTO } from "./navegacion.js";
 import { montarBuscador } from "./buscador.js";
+import { elegirFirmante } from "./firmante.js";
 
 const $ = (id) => document.getElementById(id);
 if (!sesion.vigente) location.replace("index.html");
@@ -32,7 +33,7 @@ const CARGADORES = {
   bitacora: cargarBitacora, cotejo: cargarCotejo, papeles: cargarPapelesFirmados,
   "cambios-ficha": cargarCambiosFicha, lineamientos: cargarLineamientos,
   jefaturas: cargarJefaturasAdmin, "talento-humano": cargarTalentoHumano,
-  depuracion: cargarDepuracion,
+  depuracion: cargarDepuracion, "ingreso-firmas": cargarIngresoFirmas,
 };
 
 function mostrar(seccion) {
@@ -829,9 +830,15 @@ async function cargarPapelesFirmados() {
                 : `<div class="text-xs text-rose-700">sin imprimir</div>`}
             </td>
             <td class="px-3 py-2.5 text-right whitespace-nowrap">
-              <button type="button" data-ver-papel="${esc(p.id)}"
+              ${p.firmado_en
+                ? `<span class="mr-1 text-xs text-emerald-700">firmado ${fecha(p.firmado_en)}</span>`
+                : `<button type="button" data-firmado="${esc(p.id)}" data-folio="${esc(p.folio)}"
+                           data-nombre="${esc(p.nombre)}"
+                           class="rounded-lg px-2.5 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50">
+                     Registrar firma</button>`}
+              <button type="button" data-ver-papel="${esc(p.id)}" data-region="${esc(p.region || "sierra")}"
                       class="rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200">
-                Ver</button>
+                Imprimir</button>
               ${p.tipo === "trazabilidad" && p.es_el_vigente
                 ? `<button type="button" data-reemitir="${esc(p.user_id || "")}"
                            data-nombre="${esc(p.nombre)}"
@@ -848,7 +855,22 @@ document.addEventListener("click", async (e) => {
   const ver = e.target.closest("[data-ver-papel]");
   if (ver) {
     try {
-      await api.abrirPapel(ver.dataset.verPapel);
+      const firmante = await elegirFirmante(ver.dataset.region);
+      if (firmante === null) return;
+      await api.abrirPapel(ver.dataset.verPapel, firmante);
+    } catch (err) {
+      avisar(err.message, true);
+    }
+    return;
+  }
+
+  const firmado = e.target.closest("[data-firmado]");
+  if (firmado) {
+    if (!confirm(`¿${firmado.dataset.nombre} ya firmó el documento ${firmado.dataset.folio} ` +
+                 "y está en el expediente? Con esto el trámite queda concluido.")) return;
+    try {
+      avisar((await api.registrarFirma(firmado.dataset.firmado)).mensaje);
+      cargarPapelesFirmados();
     } catch (err) {
       avisar(err.message, true);
     }
@@ -1608,3 +1630,82 @@ async function retirarDeTalento(id, nombre) {
     await cargarTalentoHumano();
   } catch (err) { avisar(err.message, true); }
 }
+
+
+/* ------------------------------------------------- primer ingreso y firmas */
+async function cargarIngresoFirmas() {
+  const [cfg, fir] = await Promise.all([api.ingresoConfig(), api.firmantes()]);
+  const c = cfg.cobertura;
+  const tarjeta = (titulo, n, pct, nota = "") => `
+    <div class="rounded-xl bg-slate-50 p-3">
+      <p class="text-xs text-slate-500">${titulo}</p>
+      <p class="text-xl font-semibold tabular-nums">${pct}%</p>
+      <p class="text-xs text-slate-500">${n} de ${c.activos} activos${nota}</p>
+    </div>`;
+  $("ing-cobertura").innerHTML =
+    tarjeta("Con fecha de nacimiento", c.con_nacimiento, c.pct_nacimiento,
+            c.pct_nacimiento >= 90 ? " · ya puede pasar a verificar con ella" : "") +
+    tarjeta("Con correo confirmado", c.con_correo, c.pct_correo) +
+    tarjeta("Fecha de ingreso confirmada", c.ingreso_confirmado, c.pct_ingreso_confirmado);
+  document.querySelectorAll('input[name="ing-modo"]').forEach((r) => { r.checked = r.value === cfg.modo; });
+  $("ing-campos").innerHTML = cfg.disponibles.map((d) => `
+    <label class="flex items-center gap-2"><input type="checkbox" data-ing-campo="${esc(d.campo)}"
+      ${cfg.campos.includes(d.campo) ? "checked" : ""} class="h-4 w-4"> ${esc(d.etiqueta)}</label>`).join("");
+
+  $("fir-persona").innerHTML = fir.candidatos.length
+    ? fir.candidatos.map((p) => `<option value="${esc(p.id)}" data-region="${esc(p.region)}">${
+        esc([p.nombre, p.cargo].filter(Boolean).join(" · "))}</option>`).join("")
+    : '<option value="">Nadie con rol de Talento Humano</option>';
+  $("fir-lista").innerHTML = fir.sedes.map((s) => {
+    const de = fir.firmantes.filter((f) => f.region === s.region);
+    return `<div>
+      <h3 class="text-xs font-medium uppercase tracking-wide text-slate-500">${esc(s.sede)}</h3>
+      ${de.length ? `<ul class="mt-1 divide-y divide-slate-100 rounded-xl ring-1 ring-slate-200">${de.map((f) => `
+        <li class="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
+          <span class="min-w-0 flex-1"><b>${esc(f.nombre)}</b> · ${esc(f.firma_como)}
+            ${f.principal ? '<span class="ml-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800">cabeza del departamento</span>' : ""}</span>
+          ${f.principal ? "" : `<button type="button" data-fir-principal="${f.id}"
+             class="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium hover:bg-slate-200">Hacer cabeza</button>`}
+          <button type="button" data-fir-quitar="${f.id}"
+             class="rounded-lg px-2.5 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50">Quitar</button>
+        </li>`).join("")}</ul>`
+        : '<p class="mt-1 text-sm text-slate-500">Nadie asignado: el documento sale con la firma de Talento Humano en blanco.</p>'}
+    </div>`;
+  }).join("");
+  $("fir-lista").querySelectorAll("[data-fir-principal]").forEach((b) => b.addEventListener("click", async () => {
+    try { avisar((await api.cambiarFirmante(b.dataset.firPrincipal, { principal: true })).mensaje); cargarIngresoFirmas(); }
+    catch (err) { avisar(err.message, true); }
+  }));
+  $("fir-lista").querySelectorAll("[data-fir-quitar]").forEach((b) => b.addEventListener("click", async () => {
+    try { avisar((await api.quitarFirmante(b.dataset.firQuitar)).mensaje); cargarIngresoFirmas(); }
+    catch (err) { avisar(err.message, true); }
+  }));
+}
+
+$("fir-persona")?.addEventListener("change", (e) => {
+  const region = e.target.selectedOptions[0]?.dataset.region;
+  if (region) $("fir-region").value = region;
+});
+
+$("form-ingreso")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const modo = document.querySelector('input[name="ing-modo"]:checked')?.value;
+  const campos = [...document.querySelectorAll("[data-ing-campo]:checked")].map((c) => c.dataset.ingCampo);
+  try {
+    avisar((await api.guardarIngresoConfig({ modo, campos })).mensaje);
+    cargarIngresoFirmas();
+  } catch (err) { avisar(err.message, true); }
+});
+
+$("form-firmante")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!$("fir-persona").value) return avisar("Elija a la persona.", true);
+  try {
+    avisar((await api.agregarFirmante({
+      user_id: $("fir-persona").value, region: $("fir-region").value,
+      cargo_firma: $("fir-cargo").value.trim() || null, principal: $("fir-principal").checked,
+    })).mensaje);
+    $("fir-cargo").value = ""; $("fir-principal").checked = false;
+    cargarIngresoFirmas();
+  } catch (err) { avisar(err.message, true); }
+});

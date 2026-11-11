@@ -31,11 +31,12 @@ def nueva_persona(db, cedula=CEDULA_OK, **extra) -> str:
 
 
 # ---------------------------------------------------------- que esté todo
-def test_estan_las_38_tablas(db):
+def test_estan_las_39_tablas(db):
+    """38 del sistema original más firmantes_rrhh (migración 0009)."""
     db.execute("""SELECT COUNT(*) AS n FROM information_schema.tables
                    WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'
                      AND table_name NOT IN ('schema_migraciones', 'secuencias')""")
-    assert db.fetchone()["n"] == 38
+    assert db.fetchone()["n"] == 39
 
 
 def test_ninguna_foranea_apunta_fuera_de_la_base(db):
@@ -65,7 +66,7 @@ def test_toda_la_base_esta_en_utf8mb4(db):
 
 
 def test_los_datos_de_referencia_cargaron(db):
-    esperado = {"regiones": 2, "ciudades_region": 55, "app_config": 25,
+    esperado = {"regiones": 2, "ciudades_region": 55, "app_config": 30,
                 "permission_types": 22, "legal_references": 37}
     for tabla, n in esperado.items():
         db.execute(f"SELECT COUNT(*) AS n FROM {tabla}")

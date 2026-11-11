@@ -18,6 +18,8 @@ y eso lo comprueba el buzón mismo.
 """
 from __future__ import annotations
 
+import re
+from datetime import date
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
@@ -29,6 +31,7 @@ from ..db import ejecutar, obtener_todos, obtener_uno
 from ..deps import exigir_rol, usuario_actual
 from ..errores import traducir
 from ..reglas import ficha as reglas_ficha
+from ..reglas import ingreso
 from ..reglas.personal import rrhh_de_region
 
 router = APIRouter(tags=["Ficha personal"])
@@ -327,4 +330,175 @@ async def resolver_cambio(
         "mensaje": ("Cambio aplicado." if datos.accion == "aprobar"
                     else "Cambio rechazado. Se le avisó a la persona."),
         "campo": fila["campo"],
+    }
+
+
+# ------------------------------------------------------------ ficha inicial
+# Lo que se pide al entrar por primera vez, antes de usar el sistema. Qué se
+# pide lo decide Talento Humano (`ficha_inicial_campos`); lo que ya consta o
+# ya se confirmó no se vuelve a pedir (reglas/ingreso.py).
+
+class FichaInicialSesion(BaseModel):
+    fecha_nacimiento: date | None = None
+    fecha_ingreso_correcta: bool | None = None
+    fecha_ingreso_propuesta: date | None = None
+    fecha_ingreso_motivo: str | None = Field(None, max_length=300)
+    jefe_correcto: bool | None = None
+    jefe_propuesto_id: str | None = Field(None, max_length=40)
+    cargo_correcto: bool | None = None
+    cargo_propuesto: str | None = Field(None, max_length=120)
+    telefono: str | None = Field(None, max_length=20)
+    emergencia_nombre: str | None = Field(None, max_length=120)
+    emergencia_parentesco: Literal[
+        "conyuge", "conviviente", "hijo", "padre", "madre", "hermano",
+        "abuelo", "nieto", "suegro", "cunado", "otro",
+    ] | None = None
+    emergencia_telefono: str | None = Field(None, max_length=20)
+
+
+def _digitos(v: str | None) -> str:
+    return re.sub(r"\D", "", v or "")
+
+
+@router.get("/mi-ficha/inicial")
+async def ficha_inicial(usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
+    """Qué falta, con lo que ya consta para mostrarlo y confirmarlo."""
+    falta = await ingreso.pendientes(usuario["id"])
+    p = await obtener_uno(
+        """select u.nombre, u.cedula, u.fecha_nacimiento, u.fecha_ingreso, u.cargo,
+                  u.departamento, j.nombre as jefe_nombre, j.cargo as jefe_cargo
+             from users u left join users j on j.id = u.jefe_id
+            where u.id = %s""", (usuario["id"],))
+    return {
+        "pendientes": falta,
+        "persona": p,
+        "jefaturas": ([{**j, "id": str(j["id"])} for j in await obtener_todos(
+            "select id, nombre, cargo, departamento from v_jefaturas where id <> %s order by nombre",
+            (usuario["id"],))] if "jefe" in falta else []),
+    }
+
+
+@router.post("/mi-ficha/inicial")
+async def guardar_ficha_inicial(
+    datos: FichaInicialSesion, request: Request, tareas: BackgroundTasks,
+    usuario: Annotated[dict, Depends(usuario_actual)],
+) -> dict:
+    """Guarda lo respondido. Lo que la persona no puede cambiar sola —su fecha
+    de ingreso, su jefe, su cargo— va como pedido a Talento Humano."""
+    falta = await ingreso.pendientes(usuario["id"])
+    uid = str(usuario["id"])
+    hoy = date.today()
+    errores: list[str] = []
+
+    if "fecha_nacimiento" in falta:
+        n = datos.fecha_nacimiento
+        if n is None:
+            errores.append("su fecha de nacimiento")
+        elif not (date(hoy.year - 90, 1, 1) <= n <= date(hoy.year - 15, 12, 31)):
+            raise HTTPException(status_code=422, detail={
+                "mensaje": "Revise su fecha de nacimiento: no parece correcta."})
+    if "fecha_ingreso" in falta:
+        if datos.fecha_ingreso_correcta is None:
+            errores.append("si su fecha de ingreso es correcta")
+        elif datos.fecha_ingreso_correcta is False:
+            if datos.fecha_ingreso_propuesta is None:
+                errores.append("la fecha de ingreso que usted indica")
+            elif datos.fecha_ingreso_propuesta > hoy:
+                raise HTTPException(status_code=422, detail={
+                    "mensaje": "La fecha de ingreso que indica no puede ser futura."})
+    if "jefe" in falta:
+        if datos.jefe_correcto is None:
+            errores.append("si su jefe inmediato es correcto")
+        elif datos.jefe_correcto is False and not datos.jefe_propuesto_id:
+            errores.append("quién es su jefe inmediato")
+    if "cargo" in falta:
+        if datos.cargo_correcto is None:
+            errores.append("si su cargo es correcto")
+        elif datos.cargo_correcto is False and not (datos.cargo_propuesto or "").strip():
+            errores.append("cuál es su cargo")
+    if "telefono" in falta and len(_digitos(datos.telefono)) < 7:
+        errores.append("su teléfono personal")
+    if "emergencia" in falta and not ((datos.emergencia_nombre or "").strip()
+                                      and len(_digitos(datos.emergencia_telefono)) >= 7):
+        errores.append("un contacto de emergencia con nombre y teléfono")
+    if errores:
+        raise HTTPException(status_code=422, detail={
+            "mensaje": "Falta " + ", ".join(errores) + "."})
+
+    pedidos: list[tuple[str, str]] = []
+    try:
+        if "fecha_nacimiento" in falta:
+            await ejecutar("update users set fecha_nacimiento = %s "
+                           "where id = %s and fecha_nacimiento is null",
+                           (datos.fecha_nacimiento, uid))
+        if "telefono" in falta:
+            await ejecutar("update users set telefono = %s where id = %s",
+                           (_digitos(datos.telefono), uid))
+        if "emergencia" in falta:
+            await ejecutar(
+                """insert into emergency_contacts (user_id, nombre, parentesco, telefono, es_principal)
+                   values (%s, %s, %s, %s, true)
+                   on duplicate key update nombre = values(nombre),
+                     parentesco = values(parentesco), telefono = values(telefono)""",
+                (uid, datos.emergencia_nombre.strip(), datos.emergencia_parentesco or "otro",
+                 _digitos(datos.emergencia_telefono)))
+        if "fecha_ingreso" in falta:
+            if datos.fecha_ingreso_correcta:
+                await ejecutar("update users set fecha_ingreso_confirmada_en = NOW(6) where id = %s",
+                               (uid,))
+            else:
+                motivo = (datos.fecha_ingreso_motivo or "").strip()
+                await reglas_ficha.solicitar_cambio_ficha(
+                    uid, "fecha_ingreso", datos.fecha_ingreso_propuesta.isoformat(),
+                    "Fecha estimada declarada por el colaborador al ingresar"
+                    + (f": {motivo}" if motivo else ""), permitir_bloqueado=True)
+                pedidos.append(("Fecha de ingreso que indica",
+                                f"{datos.fecha_ingreso_propuesta:%d/%m/%Y}"))
+        if "jefe" in falta:
+            if datos.jefe_correcto:
+                await ejecutar("update users set jefe_confirmado_en = NOW(6) where id = %s", (uid,))
+            else:
+                jefe = await obtener_uno("select nombre from v_jefaturas where id = %s",
+                                         (datos.jefe_propuesto_id,))
+                if jefe is None:
+                    raise HTTPException(status_code=422, detail={
+                        "mensaje": "La jefatura elegida no está en la lista vigente."})
+                await reglas_ficha.solicitar_cambio_ficha(
+                    uid, "jefe_id", datos.jefe_propuesto_id,
+                    "Corrección declarada por el colaborador al ingresar")
+                pedidos.append(("Jefe que indica", jefe["nombre"]))
+        if "cargo" in falta:
+            if datos.cargo_correcto:
+                await ejecutar("update users set cargo_confirmado_en = NOW(6) where id = %s", (uid,))
+            else:
+                await reglas_ficha.solicitar_cambio_ficha(
+                    uid, "cargo", datos.cargo_propuesto.strip(),
+                    "Corrección declarada por el colaborador al ingresar")
+                pedidos.append(("Cargo que indica", datos.cargo_propuesto.strip()))
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise traducir(exc) from exc
+
+    quedan = await ingreso.pendientes(uid)
+    if not quedan:
+        await ejecutar("update users set ficha_completa = true, ficha_completada_en = NOW(6) "
+                       "where id = %s and not ficha_completa", (uid,))
+    await registrar(request, "ficha_inicial_guardada", user_id=uid, cedula=usuario["cedula"],
+                    detalle={"respondido": falta, "pedidos": [e for e, _ in pedidos]})
+
+    if pedidos:
+        region = (await obtener_uno("select coalesce(region, 'sierra') as r from users where id = %s",
+                                    (uid,)))["r"]
+        destinos = [{"email": d["email"], "nombre": d["nombre"]}
+                    for d in await rrhh_de_region(region)]
+        if destinos:
+            tareas.add_task(notificaciones.avisar_correccion_de_ficha, destinos,
+                            usuario["nombre"], usuario["cedula"], pedidos)
+    return {
+        "pendientes": quedan,
+        "en_revision": [e for e, _ in pedidos],
+        "mensaje": "Gracias. Sus datos quedaron registrados."
+                   + (" Lo que indicó como incorrecto lo revisará Talento Humano."
+                      if pedidos else ""),
     }

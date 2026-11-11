@@ -2,7 +2,7 @@
 
    Cada rol ve solo sus módulos. La barra es oscura y el contenido claro:
    así la navegación no compite con los datos, que es lo que se lee. */
-import { sesion, esc } from "./api.js";
+import { api, sesion, esc } from "./api.js";
 
 const MODULOS = [
   { id: "panel",    texto: "Mi panel",     href: "dashboard.html",   roles: "*" },
@@ -43,6 +43,9 @@ const MODULOS = [
       { texto: "Jefaturas", href: "administracion.html#jefaturas" },
       // Quiénes integran el departamento y a qué buzón llegan sus avisos.
       { texto: "Talento Humano", href: "administracion.html#talento-humano" },
+      // Cómo entra por primera vez quien no tiene correo, qué se le pide, y
+      // quién firma por Talento Humano en cada sede.
+      { texto: "Ingreso y firmas", href: "administracion.html#ingreso-firmas" },
       { texto: "Cambios de ficha", href: "administracion.html#cambios-ficha" },
       { texto: "Días no laborables", href: "administracion.html#feriados" },
       { texto: "Antigüedades", href: "administracion.html#antiguedades" },
@@ -152,9 +155,26 @@ const icono = (id) => `
  * La barra es `fixed` y el desplazamiento del contenido se aplica al `body`
  * desde aquí, no en cada pantalla: así ninguna página tuvo que tocarse.
  */
+/* Antes de usar el sistema se completa la ficha inicial (bienvenida.html).
+   El perfil guardado dice si falta algo; además se consulta al servidor, que
+   es quien sabe: una sesión abierta antes de este cambio no lo traería, y lo
+   que Talento Humano pida después tiene que alcanzar también a quien ya entró. */
+function exigirFichaInicial() {
+  if (sesion.perfil?.pendientes?.length) {
+    location.replace("bienvenida.html");
+    return true;
+  }
+  api.perfil().then((p) => {
+    sesion.actualizarPerfil({ pendientes: p.pendientes || [] });
+    if (p.pendientes?.length) location.replace("bienvenida.html");
+  }).catch(() => { /* sin red, se sigue; la próxima pantalla vuelve a mirar */ });
+  return false;
+}
+
 export function montarNavegacion(contenedor, { activo = "panel", contadores = {} } = {}) {
   const perfil = sesion.perfil;
   if (!perfil) return;
+  if (exigirFichaInicial()) return;
 
   const cfg = window.RRHH_CONFIG || {};
   const modulos = MODULOS.filter((m) => visible(m, perfil.rol));

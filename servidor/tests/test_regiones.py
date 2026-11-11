@@ -105,7 +105,7 @@ async def test_el_aviso_va_al_grupo_de_la_region(
         cliente, codigos, empleado, equipo_regional, monkeypatch):
     enviados: list[list[str]] = []
 
-    async def capturar(destinatarios, solicitud, quien):
+    async def capturar(destinatarios, solicitud, quien, adjuntos=None):
         enviados.append([d["email"] for d in destinatarios])
 
     monkeypatch.setattr(notificaciones, "avisar_a_rrhh", capturar)

@@ -42,12 +42,29 @@ async def _empresa() -> dict[str, Any]:
     return {"razon_social": f["razon_social"], "ruc": f["ruc"], "ciudad": f["ciudad"]}
 
 
+async def firmante_por_defecto(user_id) -> dict | None:
+    """Quien firma por Talento Humano en la sede del colaborador: la cabeza del
+    departamento si está configurada; si no, nadie (se firma a mano)."""
+    fila = await obtener_uno(
+        """SELECT f.id, u.nombre, COALESCE(f.cargo_firma, u.cargo) AS firma_como
+             FROM firmantes_rrhh f
+             JOIN users u ON u.id = f.user_id AND u.activo
+            WHERE f.principal
+              AND f.region = (SELECT COALESCE(region, 'sierra') FROM users WHERE id = %s)""",
+        (str(user_id),))
+    return fila
+
+
 async def datos_informe_trazabilidad(user_id) -> dict[str, Any] | None:
     u = await obtener_uno(
         """SELECT u.nombre, u.cedula, u.cargo, u.departamento, u.bodega, u.centro_costo,
                   u.fecha_ingreso, anios_cumplidos(u.fecha_ingreso) AS anios, u.dias_vacaciones,
-                  (SELECT j.nombre FROM users j WHERE j.id = u.jefe_id) AS jefe
-             FROM users u WHERE u.id = %s""", (user_id,))
+                  j.nombre AS jefe, j.cedula AS jefe_cedula, j.cargo AS jefe_cargo,
+                  COALESCE(u.region, 'sierra') AS region, r.sede, u.ciudad
+             FROM users u
+             LEFT JOIN users j ON j.id = u.jefe_id
+             LEFT JOIN regiones r ON r.codigo = COALESCE(u.region, 'sierra')
+            WHERE u.id = %s""", (user_id,))
     if u is None:
         return None
     por_anio = (await obtener_uno("SELECT dias_por_antiguedad(%s) AS d",
@@ -70,6 +87,8 @@ async def datos_informe_trazabilidad(user_id) -> dict[str, Any] | None:
             "departamento": u["departamento"], "bodega": u["bodega"],
             "centro_costo": u["centro_costo"], "fecha_ingreso": u["fecha_ingreso"],
             "anios_servicio": u["anios"], "jefe": u["jefe"],
+            "jefe_cedula": u["jefe_cedula"], "jefe_cargo": u["jefe_cargo"],
+            "region": u["region"], "sede": u["sede"], "ciudad": u["ciudad"],
         },
         "saldo": {"dias_disponibles": u["dias_vacaciones"], "dias_por_periodo_en_curso": por_anio},
         "gozadas": gozadas,
@@ -87,7 +106,9 @@ async def datos_informe_solicitud(request_id) -> dict[str, Any] | None:
         """SELECT r.*, u.nombre AS u_nombre, u.cedula AS u_cedula, u.cargo AS u_cargo,
                   u.departamento AS u_departamento, u.bodega AS u_bodega,
                   u.centro_costo AS u_centro_costo, u.fecha_ingreso AS u_fecha_ingreso,
-                  j.nombre AS jefe_nombre,
+                  j.nombre AS jefe_nombre, j.cedula AS jefe_cedula, j.cargo AS jefe_cargo,
+                  COALESCE(u.region, 'sierra') AS u_region, u.ciudad AS u_ciudad,
+                  (SELECT g.sede FROM regiones g WHERE g.codigo = COALESCE(u.region, 'sierra')) AS u_sede,
                   (SELECT x.nombre FROM users x WHERE x.id = r.reemplazo_id) AS reemplazo_nombre,
                   (SELECT a.nombre FROM users a WHERE a.id = r.jefe_aprobado_por) AS aprobo_jefe,
                   (SELECT a.nombre FROM users a WHERE a.id = r.rrhh_aprobado_por) AS aprobo_rrhh
@@ -103,7 +124,8 @@ async def datos_informe_solicitud(request_id) -> dict[str, Any] | None:
             "nombre": r["u_nombre"], "cedula": r["u_cedula"], "cargo": r["u_cargo"],
             "departamento": r["u_departamento"], "bodega": r["u_bodega"],
             "centro_costo": r["u_centro_costo"], "fecha_ingreso": r["u_fecha_ingreso"],
-            "jefe": r["jefe_nombre"],
+            "jefe": r["jefe_nombre"], "jefe_cedula": r["jefe_cedula"], "jefe_cargo": r["jefe_cargo"],
+            "region": r["u_region"], "sede": r["u_sede"], "ciudad": r["u_ciudad"],
         },
         "solicitud": {
             "folio": r["folio"],

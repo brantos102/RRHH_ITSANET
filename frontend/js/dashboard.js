@@ -1,5 +1,6 @@
 /* Panel del empleado: perfil, saldo, alertas y solicitudes. */
 import { api, sesion, fecha, fechaHora, esc, ESTADOS, ErrorApi, uuid } from "./api.js";
+import { elegirFirmante } from "./firmante.js";
 import { montarNavegacion } from "./navegacion.js";
 
 const $ = (id) => document.getElementById(id);
@@ -681,6 +682,11 @@ function pintarPendientes() {
               : "bg-slate-50 text-slate-600 ring-1 ring-slate-200"}">${esc(texto)}</span>`
           ).join("")}</div>` : ""}
 
+      ${s.tipo === "vacacion" && ["rrhh", "admin"].includes(sesion.perfil?.rol)
+        ? `<button type="button" data-docs-solicitud="${s.id}" data-region="${esc(s.region || "sierra")}"
+                   class="mt-4 w-full rounded-xl bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700
+                          ring-1 ring-slate-200 hover:bg-slate-100">
+             📄 Solicitud y constancia para imprimir</button>` : ""}
       <div class="mt-4 flex gap-3">
         <button data-rechazar="${s.id}" data-nombre="${esc(s.empleado)}" data-folio="${s.folio}"
                 class="flex-1 rounded-xl bg-white px-4 py-2.5 font-medium text-rose-700 ring-1 ring-rose-200 hover:bg-rose-50">
@@ -696,6 +702,17 @@ function pintarPendientes() {
 }
 
 document.addEventListener("click", async (e) => {
+  const docs = e.target.closest("[data-docs-solicitud]");
+  if (docs) {
+    try {
+      const papel = await api.papelDeLaSolicitud(docs.dataset.docsSolicitud);
+      const firmante = await elegirFirmante(docs.dataset.region);
+      if (firmante !== null) await api.abrirPapel(papel.id, firmante);
+    } catch (err) {
+      avisar(err.message, true);
+    }
+    return;
+  }
   const aprobar = e.target.closest("[data-aprobar]");
   if (aprobar) {
     /* Antes de aprobar, el jefe decide quién cubre el puesto. Es el momento

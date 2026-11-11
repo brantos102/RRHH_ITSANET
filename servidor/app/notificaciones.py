@@ -133,16 +133,28 @@ async def avisar_al_jefe(jefe: dict, solicitud: dict) -> None:
     await correo.enviar(jefe["email"], titulo, texto, _marco(titulo, cuerpo, ("Revisar solicitud", url)))
 
 
-async def avisar_a_rrhh(destinatarios: list[dict], solicitud: dict, jefe: str) -> None:
+async def avisar_a_rrhh(destinatarios: list[dict], solicitud: dict, jefe: str,
+                       adjuntos: list[tuple[str, bytes, str]] | None = None) -> None:
+    """A Talento Humano cuando el jefe aprobó. En vacaciones van adjuntas la
+    solicitud y la constancia de goce en PDF, para imprimirlas y firmarlas:
+    el colaborador solo tendrá que acercarse a firmar. Solo a los buzones de
+    Talento Humano (LOPDP: el documento lleva datos personales)."""
     url = _enlace(str(solicitud["rrhh_token"]), "rrhh")
     titulo = f"Aprobación de Talento Humano: {solicitud['empleado']}"
     filas = _detalle(solicitud) + [("Aprobada por", jefe)]
+    nota_adjuntos = (
+        "Se adjuntan la solicitud y la constancia de goce para imprimir y firmar. "
+        "Para elegir quién firma por Talento Humano, imprímalas desde el sistema."
+        if adjuntos else "")
     cuerpo = (
         '<p style="margin:0 0 16px;font-size:14px;color:#475569">'
         "El jefe inmediato ya aprobó esta solicitud. Falta la aprobación de Talento Humano.</p>"
         + _tabla(filas)
+        + (f'<p style="margin:16px 0 0;font-size:13px;color:#475569">{nota_adjuntos}</p>'
+           if nota_adjuntos else "")
     )
-    texto = f"{titulo}\n\n" + "\n".join(f"{e}: {v}" for e, v in filas) + f"\n\nDecida aquí:\n{url}\n"
+    texto = (f"{titulo}\n\n" + "\n".join(f"{e}: {v}" for e, v in filas)
+             + (f"\n\n{nota_adjuntos}" if nota_adjuntos else "") + f"\n\nDecida aquí:\n{url}\n")
     html = _marco(titulo, cuerpo, ("Revisar solicitud", url))
 
     # El buzón del departamento recibe el aviso aunque no haya nadie
@@ -150,7 +162,7 @@ async def avisar_a_rrhh(destinatarios: list[dict], solicitud: dict, jefe: str) -
     buzon = await _buzon_del_departamento(solicitud.get("region"))
     if buzon:
         try:
-            await correo.enviar(buzon, titulo, texto, html)
+            await correo.enviar(buzon, titulo, texto, html, adjuntos=adjuntos)
         except Exception:  # noqa: BLE001
             log.exception("No se pudo avisar al buzón del departamento %s", buzon)
 
@@ -158,7 +170,7 @@ async def avisar_a_rrhh(destinatarios: list[dict], solicitud: dict, jefe: str) -
         if buzon and persona["email"] == buzon:
             continue              # ya lo recibió como departamento
         try:
-            await correo.enviar(persona["email"], titulo, texto, html)
+            await correo.enviar(persona["email"], titulo, texto, html, adjuntos=adjuntos)
         except Exception:  # noqa: BLE001
             log.exception("No se pudo avisar a %s", persona["email"])
 
@@ -251,15 +263,23 @@ async def avisar_excepcion_a_rrhh(
             "(Configuración › Talento Humano)", solicitud.get("folio"))
 
 
-async def avisar_aprobacion(empleado: dict, solicitud: dict) -> None:
-    """Al empleado, con su código QR incrustado y adjunto."""
+async def avisar_aprobacion(empleado: dict, solicitud: dict, sede_firma: str | None = None) -> None:
+    """Al empleado, con su código QR incrustado y adjunto. En vacaciones, le
+    pide además acercarse a Talento Humano a firmar para concluir."""
     imagen = qr.png(str(solicitud["qr_hash"]))
     titulo = "Su solicitud fue aprobada"
     filas = _detalle(solicitud) + [("Válido hasta", _fecha(solicitud["fecha_fin"]))]
+    firmar = ""
+    if solicitud.get("tipo") == "vacacion":
+        firmar = ("Para concluir el proceso, acérquese a Talento Humano"
+                  + (f" de {sede_firma}" if sede_firma else "")
+                  + " a firmar la solicitud y la constancia de sus vacaciones.")
 
     cuerpo = (
         '<p style="margin:0 0 16px;font-size:14px;color:#475569">'
         "Su solicitud completó las dos aprobaciones. Presente este código en garita al salir.</p>"
+        + (f'<p style="margin:0 0 16px;padding:10px 12px;border-radius:10px;background:#fff7ed;'
+           f'color:#9a3412;font-size:14px;font-weight:600">{firmar}</p>' if firmar else "")
         + _tabla(filas)
         + """<div style="margin-top:22px;text-align:center">
                <img src="cid:qr" alt="Código QR de salida" width="220" height="220"
@@ -271,6 +291,7 @@ async def avisar_aprobacion(empleado: dict, solicitud: dict) -> None:
     texto = (
         f"{titulo}\n\n"
         + "\n".join(f"{e}: {v}" for e, v in filas)
+        + (f"\n\n{firmar}" if firmar else "")
         + "\n\nSu código QR de salida va adjunto a este correo.\n"
     )
     await correo.enviar(

@@ -32,6 +32,7 @@
     <button data-seccion="lineamientos" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Lineamientos</button>
     <button data-seccion="jefaturas" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Jefaturas</button>
     <button data-seccion="talento-humano" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Talento Humano</button>
+    <button data-seccion="ingreso-firmas" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Ingreso y firmas</button>
     <button data-seccion="depuracion" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Depuración</button>
   </nav>
 
@@ -125,6 +126,58 @@
           <tbody id="th-tabla"></tbody>
         </table>
       </div>
+    </div>
+  </section>
+
+  <!-- ===== Primer ingreso y firmas de Talento Humano =====
+       Cómo entra por primera vez quien no tiene correo, qué se le pide antes
+       de usar el sistema, y quién firma por Talento Humano en cada sede. -->
+  <section data-panel="ingreso-firmas" class="hidden space-y-4">
+    <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <h2 class="font-medium">Primer ingreso de quien no tiene correo</h2>
+      <p class="mt-0.5 text-sm text-slate-600">
+        Con «correo», la persona registra su correo y entra con el código que le
+        llega ahí. Cuando la mayoría tenga fecha de nacimiento registrada, cambie a
+        «fecha de nacimiento»: además deberá coincidir con su expediente.
+      </p>
+      <div id="ing-cobertura" class="mt-3 grid gap-2 sm:grid-cols-3"></div>
+      <form id="form-ingreso" class="mt-4 space-y-4">
+        <fieldset class="space-y-2 text-sm">
+          <legend class="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">Cómo se comprueba</legend>
+          <label class="flex items-start gap-2"><input type="radio" name="ing-modo" value="correo" class="mt-0.5">
+            <span><b>Correo:</b> registra su correo y entra con el código.</span></label>
+          <label class="flex items-start gap-2"><input type="radio" name="ing-modo" value="nacimiento" class="mt-0.5">
+            <span><b>Fecha de nacimiento:</b> debe coincidir con su expediente.</span></label>
+        </fieldset>
+        <fieldset>
+          <legend class="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">
+            Qué se pide al entrar, antes de usar el sistema</legend>
+          <div id="ing-campos" class="grid gap-1.5 text-sm sm:grid-cols-2"></div>
+          <p class="mt-1 text-xs text-slate-500">Lo que ya consta o ya se confirmó no se vuelve a pedir.</p>
+        </fieldset>
+        <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">Guardar</button>
+      </form>
+    </div>
+
+    <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <h2 class="font-medium">Quién firma por Talento Humano</h2>
+      <p class="mt-0.5 text-sm text-slate-600">
+        En los documentos de vacaciones. La cabeza del departamento de cada sede sale
+        por defecto; al imprimir se puede elegir a otro de la lista o dejarlo en blanco.
+      </p>
+      <form id="form-firmante" class="mt-3 grid gap-3 sm:grid-cols-[1fr_10rem_1fr_auto] sm:items-end">
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Persona</span>
+          <select id="fir-persona" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></select></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Sede</span>
+          <select id="fir-region" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+            <option value="sierra">Quito</option><option value="costa">Guayaquil</option></select></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Firma como</span>
+          <input id="fir-cargo" maxlength="120" placeholder="Jefe de Talento Humano" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <label class="flex items-center gap-2 text-sm sm:col-span-4">
+          <input id="fir-principal" type="checkbox" class="h-4 w-4"> Es la cabeza del departamento en esa sede</label>
+        <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 sm:col-span-4 sm:justify-self-start">Agregar</button>
+      </form>
+      <div id="fir-lista" class="mt-4 space-y-4"></div>
     </div>
   </section>
 

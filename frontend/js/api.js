@@ -34,6 +34,14 @@ export const sesion = {
     const s = this.leer();
     return !!s && new Date(s.expira_en) > new Date();
   },
+  /* Cambia datos del perfil guardado sin tocar el token: lo usa la ficha
+     inicial para dejar de pedir lo que ya se respondió. */
+  actualizarPerfil(cambios) {
+    const s = this.leer();
+    if (!s) return;
+    s.perfil = { ...s.perfil, ...cambios };
+    this.guardar(s);
+  },
 };
 
 /* --------------------------------------------------------------- peticiones */
@@ -120,6 +128,22 @@ export const api = {
   completarFicha: (datos) =>
     peticion("/auth/completar-ficha", { method: "POST", body: JSON.stringify(datos) }),
   jefaturasDelAlta: (token) => peticion(`/auth/alta/jefaturas?token=${token}`),
+  registrarCorreo: (cedula, email) =>
+    peticion("/auth/registrar-correo", { method: "POST", body: JSON.stringify({ cedula, email }) }),
+  fichaInicial: () => peticion("/mi-ficha/inicial"),
+  guardarFichaInicial: (datos) =>
+    peticion("/mi-ficha/inicial", { method: "POST", body: JSON.stringify(datos) }),
+  ingresoConfig: () => peticion("/admin/ingreso"),
+  guardarIngresoConfig: (datos) =>
+    peticion("/admin/ingreso", { method: "PUT", body: JSON.stringify(datos) }),
+  firmantes: () => peticion("/admin/firmantes"),
+  agregarFirmante: (datos) =>
+    peticion("/admin/firmantes", { method: "POST", body: JSON.stringify(datos) }),
+  cambiarFirmante: (id, datos) =>
+    peticion(`/admin/firmantes/${id}`, { method: "PATCH", body: JSON.stringify(datos) }),
+  quitarFirmante: (id) => peticion(`/admin/firmantes/${id}`, { method: "DELETE" }),
+  firmantesParaImprimir: (region) =>
+    peticion(`/papeles/firmantes?region=${encodeURIComponent(region || "sierra")}`),
   confirmarCorreo: (token) =>
     peticion("/auth/confirmar-correo", { method: "POST", body: JSON.stringify({ token }) }),
   cambiarCorreo: (email) =>
@@ -337,14 +361,15 @@ export const api = {
   papelDeLaSolicitud: (id) => peticion(`/papeles/de-la-solicitud/${id}`),
   asegurarTrazabilidad: () => peticion("/papeles/trazabilidad", { method: "POST" }),
 
-  async abrirPapel(id) {
-    const r = await fetch(`${API}/papeles/${id}.html`, {
+  async abrirPapel(id, firmante = "") {
+    const parametro = firmante ? `?firmante=${encodeURIComponent(firmante)}` : "";
+    const r = await fetch(`${API}/papeles/${id}.pdf${parametro}`, {
       headers: { Authorization: `Bearer ${sesion.token}` },
     });
     if (!r.ok) {
       throw new ErrorApi("No se pudo preparar el documento para imprimir.", r.status);
     }
-    const url = URL.createObjectURL(new Blob([await r.text()], { type: "text/html" }));
+    const url = URL.createObjectURL(new Blob([await r.arrayBuffer()], { type: "application/pdf" }));
     const ventana = window.open(url, "_blank");
     if (!ventana) {
       URL.revokeObjectURL(url);
@@ -353,9 +378,10 @@ export const api = {
         "emergentes de este sitio y vuelva a intentarlo.", 0);
     }
     // Sin esto el documento queda en memoria mientras la pestaña viva.
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
     return ventana;
   },
+  registrarFirma: (id) => peticion(`/admin/papeles/${id}/firmado`, { method: "POST" }),
 
   panelConfiguracion: () => peticion("/panel/configuracion"),
   panelCambiar: (clave, cambios) =>

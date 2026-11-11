@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from . import registro
 from .config import get_settings
 from .db import abrir_pool, cerrar_pool, obtener_uno
-from .routers import (administracion, aprobaciones, auth, chat, ficha,
+from .routers import (administracion, aprobaciones, auth, chat, ficha, ingreso_firmas,
                       garita, informes, panel, papeles, personas, solicitudes,
                       tablero, temporal)
 
@@ -217,6 +217,7 @@ app.include_router(garita.router)
 app.include_router(informes.router)
 app.include_router(administracion.router)
 app.include_router(ficha.router)
+app.include_router(ingreso_firmas.router)
 app.include_router(chat.router)
 app.include_router(temporal.router)
 app.include_router(panel.router)

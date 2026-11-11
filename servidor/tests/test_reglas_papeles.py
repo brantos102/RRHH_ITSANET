@@ -11,8 +11,27 @@ COLUMNAS = ["user_id", "tipo", "request_id", "autorizado_por", "autorizacion_mot
             "emitido_por", "datos", "impresiones"]
 
 
+# Lo que el documento lleva desde que tiene el formato de Talento Humano y el
+# sistema anterior no tenía: datos del jefe para su bloque de firma y la sede
+# donde se firma. Se quitan para comparar; lo demás tiene que ser idéntico.
+CAMPOS_NUEVOS = ("jefe_cedula", "jefe_cargo", "region", "sede", "ciudad")
+
+
+def _sin_nuevos(datos):
+    if isinstance(datos, dict) and isinstance(datos.get("colaborador"), dict):
+        datos = {**datos, "colaborador": {k: v for k, v in datos["colaborador"].items()
+                                          if k not in CAMPOS_NUEVOS}}
+    return datos
+
+
 def _fila(f):
-    return json_normal({c: f[c] for c in COLUMNAS})
+    fila = {c: f[c] for c in COLUMNAS}
+    datos = fila["datos"]
+    if isinstance(datos, str):
+        import json
+        datos = json.loads(datos)
+    fila["datos"] = _sin_nuevos(datos)
+    return json_normal(fila)
 
 
 def _ordenadas(filas):
@@ -24,7 +43,7 @@ def _ordenadas(filas):
 async def test_datos_de_trazabilidad_de_toda_la_muestra(muestra):
     for p in muestra.execute("select id from users order by cedula").fetchall():
         en_pg = muestra.execute("select datos_informe_trazabilidad(%s) as d", (p["id"],)).fetchone()["d"]
-        assert json_normal(await papeles.datos_informe_trazabilidad(p["id"])) == json_normal(en_pg), p["id"]
+        assert json_normal(_sin_nuevos(await papeles.datos_informe_trazabilidad(p["id"]))) == json_normal(en_pg), p["id"]
 
 
 async def test_datos_de_cada_solicitud_de_la_muestra(muestra):
@@ -32,7 +51,7 @@ async def test_datos_de_cada_solicitud_de_la_muestra(muestra):
     assert len(filas) > 40
     for r in filas:
         en_pg = muestra.execute("select datos_informe_solicitud(%s) as d", (r["id"],)).fetchone()["d"]
-        assert json_normal(await papeles.datos_informe_solicitud(r["id"])) == json_normal(en_pg), r["id"]
+        assert json_normal(_sin_nuevos(await papeles.datos_informe_solicitud(r["id"]))) == json_normal(en_pg), r["id"]
 
 
 async def test_el_folio_tiene_la_forma_de_siempre_y_no_se_repite():

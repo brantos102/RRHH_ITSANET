@@ -24,7 +24,7 @@ from ..cedula import normalizar_cedula
 from ..config import get_settings
 from ..db import ejecutar, nuevo_id, obtener_todos, obtener_uno, para_json, transaccion
 from ..errores import traducir
-from ..reglas import acceso, ficha, periodos, personal, saldo
+from ..reglas import acceso, ficha, ingreso, periodos, personal, saldo
 from ..deps import usuario_actual
 from ..schemas import Perfil, RespuestaEnvio, Sesion, SolicitudToken, ValidacionToken
 from ..security import comparar_hash, emitir_token, generar_otp, hash_otp
@@ -167,14 +167,15 @@ async def solicitar_token(datos: SolicitudToken, request: Request) -> RespuestaE
 
 # --------------------------------------------------------------------------
 @router.post("/validar-token", response_model=Sesion)
-async def validar_token(datos: ValidacionToken, request: Request) -> Sesion:
+async def validar_token(datos: ValidacionToken, request: Request,
+                        tareas: BackgroundTasks) -> Sesion:
     error_credenciales = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Código incorrecto o expirado.",
     )
 
     registro = await obtener_uno(
-        """SELECT id, user_id, code_hash, intentos, max_intentos, expira_en
+        """SELECT id, user_id, email, code_hash, intentos, max_intentos, expira_en
              FROM auth_otp
             WHERE cedula = %s AND consumido_en IS NULL AND anulado_en IS NULL
             ORDER BY created_at DESC LIMIT 1""",
@@ -228,6 +229,11 @@ async def validar_token(datos: ValidacionToken, request: Request) -> Sesion:
     if usuario is None:
         raise error_credenciales
 
+    # Primer ingreso por correo: el código llegó a la dirección que la persona
+    # declaró, y recibirlo ES la prueba de que el buzón existe y es suyo. Recién
+    # aquí el correo pasa al expediente.
+    await _adoptar_correo_declarado(registro, request, tareas)
+
     # Los períodos se generan/actualizan al entrar: el saldo siempre está al día.
     await periodos.generar_periodos_vacaciones(usuario["id"])
     usuario = await obtener_uno(
@@ -265,6 +271,7 @@ async def validar_token(datos: ValidacionToken, request: Request) -> Sesion:
             dias_vacaciones=float(usuario["dias_vacaciones"]),
             jefe_nombre=usuario["jefe_nombre"],
             logros=usuario["logros"] or [],
+            pendientes=await ingreso.pendientes(usuario["id"]),
         ),
     )
 
@@ -286,6 +293,7 @@ async def perfil(usuario: Annotated[dict, Depends(usuario_actual)]) -> Perfil:
         dias_vacaciones=float(usuario["dias_vacaciones"]),
         jefe_nombre=usuario["jefe_nombre"],
         logros=usuario["logros"] or [],
+        pendientes=await ingreso.pendientes(usuario["id"]),
     )
 
 
@@ -364,7 +372,8 @@ class ConfirmacionCorreo(BaseModel):
 class PruebaIdentidad(BaseModel):
     cedula: str
     fecha_nacimiento: date
-    fecha_ingreso: date
+    # Opcional: con la fecha de nacimiento basta. Si llega, también se compara.
+    fecha_ingreso: date | None = None
 
     @field_validator("cedula")
     @classmethod
@@ -421,7 +430,128 @@ async def necesita_ficha(datos: SolicitudToken, request: Request) -> dict:
     correo: quien pregunta no aprende nada que no supiera.
     """
     fila = await obtener_uno("SELECT puede_completar_ficha(%s) AS puede", (datos.cedula,))
-    return {"necesita": bool(fila and fila["puede"])}
+    necesita = bool(fila and fila["puede"])
+    # El modo solo se dice a quien SÍ debe completar su ficha: a los demás la
+    # respuesta les llega idéntica, exista o no la cédula.
+    return {"necesita": necesita, "modo": await ingreso.modo_alta() if necesita else None}
+
+
+class CorreoDeclarado(SolicitudToken):
+    email: EmailStr
+
+
+@router.post("/registrar-correo", response_model=RespuestaEnvio)
+async def registrar_correo(datos: CorreoDeclarado, request: Request) -> RespuestaEnvio:
+    """Primer ingreso de quien no tiene correo, en el modo «correo».
+
+    La persona escribe su correo y recibe ahí el código. El correo NO se guarda
+    todavía: pasa al expediente recién cuando entra con ese código
+    (`_adoptar_correo_declarado`), que es lo que prueba que el buzón es suyo.
+
+    El riesgo es el de siempre con la cédula, que es casi pública: alguien
+    podría declarar su propio correo con la cédula de otro. Por eso:
+      · solo vale para quien no tiene correo confirmado (no sirve para
+        quitarle la cuenta a quien ya entra);
+      · Talento Humano de su sede recibe aviso de cada correo registrado así;
+      · queda en la bitácora con IP y navegador;
+      · y en cuanto haya fechas de nacimiento suficientes, se cambia el modo a
+        «nacimiento» desde Administración y este camino se cierra.
+    """
+    settings = get_settings()
+    ip = ip_del_cliente(request)
+    email = str(datos.email).strip().lower()
+
+    if await ingreso.modo_alta() != "correo":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
+            "mensaje": "Para su primer ingreso debe comprobar su identidad con su fecha "
+                       "de nacimiento."})
+
+    puede = await obtener_uno("SELECT puede_completar_ficha(%s) AS puede", (datos.cedula,))
+    if not (puede and puede["puede"]):
+        # La misma respuesta que da solicitar-token a una cédula que no existe.
+        await registrar(request, "alta_correo_no_aplica", cedula=datos.cedula)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
+            "mensaje": "No se puede registrar un correo para esta cédula desde aquí. "
+                       "Comuníquese con Talento Humano."})
+
+    conteo = await acceso.codigos_sin_usar(datos.cedula, ip)
+    if conteo and (conteo["por_cedula"] >= settings.otp_max_envios_hora
+                   or conteo["por_ip"] >= settings.otp_max_envios_hora * 4):
+        await registrar(request, "alta_correo_limite", cedula=datos.cedula)
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail={
+            "mensaje": "Pidió varios códigos y no usó ninguno. Revise su correo —también "
+                       "la carpeta de no deseado— o comuníquese con Talento Humano."})
+
+    usuario = await obtener_uno(
+        "SELECT id, nombre FROM users WHERE cedula = %s AND activo", (datos.cedula,))
+    ocupado = await obtener_uno(
+        "SELECT 1 AS x FROM users WHERE LOWER(email) = %s AND id <> %s", (email, usuario["id"]))
+    if ocupado:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
+            "mensaje": "Ese correo ya lo usa otra persona. Escriba el suyo o comuníquese "
+                       "con Talento Humano."})
+
+    codigo = generar_otp(settings.otp_longitud)
+    await ejecutar(
+        """UPDATE auth_otp SET anulado_en = NOW(6)
+            WHERE cedula = %s AND consumido_en IS NULL AND anulado_en IS NULL
+              AND expira_en > NOW(6)""", (datos.cedula,))
+    await ejecutar(
+        """INSERT INTO auth_otp
+             (cedula, user_id, email, code_hash, max_intentos, expira_en, ip, user_agent)
+           VALUES (%(cedula)s, %(user_id)s, %(email)s, %(hash)s, %(max_intentos)s,
+                   NOW(6) + INTERVAL %(minutos)s MINUTE, %(ip)s, %(agente)s)""",
+        {"cedula": datos.cedula, "user_id": usuario["id"], "email": email,
+         "hash": hash_otp(codigo, datos.cedula), "max_intentos": settings.otp_max_intentos,
+         "minutos": settings.otp_vigencia_minutos, "ip": ip,
+         "agente": (request.headers.get("user-agent") or "")[:500]})
+    try:
+        await correo.enviar_otp(email, usuario["nombre"], codigo)
+    except Exception:  # noqa: BLE001
+        log.exception("No se pudo enviar el código de alta a %s", enmascarar(email))
+        await registrar(request, "otp_error_envio", user_id=str(usuario["id"]), cedula=datos.cedula)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail="No pudimos enviar el correo. Intente en unos minutos.")
+
+    await registrar(request, "alta_correo_declarado", user_id=str(usuario["id"]),
+                    cedula=datos.cedula, detalle={"correo": enmascarar(email)})
+    return RespuestaEnvio(enviado=True, correo=enmascarar(email),
+                          vigencia_minutos=settings.otp_vigencia_minutos,
+                          mensaje="Le enviamos un código a ese correo. Con él confirma que "
+                                  "es suyo y entra al sistema.")
+
+
+async def _adoptar_correo_declarado(registro: dict, request: Request,
+                                    tareas: BackgroundTasks) -> None:
+    """Si el código se envió a un correo declarado en el primer ingreso, ese
+    correo pasa al expediente: quien lo recibió probó que el buzón es suyo."""
+    if not registro.get("email"):
+        return
+    u = await obtener_uno(
+        """SELECT id, cedula, nombre, email, correo_pendiente, region
+             FROM users WHERE id = %s""", (registro["user_id"],))
+    if u is None or (u["email"] and not u["correo_pendiente"]):
+        return                                    # ya tenía correo confirmado
+    if (u["email"] or "").lower() == registro["email"].lower() and not u["correo_pendiente"]:
+        return
+    ocupado = await obtener_uno(
+        "SELECT 1 AS x FROM users WHERE LOWER(email) = %s AND id <> %s",
+        (registro["email"].lower(), u["id"]))
+    if ocupado:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
+            "mensaje": "Ese correo ya lo registró otra persona mientras usted entraba. "
+                       "Comuníquese con Talento Humano."})
+    await ejecutar(
+        """UPDATE users SET email = %s, correo_pendiente = FALSE
+            WHERE id = %s AND (email IS NULL OR correo_pendiente)""",
+        (registro["email"], u["id"]))
+    await registrar(request, "alta_correo_confirmado", user_id=str(u["id"]), cedula=u["cedula"],
+                    detalle={"correo": registro["email"]})
+    destinos = [{"email": d["email"], "nombre": d["nombre"]}
+                for d in await personal.rrhh_de_region(u.get("region") or "sierra")]
+    if destinos:
+        tareas.add_task(notificaciones.avisar_alta_completada, destinos,
+                        u["nombre"], u["cedula"], registro["email"])
 
 
 @router.post("/probar-identidad")
@@ -455,7 +585,7 @@ async def probar_identidad(datos: PruebaIdentidad, request: Request) -> dict:
             where u.cedula = %(cedula)s and u.activo
               and u.correo_pendiente and not u.ficha_completa
               and u.fecha_nacimiento = %(nacimiento)s
-              and u.fecha_ingreso = %(ingreso)s""",
+              and (%(ingreso)s is null or u.fecha_ingreso = %(ingreso)s)""",
         {"cedula": datos.cedula, "nacimiento": datos.fecha_nacimiento,
          "ingreso": datos.fecha_ingreso},
     )
@@ -469,18 +599,18 @@ async def probar_identidad(datos: PruebaIdentidad, request: Request) -> dict:
         # que decirlo no expone nada nuevo.
         faltan = await obtener_uno(
             """SELECT fecha_nacimiento IS NULL AS sin_nacimiento,
-                      fecha_ingreso IS NULL AS sin_ingreso
+                      (fecha_ingreso IS NULL AND %s IS NOT NULL) AS sin_ingreso
                  FROM users
                 WHERE cedula = %s AND activo AND correo_pendiente AND NOT ficha_completa""",
-            (datos.cedula,))
+            (datos.fecha_ingreso, datos.cedula))
         if faltan and (faltan["sin_nacimiento"] or faltan["sin_ingreso"]):
             await registrar(request, "alta_sin_datos_para_verificar", cedula=datos.cedula)
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={"mensaje": "Su expediente todavía no tiene registrada su fecha de "
                                    "nacimiento, que es con lo que el sistema comprueba que es "
-                                   "usted. Pida a Talento Humano que registre su correo "
-                                   "institucional: con él recibirá el código y podrá entrar."},
+                                   "usted. Comuníquese con Talento Humano para que la "
+                                   "registre o le habilite el ingreso con su correo."},
             )
         await registrar(request, "alta_identidad_fallida", cedula=datos.cedula)
         raise HTTPException(

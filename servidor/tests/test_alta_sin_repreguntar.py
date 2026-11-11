@@ -149,4 +149,7 @@ async def test_no_se_expone_el_expediente_a_quien_solo_teclea_una_cedula(
     r = await cliente.post("/auth/necesita-ficha",
                            json={"cedula": ficha_completa_sin_correo["cedula"]})
     assert r.status_code == 200
-    assert set(r.json()) == {"necesita"}, "no debe filtrar nada más"
+    # Además de «necesita», solo el modo de verificación, que es una
+    # configuración de la empresa y no un dato de la persona.
+    assert set(r.json()) == {"necesita", "modo"}, "no debe filtrar nada más"
+    assert r.json()["modo"] in (None, "correo", "nacimiento")

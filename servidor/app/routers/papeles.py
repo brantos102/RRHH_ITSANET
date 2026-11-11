@@ -31,7 +31,7 @@ from ..db import booleanos, obtener_todos, obtener_uno
 from ..errores import traducir
 from ..deps import exigir_rol, usuario_actual
 from ..reglas import papeles as reglas_papeles
-from ..documentos import armar
+from ..documentos import armar, nombre_archivo
 
 router = APIRouter(tags=["Papeles para firmar"])
 
@@ -47,7 +47,7 @@ CAMPOS = """i.id, i.user_id, i.tipo, i.request_id, i.folio,
             i.emitido_en, i.impresiones, i.ultima_impresion, i.datos,
             i.autorizado_en, i.autorizacion_motivo,
             i.autorizado_por is not null as es_reemision,
-            a.nombre as autorizado_por"""
+            a.nombre as autorizado_por, i.firmado_en"""
 
 
 async def _buscar(informe_id: uuid.UUID) -> dict | None:
@@ -97,9 +97,31 @@ async def asegurar_trazabilidad(request: Request, usuario: Usuario) -> dict:
     return {"id": fila["id"], "folio": fila["folio"], "emitido_en": fila["emitido_en"]}
 
 
-@router.get("/papeles/{informe_id}.html", response_class=Response)
-async def imprimir(informe_id: uuid.UUID, request: Request, usuario: Usuario) -> Response:
-    """El documento, listo para imprimir y firmar a mano."""
+async def _firmante_elegido(informe: dict, usuario: dict, firmante: str | None) -> dict | None:
+    """Quién firma por Talento Humano en este ejemplar.
+
+    Por defecto, la cabeza del departamento en la sede del colaborador. Solo
+    Talento Humano puede elegir a otro de su sede o dejarlo en blanco; al
+    colaborador siempre le sale el de por defecto.
+    """
+    if firmante and usuario["rol"] in ("rrhh", "admin"):
+        if firmante == "blanco":
+            return None
+        fila = await obtener_uno(
+            """SELECT u.nombre, COALESCE(f.cargo_firma, u.cargo) AS firma_como
+                 FROM firmantes_rrhh f JOIN users u ON u.id = f.user_id AND u.activo
+                WHERE f.id = %s""", (firmante,))
+        if fila is None:
+            raise HTTPException(status_code=422, detail={
+                "mensaje": "Ese firmante no está en la lista de Talento Humano."})
+        return fila
+    return await reglas_papeles.firmante_por_defecto(informe["user_id"])
+
+
+@router.get("/papeles/{informe_id}.pdf", response_class=Response)
+async def imprimir(informe_id: uuid.UUID, request: Request, usuario: Usuario,
+                   firmante: str | None = None) -> Response:
+    """El documento en PDF, listo para imprimir y firmar a mano."""
     informe = await _buscar(informe_id)
     if informe is None:
         raise HTTPException(status_code=404, detail={"mensaje": "Ese documento no existe."})
@@ -110,6 +132,9 @@ async def imprimir(informe_id: uuid.UUID, request: Request, usuario: Usuario) ->
         raise HTTPException(status_code=403, detail={
             "mensaje": "Ese documento es del colaborador y de Talento Humano."})
 
+    elegido = await _firmante_elegido(informe, usuario, firmante)
+    contenido = armar(informe, elegido)
+
     # Cada impresión se cuenta: es la diferencia entre «se emitió una vez» y
     # «se imprimió catorce veces», y la segunda es la que cuenta en una
     # auditoría.
@@ -118,10 +143,12 @@ async def imprimir(informe_id: uuid.UUID, request: Request, usuario: Usuario) ->
                     cedula=usuario["cedula"], entidad="informes_firmados",
                     entidad_id=str(informe_id),
                     detalle={"tipo": informe["tipo"], "folio": informe["folio"],
-                             "de": informe["de_quien"], "propio": propio})
+                             "de": informe["de_quien"], "propio": propio,
+                             "firma_th": elegido["nombre"] if elegido else None})
 
-    return Response(content=armar(informe), media_type="text/html; charset=utf-8",
-                    headers={"Cache-Control": "no-store"})
+    return Response(content=contenido, media_type="application/pdf",
+                    headers={"Cache-Control": "no-store",
+                             "Content-Disposition": f'inline; filename="{nombre_archivo(informe)}"'})
 
 
 @router.get("/papeles/de-la-solicitud/{request_id}")
@@ -157,6 +184,8 @@ async def listar_papeles(usuario: RRHH, q: str = "", tipo: str | None = None) ->
     donde = ("where " + " and ".join(condiciones)) if condiciones else ""
     filas = await obtener_todos(
         f"""select v.id, v.user_id, v.cedula, v.nombre, v.departamento, v.tipo, v.folio,
+                   coalesce(v.region, 'sierra') as region,
+                   (select x.firmado_en from informes_firmados x where x.id = v.id) as firmado_en,
                    v.solicitud_folio, v.emitido_en, v.emitido_por, v.impresiones,
                    v.ultima_impresion, v.es_reemision, v.es_el_vigente,
                    v.autorizado_por, v.autorizacion_motivo
@@ -195,3 +224,22 @@ async def reemitir(user_id: uuid.UUID, datos: Reemision,
             "mensaje": f"Nueva constancia {fila['folio']} para "
                        f"{persona['nombre'] if persona else 'el colaborador'}. "
                        "La anterior sigue siendo válida."}
+
+
+@router.post("/admin/papeles/{informe_id}/firmado")
+async def registrar_firma(informe_id: uuid.UUID, request: Request, usuario: RRHH) -> dict:
+    """Talento Humano recibió el documento firmado por el colaborador: con eso
+    el trámite queda concluido."""
+    informe = await _buscar(informe_id)
+    if informe is None:
+        raise HTTPException(status_code=404, detail={"mensaje": "Ese documento no existe."})
+    from ..db import ejecutar
+    await ejecutar(
+        """UPDATE informes_firmados SET firmado_en = NOW(6), firmado_registrado_por = %s
+            WHERE id = %s AND firmado_en IS NULL""", (str(usuario["id"]), str(informe_id)))
+    await registrar(request, "papel_firmado", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="informes_firmados",
+                    entidad_id=str(informe_id),
+                    detalle={"folio": informe["folio"], "de": informe["de_quien"]})
+    return {"mensaje": f"Documento {informe['folio']} registrado como firmado por "
+                       f"{informe['de_quien']}."}

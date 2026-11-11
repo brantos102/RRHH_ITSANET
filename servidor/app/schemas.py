@@ -54,6 +54,9 @@ class Perfil(BaseModel):
     dias_vacaciones: float
     jefe_nombre: str | None = None
     logros: list[dict[str, Any]] = []
+    # Lo que la persona debe completar o confirmar antes de usar el sistema:
+    # fecha_nacimiento, fecha_ingreso, jefe, cargo, telefono, emergencia.
+    pendientes: list[str] = []
 
 
 class Sesion(BaseModel):

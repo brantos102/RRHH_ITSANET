@@ -46,12 +46,14 @@ def correos(monkeypatch) -> list[dict]:
     async def _jefe(jefe, solicitud):
         enviados.append({"a": "jefe", "email": jefe["email"], "solicitud": solicitud})
 
-    async def _rrhh(destinatarios, solicitud, quien):
+    async def _rrhh(destinatarios, solicitud, quien, adjuntos=None):
         enviados.append({"a": "rrhh", "emails": [d["email"] for d in destinatarios],
-                         "solicitud": solicitud, "quien": quien})
+                         "solicitud": solicitud, "quien": quien,
+                         "adjuntos": [n for n, _, _ in adjuntos or []]})
 
-    async def _aprobado(empleado, solicitud):
-        enviados.append({"a": "empleado_aprobado", "email": empleado["email"], "solicitud": solicitud})
+    async def _aprobado(empleado, solicitud, sede=None):
+        enviados.append({"a": "empleado_aprobado", "email": empleado["email"],
+                         "solicitud": solicitud, "sede": sede})
 
     async def _rechazado(empleado, solicitud, quien, motivo):
         enviados.append({"a": "empleado_rechazado", "email": empleado["email"],
@@ -308,3 +310,34 @@ async def test_el_qr_solo_contiene_el_identificador(solicitud, cliente, codigos,
     assert imagen[:8] == b"\x89PNG\r\n\x1a\n"
     # El contenido codificado es exactamente el hash, nada más
     assert len(str(fila["qr_hash"])) == 36
+
+
+# ------------------------------------------- documentos para firmar
+async def test_al_aprobar_el_jefe_talento_humano_recibe_los_documentos(
+        cliente, codigos, solicitud, correos):
+    """La solicitud y la constancia de goce, en PDF, para imprimirlas y firmarlas."""
+    token_jefe = await _sesion(cliente, codigos, CEDULA_JEFE)
+    await cliente.post(f"/aprobaciones/{solicitud}/decidir",
+                       headers={"Authorization": f"Bearer {token_jefe}"},
+                       json={"accion": "aprobar"})
+    aviso = next(c for c in correos if c["a"] == "rrhh")
+    assert len(aviso["adjuntos"]) == 2
+    assert any(n.startswith("solicitud-vacaciones-SOL-") for n in aviso["adjuntos"])
+    assert any(n.startswith("constancia-goce-TRZ-") for n in aviso["adjuntos"])
+
+
+async def test_al_aprobar_talento_humano_se_le_pide_que_firme(
+        cliente, codigos, solicitud, correos, empleado):
+    for cedula in (CEDULA_JEFE, CEDULA_RRHH):
+        token = await _sesion(cliente, codigos, cedula)
+        await cliente.post(f"/aprobaciones/{solicitud}/decidir",
+                           headers={"Authorization": f"Bearer {token}"},
+                           json={"accion": "aprobar"})
+    aviso = next(c for c in correos if c["a"] == "empleado_aprobado")
+    assert aviso["sede"] == "Quito"
+    pendiente = await obtener_uno(
+        """select titulo, mensaje from notifications
+            where user_id = %s and tipo = 'documento_faltante'""", (empleado["id"],))
+    assert pendiente and "firmar" in pendiente["mensaje"]
+    await ejecutar("delete from notifications where user_id = %s and tipo = 'documento_faltante'",
+                   (empleado["id"],))
