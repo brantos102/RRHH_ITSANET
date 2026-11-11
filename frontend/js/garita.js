@@ -4,6 +4,7 @@
    el foco vuelve solo al campo del escáner, el veredicto ocupa la pantalla
    entera con un color inequívoco, y Enter cierra y deja listo el siguiente. */
 import { api, sesion, esc, fechaHora, validarCedula } from "./api.js";
+import { escanearCedula } from "./escaner-cedula.js";
 import { montarNavegacion } from "./navegacion.js";
 import { montarBuscador } from "./buscador.js";
 
@@ -396,6 +397,14 @@ document.addEventListener("click", async (e) => {
       salida.disabled = false;
     }
   }
+});
+
+$("v-escanear").addEventListener("click", async () => {
+  const datos = await escanearCedula();
+  if (!datos) return;
+  $("v-cedula").value = datos.cedula;
+  if (datos.nombre) $("v-nombre").value = datos.nombre;
+  $("v-error-cedula").classList.add("hidden");
 });
 
 $("v-cedula").addEventListener("input", (e) => {

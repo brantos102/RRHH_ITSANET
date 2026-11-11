@@ -44,6 +44,9 @@
           <input type="search" id="buscar-temporal" placeholder="Nombre, cédula o labor"
                  class="w-52 rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
                         focus:bg-white focus:ring-2 focus:ring-slate-900">
+          <button id="btn-escanear-temporal" type="button"
+                  class="rounded-xl bg-sky-50 px-3 py-2 text-sm font-medium text-sky-900 ring-1
+                         ring-sky-200 hover:bg-sky-100">📷 Escanear</button>
           <button id="btn-nuevo-temporal"
                   class="hidden rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white
                          hover:bg-slate-800">+ Registrar</button>
@@ -206,6 +209,11 @@
       <button type="button" data-cerrar class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100">✕</button>
     </div>
     <div class="space-y-3 px-5 py-4">
+      <button type="button" id="t-escanear"
+              class="flex w-full items-center justify-center gap-2 rounded-xl bg-sky-50 px-4 py-2.5
+                     text-sm font-medium text-sky-900 ring-1 ring-sky-200 hover:bg-sky-100">
+        📷 Escanear cédula</button>
+      <p id="t-origen" class="hidden rounded-xl bg-emerald-50 p-2.5 text-xs text-emerald-800"></p>
       <div>
         <label for="t-cedula" class="block text-sm font-medium text-slate-700">Cédula</label>
         <input id="t-cedula" inputmode="numeric" maxlength="10" required autocomplete="off"

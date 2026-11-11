@@ -46,6 +46,10 @@ class NuevoTemporal(BaseModel):
     proveedor: str | None = Field(None, max_length=120)
     telefono: str | None = Field(None, max_length=20)
     observacion: str | None = Field(None, max_length=300)
+    # Cómo se tomaron cédula y nombre: escritos a mano o leídos del documento
+    # (zona MRZ del reverso, anverso o QR). Va a la bitácora, no a la ficha.
+    origen: Literal["manual", "mrz", "anverso", "qr"] = "manual"
+    verificada: bool = False
 
     @field_validator("cedula")
     @classmethod
@@ -108,7 +112,14 @@ async def listar(usuario: GARITA, buscar: str | None = None,
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def registrar_persona(datos: NuevoTemporal, request: Request, usuario: RRHH) -> dict:
+async def registrar_persona(datos: NuevoTemporal, request: Request, usuario: GARITA) -> dict:
+    """Dar de alta a un operario.
+
+    Lo hace la garita, que es donde llega la persona y donde se escanea la
+    cédula, o Talento Humano. Editar, desactivar, cerrar jornadas a mano y los
+    informes siguen siendo solo de Talento Humano. Queda en la bitácora quién
+    lo registró y si los datos se leyeron del documento o se escribieron.
+    """
     nuevo = nuevo_id()
     try:
         await ejecutar(
@@ -116,7 +127,7 @@ async def registrar_persona(datos: NuevoTemporal, request: Request, usuario: RRH
                  (id, cedula, nombre, labor, proveedor, telefono, observacion)
                values (%(id)s, %(cedula)s, %(nombre)s, %(labor)s, %(proveedor)s,
                        %(telefono)s, %(observacion)s)""",
-            {**datos.model_dump(), "id": nuevo},
+            {**datos.model_dump(exclude={"origen", "verificada"}), "id": nuevo},
         )
         fila = await obtener_uno("select id, nombre from personal_temporal where id = %s", (nuevo,))
     except Exception as exc:  # noqa: BLE001
@@ -124,7 +135,9 @@ async def registrar_persona(datos: NuevoTemporal, request: Request, usuario: RRH
 
     await registrar(request, "temporal_registrado", user_id=str(usuario["id"]),
                     cedula=usuario["cedula"], entidad="personal_temporal",
-                    entidad_id=str(fila["id"]), detalle={"cedula": datos.cedula})
+                    entidad_id=str(fila["id"]),
+                    detalle={"cedula": datos.cedula, "origen": datos.origen,
+                             "verificada": datos.verificada})
     return {"id": str(fila["id"]), "mensaje": f"{fila['nombre']} quedó registrado."}
 
 

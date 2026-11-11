@@ -8,6 +8,7 @@ convertiría un dato que falta en uno falso, que es peor que no tenerlo.
 """
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 
 import pytest
@@ -82,11 +83,37 @@ async def test_la_cedula_se_valida(cliente, rrhh_auth):
     assert r.status_code == 422, r.text
 
 
-async def test_la_garita_no_da_de_alta_gente(cliente, guardia_auth):
-    """Registrar quién trabaja es de Talento Humano; la garita registra horas."""
-    r = await cliente.post("/temporal", headers=guardia_auth,
-                           json={"cedula": CED_OPERARIO, "nombre": "Alguien"})
+async def test_la_garita_da_de_alta_y_queda_constancia(cliente, guardia_auth):
+    """La persona llega a la garita y ahí se escanea su cédula: el guardia la
+    registra, y la bitácora dice quién y si los datos salieron del documento."""
+    await ejecutar("delete from personal_temporal where cedula = %s", (CED_OPERARIO,))
+    try:
+        r = await cliente.post("/temporal", headers=guardia_auth,
+                               json={"cedula": CED_OPERARIO, "nombre": "Alguien Escaneado",
+                                     "origen": "mrz", "verificada": True})
+        assert r.status_code == 201, r.text
+        bitacora = await obtener_uno(
+            """select cedula, detalle from audit_logs
+                where accion = 'temporal_registrado' and entidad_id = %s""", (r.json()["id"],))
+        assert bitacora["cedula"] == CED_GUARDIA_T
+        detalle = bitacora["detalle"]
+        detalle = json.loads(detalle) if isinstance(detalle, str) else detalle
+        assert detalle["origen"] == "mrz" and detalle["verificada"] is True
+    finally:
+        await ejecutar("delete from personal_temporal where cedula = %s", (CED_OPERARIO,))
+
+
+async def test_la_garita_no_edita_ni_desactiva(cliente, guardia_auth, operario):
+    """Corregir o dar de baja sigue siendo de Talento Humano."""
+    r = await cliente.patch(f"/temporal/{operario['id']}", headers=guardia_auth,
+                            json={"activo": False})
     assert r.status_code == 403
+
+
+async def test_el_origen_solo_acepta_valores_conocidos(cliente, rrhh_auth):
+    r = await cliente.post("/temporal", headers=rrhh_auth,
+                           json={"cedula": CED_OPERARIO, "nombre": "Alguien", "origen": "internet"})
+    assert r.status_code == 422
 
 
 # ----------------------------------------------------------------- jornadas

@@ -2,7 +2,7 @@
     Las clases generadas en JS con plantillas también se detectan porque se
     buscan como texto en los .js. */
 module.exports = {
-  content: ["../frontend/**/*.html", "../frontend/**/*.js"],
+  content: ["../frontend/**/*.html", "../frontend/**/*.js", "!../frontend/vendor/**"],
   theme: { extend: {} },
   plugins: [],
 };

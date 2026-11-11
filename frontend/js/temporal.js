@@ -10,6 +10,7 @@
    elegir entre dos botones se equivoca; uno que tiene uno, no. */
 import { api, sesion, esc, fechaHora } from "./api.js";
 import { montarNavegacion } from "./navegacion.js";
+import { escanearCedula } from "./escaner-cedula.js";
 
 const $ = (id) => document.getElementById(id);
 if (!sesion.vigente) location.replace("index.html");
@@ -18,7 +19,7 @@ if (!["guardia", "rrhh", "admin"].includes(sesion.perfil?.rol)) location.replace
 const ES_RRHH = ["rrhh", "admin"].includes(sesion.perfil?.rol);
 montarNavegacion($("barra"), { activo: "temporal" });
 
-const estado = { gente: [], jornada: null, sondeo: null };
+const estado = { gente: [], jornada: null, sondeo: null, escaneo: null };
 
 let temporizador;
 const avisar = (texto, error = false) => {
@@ -178,7 +179,6 @@ async function cargar() {
 
     if (ES_RRHH) {
       $("caja-semana").classList.remove("hidden");
-      $("btn-nuevo-temporal").classList.remove("hidden");
       pintarSemana(await api.temporalSemana());
     }
   } catch (err) {
@@ -188,10 +188,58 @@ async function cargar() {
 
 $("buscar-temporal").addEventListener("input", pintarGente);
 
-$("btn-nuevo-temporal").addEventListener("click", () => {
+/* Dar de alta lo hace la garita —ahí llega la persona y ahí se escanea su
+   cédula— o Talento Humano. */
+$("btn-nuevo-temporal").classList.remove("hidden");
+
+function abrirAlta(datos = null) {
   $("form-temporal").reset();
   $("t-error").classList.add("hidden");
+  estado.escaneo = null;
+  $("t-origen").classList.add("hidden");
+  if (datos) usarEscaneo(datos);
   $("modal-temporal").showModal();
+}
+
+function usarEscaneo(datos) {
+  estado.escaneo = datos;
+  $("t-cedula").value = datos.cedula;
+  if (datos.nombre) $("t-nombre").value = datos.nombre;
+  $("t-origen").textContent = datos.verificada
+    ? "Datos leídos de la cédula y verificados con sus dígitos de control."
+    : "Datos leídos de la cédula. Compárelos con el documento antes de registrar.";
+  $("t-origen").className = `rounded-xl p-2.5 text-xs ${datos.verificada
+    ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`;
+}
+
+$("btn-nuevo-temporal").addEventListener("click", () => abrirAlta());
+
+$("t-escanear").addEventListener("click", async () => {
+  const datos = await escanearCedula();
+  if (datos) usarEscaneo(datos);
+});
+
+// Si alguien corrige a mano lo leído, el registro ya no es «leído del documento».
+["t-cedula", "t-nombre"].forEach((id) => $(id).addEventListener("input", () => {
+  if (!estado.escaneo) return;
+  estado.escaneo = null;
+  $("t-origen").classList.add("hidden");
+}));
+
+/* En la entrada: se escanea y, si ya está registrado, se lo muestra para
+   marcar su jornada; si no, se abre el alta con sus datos. */
+$("btn-escanear-temporal").addEventListener("click", async () => {
+  const datos = await escanearCedula();
+  if (!datos) return;
+  await cargar();
+  const ya = estado.gente.find((p) => p.cedula === datos.cedula);
+  if (ya) {
+    $("buscar-temporal").value = datos.cedula;
+    pintarGente();
+    avisar(`${ya.nombre} ya está registrado: use su botón para la jornada.`);
+  } else {
+    abrirAlta(datos);
+  }
 });
 
 document.addEventListener("click", (e) => {
@@ -207,6 +255,8 @@ $("form-temporal").addEventListener("submit", async (e) => {
       labor: $("t-labor").value.trim() || null,
       proveedor: $("t-proveedor").value.trim() || null,
       telefono: $("t-telefono").value.trim() || null,
+      origen: estado.escaneo?.fuente || "manual",
+      verificada: !!estado.escaneo?.verificada,
     });
     $("modal-temporal").close();
     avisar(r.mensaje);

@@ -91,6 +91,7 @@ python frontend/tests/e2e_flujo_aprobacion.py # aprueba y emite el QR
 python frontend/tests/e2e_interfaz.py         # folio, desglose, filtros
 python frontend/tests/e2e_equipo_ajuste.py    # calendario del jefe y ajuste
 python frontend/tests/e2e_garita_admin.py     # garita y administración
+node --test frontend/tests/cedula.test.mjs    # lector de cédula (sin navegador)
 ```
 
 ### Si al pedir el código sale «Demasiados intentos»

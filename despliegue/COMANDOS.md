@@ -149,7 +149,14 @@ sudo mysql rrhh -e "SELECT COUNT(*) AS sin_correo FROM users WHERE activo AND em
 sudo mysql rrhh -e "SELECT estado, COUNT(*) FROM requests GROUP BY estado"
 ```
 
-Para depurar datos con DBeaver: `mysql/depuracion/00_LEER_PRIMERO.sql`.
+Puertos, servicios y quién tiene acceso a la base (solo mira):
+
+```bash
+bash despliegue/accesos.sh
+```
+
+DBeaver desde Windows, por túnel SSH y con un usuario de solo lectura:
+`despliegue/DBEAVER.md`. Para depurar datos: `mysql/depuracion/00_LEER_PRIMERO.sql`.
 
 ## 13. Retirar el sistema (deja el servidor como estaba)
 
