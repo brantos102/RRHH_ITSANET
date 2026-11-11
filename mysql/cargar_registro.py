@@ -331,11 +331,11 @@ async def principal(args) -> int:
             completar = archivo.with_name("personas_completar.csv")
             filas = await obtener_todos(
                 """SELECT cedula, nombre, '' AS email, rol, fecha_ingreso, '' AS jefe_cedula, '' AS saldo,
-                          cargo, departamento, ciudad
+                          cargo, departamento, ciudad, fecha_nacimiento
                      FROM users WHERE cedula IN %s AND email IS NULL ORDER BY nombre""",
                 (lista([p["cedula"] for p in personas]),))
             _escribir(completar, filas, ["cedula", "nombre", "email", "rol", "fecha_ingreso", "jefe_cedula",
-                                         "saldo", "cargo", "departamento", "ciudad"])
+                                         "saldo", "cargo", "departamento", "ciudad", "fecha_nacimiento"])
             print(f"  Para registrar correos, jefes y roles: {completar}")
             print(f"  (complete esas columnas y cárguelo con mysql/cargar_personas.py; con «saldo» vacío "
                   f"el saldo cargado se conserva)")

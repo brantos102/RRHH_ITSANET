@@ -148,6 +148,10 @@ export const api = {
   catalogoPermisos: () => peticion("/catalogos/permisos"),
   tablaAntiguedad: () => peticion("/catalogos/antiguedad"),
   candidatosReemplazo: (id) => peticion(`/aprobaciones/${id}/candidatos`),
+  reemplazosPorConfirmar: () => peticion("/aprobaciones/reemplazos-por-confirmar"),
+  confirmarReemplazo: (id, accion, reemplazoId = null) =>
+    peticion(`/aprobaciones/${id}/reemplazo`, {
+      method: "POST", body: JSON.stringify({ accion, reemplazo_id: reemplazoId }) }),
   ajustarAusencia: (id, datos) =>
     peticion(`/aprobaciones/${id}/ajustar`, { method: "POST", body: JSON.stringify(datos) }),
   ajustesDe: (id) => peticion(`/solicitudes/${id}/ajustes`),

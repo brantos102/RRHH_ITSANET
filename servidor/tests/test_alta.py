@@ -135,3 +135,19 @@ async def test_no_se_puede_tomar_el_correo_de_otra_persona(cliente, sin_correo, 
         "emergencia_telefono": "0994445556",
     })
     assert r.status_code == 409
+
+
+async def test_sin_fecha_de_nacimiento_se_dice_que_falta_el_dato(cliente):
+    """Quien se cargó de la hoja de vacaciones no tiene fecha de nacimiento.
+
+    Decirle «no coinciden» lo mandaba a revisar fechas que estaban bien.
+    """
+    await persona("1700000027", al_existir={"fecha_nacimiento": None, "correo_pendiente": True,
+                                            "ficha_completa": False, "email": None},
+                  nombre="Cargado De La Hoja", email=None, rol="empleado",
+                  fecha_ingreso="2021-02-01", correo_pendiente=True, ficha_completa=False)
+    r = await cliente.post("/auth/probar-identidad", json={
+        "cedula": "1700000027", "fecha_nacimiento": "1995-10-16", "fecha_ingreso": "2021-02-01"})
+    assert r.status_code == 409, r.text
+    assert "fecha de nacimiento" in r.json()["detail"]["mensaje"]
+    assert "Talento Humano" in r.json()["detail"]["mensaje"]

@@ -461,6 +461,27 @@ async def probar_identidad(datos: PruebaIdentidad, request: Request) -> dict:
     )
 
     if usuario is None:
+        # Si al expediente le falta el dato con que se compara, ninguna fecha
+        # que se escriba va a coincidir: decir «no coinciden» manda a la
+        # persona a revisar algo que está bien. Pasa con quien se cargó de la
+        # hoja de vacaciones, que no trae fechas de nacimiento. La cédula ya
+        # se reveló como existente en el paso anterior (necesita-ficha), así
+        # que decirlo no expone nada nuevo.
+        faltan = await obtener_uno(
+            """SELECT fecha_nacimiento IS NULL AS sin_nacimiento,
+                      fecha_ingreso IS NULL AS sin_ingreso
+                 FROM users
+                WHERE cedula = %s AND activo AND correo_pendiente AND NOT ficha_completa""",
+            (datos.cedula,))
+        if faltan and (faltan["sin_nacimiento"] or faltan["sin_ingreso"]):
+            await registrar(request, "alta_sin_datos_para_verificar", cedula=datos.cedula)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"mensaje": "Su expediente todavía no tiene registrada su fecha de "
+                                   "nacimiento, que es con lo que el sistema comprueba que es "
+                                   "usted. Pida a Talento Humano que registre su correo "
+                                   "institucional: con él recibirá el código y podrá entrar."},
+            )
         await registrar(request, "alta_identidad_fallida", cedula=datos.cedula)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

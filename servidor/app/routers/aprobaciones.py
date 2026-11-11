@@ -37,7 +37,7 @@ SQL_SOLICITUD = """
            r.es_adelanto, r.saldo_al_solicitar, r.fines_semana, r.created_at,
            r.jefe_id, r.jefe_token, r.rrhh_token, r.qr_hash, r.motivo_rechazo,
            r.ruta_aprobacion, r.bloque_menor_justificado, r.reemplazo_id, r.region,
-           rp.nombre as reemplazo,
+           rp.nombre as reemplazo, r.reemplazo_asignado_por, r.reemplazo_confirmado_en,
            r.user_id, u.nombre as empleado, u.cedula, u.email, u.departamento, u.cargo,
            u.dias_vacaciones as saldo_actual,
            pt.nombre as categoria, pt.requiere_adjunto,
@@ -86,6 +86,8 @@ def _publico(solicitud: dict) -> dict:
         "folio": solicitud["folio"],
         "empleado": solicitud["empleado"],
         "reemplazo": solicitud["reemplazo"],
+        "reemplazo_asignado_por": solicitud["reemplazo_asignado_por"],
+        "reemplazo_confirmado": solicitud["reemplazo_confirmado_en"] is not None,
         "cedula": solicitud["cedula"],
         "cargo": solicitud["cargo"],
         "departamento": solicitud["departamento"],
@@ -111,6 +113,52 @@ def _publico(solicitud: dict) -> dict:
     }
 
 
+def _reemplazo_al_aprobar(solicitud: dict, decision: Decision,
+                          decidido_por: str | None) -> tuple[str, dict, bool]:
+    """Qué hacer con el reemplazo al aprobar: (SQL extra, parámetros, avisar al jefe).
+
+    El reemplazo lo elige el jefe inmediato: sabe si esa persona ya tiene
+    otras tareas. Talento Humano lo confirma para el registro, no lo cambia.
+    Si nadie eligió, Talento Humano puede asignar a alguien, y entonces se le
+    pide al jefe que lo confirme o lo cambie.
+    """
+    if decision.accion != "aprobar":
+        return "", {}, False
+    actual = solicitud.get("reemplazo_id")
+    asignado = solicitud.get("reemplazo_asignado_por")
+    nuevo = decision.reemplazo_id
+    tiene_jefe = solicitud.get("jefe_id") is not None
+    es_el_jefe = tiene_jefe and decidido_por is not None and str(solicitud["jefe_id"]) == str(decidido_por)
+
+    fijar = """, reemplazo_id = %(r_id)s, reemplazo_asignado_por = %(r_por)s,
+               reemplazo_confirmado_en = IF(%(r_confirmado)s, NOW(6), NULL),
+               reemplazo_confirmado_por = IF(%(r_confirmado)s, %(r_quien)s, NULL)"""
+    confirmar = ", reemplazo_confirmado_en = NOW(6), reemplazo_confirmado_por = %(r_quien)s"
+
+    if es_el_jefe:
+        if nuevo is not None:
+            return fijar, {"r_id": nuevo, "r_por": "jefe", "r_confirmado": True,
+                           "r_quien": decidido_por}, False
+        if actual is not None and asignado == "rrhh" and solicitud.get("reemplazo_confirmado_en") is None:
+            # Aprobar viendo el reemplazo que puso Talento Humano es confirmarlo.
+            return confirmar, {"r_quien": decidido_por}, False
+        return "", {}, False
+
+    # Talento Humano (o administración), o quien decide por un jefe que no hay.
+    if nuevo is None or (actual is not None and str(actual) == str(nuevo)):
+        return "", {}, False
+    if actual is not None and asignado == "jefe":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"mensaje": f"El reemplazo lo eligió el jefe inmediato ({solicitud.get('reemplazo')}). "
+                               "Talento Humano lo confirma para el registro, no lo cambia: si hace "
+                               "falta otra persona, coordínelo con el jefe."},
+        )
+    # Sin jefe no hay a quién pedir confirmación: queda confirmado por quien decide.
+    return fijar, {"r_id": nuevo, "r_por": "rrhh", "r_confirmado": not tiene_jefe,
+                   "r_quien": decidido_por}, tiene_jefe
+
+
 async def _aplicar(solicitud: dict, rol: str, decision: Decision,
                    decidido_por: str | None, tareas: BackgroundTasks) -> dict:
     """Cambia el estado y encola los correos del paso siguiente."""
@@ -129,23 +177,18 @@ async def _aplicar(solicitud: dict, rol: str, decision: Decision,
     ruta = solicitud.get("ruta_aprobacion") or "estandar"
     nuevo = _siguiente_estado(rol, ruta) if decision.accion == "aprobar" else "rechazado"
     columna_quien = "jefe_aprobado_por" if rol == "jefe" else "rrhh_aprobado_por"
+    reemplazo_sql, reemplazo_params, avisar_al_jefe = _reemplazo_al_aprobar(solicitud, decision, decidido_por)
 
     try:
         if decision.accion == "aprobar":
-            # El reemplazo solo lo fija el jefe; si no manda uno, se conserva
-            # el que ya hubiera (una segunda vuelta no debe borrarlo).
             cambiadas = await ejecutar(
                 f"""
                 update requests
-                   set estado = %(estado)s, {columna_quien} = %(quien)s,
-                       reemplazo_id = case when %(fija_reemplazo)s
-                                           then %(reemplazo)s else reemplazo_id end
+                   set estado = %(estado)s, {columna_quien} = %(quien)s {reemplazo_sql}
                  where id = %(id)s and estado = %(esperado)s
                 """,
                 {"estado": nuevo, "quien": decidido_por, "id": solicitud["id"],
-                 "esperado": _estado_esperado(rol),
-                 "fija_reemplazo": rol == "jefe" and decision.reemplazo_id is not None,
-                 "reemplazo": decision.reemplazo_id},
+                 "esperado": _estado_esperado(rol), **reemplazo_params},
             )
         else:
             cambiadas = await ejecutar(
@@ -178,6 +221,12 @@ async def _aplicar(solicitud: dict, rol: str, decision: Decision,
     quien = (await obtener_uno("select nombre from users where id = %s", (decidido_por,)) or {}).get(
         "nombre", "Talento Humano"
     )
+
+    if avisar_al_jefe:
+        jefe = await obtener_uno("select email, nombre from users where id = %s and activo and email is not null",
+                                 (completa["jefe_id"],))
+        if jefe:
+            tareas.add_task(notificaciones.avisar_reemplazo_por_confirmar, jefe, completa, quien)
 
     if actualizada["estado"] == "pendiente_rrhh":
         # Al grupo de la región, no a un buzón concreto: si alguien está de
@@ -264,7 +313,8 @@ async def pendientes(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[
         select r.id, r.folio, r.tipo, r.estado, r.fecha_inicio, r.fecha_fin, r.hora_inicio, r.hora_fin,
                r.dias_solicitados, r.horas_solicitadas, r.descripcion, r.justificacion,
                r.es_adelanto, r.saldo_al_solicitar, r.fines_semana, r.created_at, r.motivo_rechazo,
-               r.ruta_aprobacion, r.bloque_menor_justificado, r.reemplazo_id, r.user_id,
+               r.ruta_aprobacion, r.bloque_menor_justificado, r.reemplazo_id, r.user_id, r.jefe_id,
+               r.reemplazo_asignado_por, r.reemplazo_confirmado_en is not null as reemplazo_confirmado,
                r.region,
                u.nombre as empleado, u.cedula, u.departamento, u.cargo, rp.nombre as reemplazo,
                u.dias_vacaciones as saldo_actual,
@@ -290,7 +340,7 @@ async def pendientes(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[
          "saldo_actual": float(f["saldo_actual"]),
          "hora_inicio": str(f["hora_inicio"])[:5] if f["hora_inicio"] else None,
          "hora_fin": str(f["hora_fin"])[:5] if f["hora_fin"] else None}
-        for f in booleanos(filas, "sin_jefe")
+        for f in booleanos(filas, "sin_jefe", "reemplazo_confirmado")
     ]
 
 
@@ -514,6 +564,77 @@ async def qr_png(solicitud_id: uuid.UUID, usuario: Annotated[dict, Depends(usuar
         media_type="image/png",
         headers={"Cache-Control": "private, max-age=300"},
     )
+
+
+# --------------------------------------- el jefe confirma el reemplazo de TH
+class ConfirmacionReemplazo(BaseModel):
+    accion: Literal["confirmar", "cambiar"]
+    # Con «cambiar»: a quién elige el jefe. Vacío = nadie cubre el puesto.
+    reemplazo_id: uuid.UUID | None = None
+
+
+@router.get("/aprobaciones/reemplazos-por-confirmar")
+async def reemplazos_por_confirmar(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[dict]:
+    """Reemplazos que Talento Humano asignó a gente de este jefe y que él aún no confirmó."""
+    filas = await obtener_todos(
+        """select r.id, r.folio, r.tipo, r.estado, r.fecha_inicio, r.fecha_fin,
+                  u.nombre as empleado, rp.nombre as reemplazo, q.nombre as asignado_por
+             from requests r
+             join users u on u.id = r.user_id
+             left join users rp on rp.id = r.reemplazo_id
+             left join users q on q.id = r.rrhh_aprobado_por
+            where r.jefe_id = %s and r.reemplazo_asignado_por = 'rrhh'
+              and r.reemplazo_confirmado_en is null
+              and r.estado not in ('rechazado', 'cancelado')
+            order by r.fecha_inicio""",
+        (usuario["id"],))
+    return [{**f, "id": str(f["id"])} for f in filas]
+
+
+@router.post("/aprobaciones/{solicitud_id}/reemplazo")
+async def confirmar_reemplazo(
+    solicitud_id: uuid.UUID, datos: ConfirmacionReemplazo, request: Request,
+    tareas: BackgroundTasks, usuario: Annotated[dict, Depends(usuario_actual)],
+) -> dict:
+    """El jefe confirma el reemplazo que asignó Talento Humano, o elige otro."""
+    solicitud = await obtener_uno(SQL_SOLICITUD, (str(solicitud_id),))
+    if solicitud is None:
+        raise HTTPException(status_code=404, detail={"mensaje": "Solicitud no encontrada."})
+    if str(solicitud["jefe_id"]) != str(usuario["id"]) and usuario["rol"] != "admin":
+        raise HTTPException(status_code=403, detail={
+            "mensaje": "Solo el jefe inmediato confirma el reemplazo de su equipo."})
+    if (solicitud["reemplazo_asignado_por"] != "rrhh" or solicitud["reemplazo_confirmado_en"] is not None
+            or solicitud["estado"] in ("rechazado", "cancelado")):
+        raise HTTPException(status_code=409, detail={
+            "mensaje": "Este reemplazo no está pendiente de confirmación."})
+
+    if datos.accion == "confirmar":
+        await ejecutar("""update requests set reemplazo_confirmado_en = NOW(6), reemplazo_confirmado_por = %s
+                           where id = %s""", (usuario["id"], str(solicitud_id)))
+        mensaje = f"Reemplazo confirmado: {solicitud['reemplazo']} cubre a {solicitud['empleado']}."
+    else:
+        if datos.reemplazo_id is not None:
+            if str(datos.reemplazo_id) == str(solicitud["user_id"]):
+                raise HTTPException(status_code=422, detail={"mensaje": "Nadie puede cubrirse a sí mismo."})
+            if await obtener_uno("select 1 as x from users where id = %s and activo",
+                                 (str(datos.reemplazo_id),)) is None:
+                raise HTTPException(status_code=422, detail={"mensaje": "Esa persona no está activa."})
+        await ejecutar(
+            """update requests set reemplazo_id = %s, reemplazo_asignado_por = 'jefe',
+                      reemplazo_confirmado_en = NOW(6), reemplazo_confirmado_por = %s
+                where id = %s""", (datos.reemplazo_id, usuario["id"], str(solicitud_id)))
+        completa = await obtener_uno(SQL_SOLICITUD, (str(solicitud_id),))
+        destinatarios = [{"email": d["email"]} for d in
+                         await personal.rrhh_de_region(completa.get("region") or "sierra")]
+        tareas.add_task(notificaciones.avisar_reemplazo_cambiado, destinatarios, completa,
+                        usuario["nombre"], solicitud["reemplazo"])
+        mensaje = (f"Reemplazo cambiado: ahora cubre {completa['reemplazo']}." if completa["reemplazo"]
+                   else "Quedó sin reemplazo.") + " Se avisó a Talento Humano."
+
+    await registrar(request, f"reemplazo_{datos.accion}", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="requests", entidad_id=str(solicitud_id),
+                    detalle={"reemplazo_id": str(datos.reemplazo_id) if datos.reemplazo_id else None})
+    return {"mensaje": mensaje}
 
 
 # --------------------------------------------- quién puede cubrir el puesto

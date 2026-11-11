@@ -457,3 +457,52 @@ async def avisar_respuesta_de_chat(destino: str, nombre: str, quien: str) -> Non
     texto = (f"{titulo}\n\nHola {nombre}: {quien} le respondió en el chat del sistema. "
              f"Entre para leerla:\n{url}\n")
     await correo.enviar(destino, titulo, texto, _marco(titulo, cuerpo, ("Ver la respuesta", url)))
+
+
+# ---------------------------------------------------------------- reemplazo
+async def avisar_reemplazo_por_confirmar(jefe: dict, solicitud: dict, quien: str) -> None:
+    """Al jefe: Talento Humano asignó un reemplazo a alguien de su equipo.
+
+    El jefe es quien sabe si esa persona ya tiene otras tareas: se le pide que
+    lo confirme o elija a otro, en vez de enterarse cuando ya está asumido.
+    """
+    url = f"{get_settings().app_url.rstrip('/')}/dashboard.html#aprobaciones"
+    titulo = f"Confirme el reemplazo de {solicitud['empleado']}"
+    filas = [("Ausencia de", solicitud["empleado"]),
+             ("Fechas", _rango(solicitud["fecha_inicio"], solicitud["fecha_fin"])),
+             ("Reemplazo asignado", solicitud.get("reemplazo") or "—"),
+             ("Asignado por", f"{quien} (Talento Humano)")]
+    cuerpo = (
+        '<p style="margin:0 0 16px;font-size:14px;color:#475569">'
+        "Usted no había elegido reemplazo y Talento Humano asignó a esta persona. Como jefe "
+        "inmediato, confirme que puede asumirlo o elija a otra: puede tener otras tareas "
+        "asignadas que solo usted conoce.</p>" + _tabla(filas))
+    texto = (f"{titulo}\n\n" + "\n".join(f"{e}: {v}" for e, v in filas)
+             + f"\n\nConfírmelo o cámbielo aquí:\n{url}\n")
+    await correo.enviar(jefe["email"], titulo, texto, _marco(titulo, cuerpo, ("Confirmar o cambiar", url)))
+
+
+async def avisar_reemplazo_cambiado(destinatarios: list[dict], solicitud: dict,
+                                    jefe: str, anterior: str | None) -> None:
+    """A Talento Humano: el jefe cambió el reemplazo que se había asignado."""
+    titulo = f"El jefe cambió el reemplazo de {solicitud['empleado']}"
+    filas = [("Ausencia de", solicitud["empleado"]),
+             ("Fechas", _rango(solicitud["fecha_inicio"], solicitud["fecha_fin"])),
+             ("Reemplazo anterior", anterior or "—"),
+             ("Reemplazo elegido por el jefe", solicitud.get("reemplazo") or "Nadie"),
+             ("Jefe inmediato", jefe)]
+    cuerpo = (
+        '<p style="margin:0 0 16px;font-size:14px;color:#475569">'
+        "El jefe inmediato revisó el reemplazo que asignó Talento Humano y eligió otro. "
+        "Queda registrado así.</p>" + _tabla(filas))
+    texto = f"{titulo}\n\n" + "\n".join(f"{e}: {v}" for e, v in filas) + "\n"
+    html = _marco(titulo, cuerpo)
+    buzon = await _buzon_del_departamento(solicitud.get("region"))
+    enviados: set[str] = set()
+    for destino in ([buzon] if buzon else []) + [d.get("email") for d in destinatarios]:
+        if destino and destino.lower() not in enviados:
+            enviados.add(destino.lower())
+            try:
+                await correo.enviar(destino, titulo, texto, html)
+            except Exception:  # noqa: BLE001
+                log.exception("No se pudo avisar del cambio de reemplazo a %s", destino)

@@ -4,6 +4,8 @@
     .venv/bin/python mysql/cargar_personas.py personas.csv --aplicar   # carga
     .venv/bin/python mysql/cargar_personas.py personas.csv --quitar --aplicar
                                                                        # borra a ESAS personas
+    .venv/bin/python mysql/cargar_personas.py pendientes.csv --exportar-pendientes
+                                                                       # lista quién no tiene correo
 
 El CSV lo prepara Talento Humano EN EL SERVIDOR y no se sube nunca al
 repositorio: son datos personales (LOPDP). Columnas, con encabezado, separadas
@@ -192,7 +194,33 @@ async def quitar(cedulas: list[str]) -> int:
     return n
 
 
+async def exportar_pendientes(destino: Path) -> int:
+    """Escribe el CSV de quienes todavía no tienen correo, listo para completar."""
+    try:
+        filas = await obtener_todos(
+            """SELECT cedula, nombre, '' AS email, rol, fecha_ingreso,
+                      COALESCE((SELECT j.cedula FROM users j WHERE j.id = u.jefe_id), '') AS jefe_cedula,
+                      '' AS saldo, cargo, departamento, ciudad, fecha_nacimiento
+                 FROM users u WHERE activo AND email IS NULL ORDER BY nombre""")
+    finally:
+        await cerrar_pool()
+    columnas = ["cedula", "nombre", "email", "rol", "fecha_ingreso", "jefe_cedula", "saldo",
+                "cargo", "departamento", "ciudad", "fecha_nacimiento"]
+    with destino.open("w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f, delimiter=";")
+        w.writerow(columnas)
+        for r in filas:
+            w.writerow(["" if r[c] is None else r[c] for c in columnas])
+    destino.chmod(0o600)
+    print(f"{len(filas)} persona(s) sin correo en {destino}")
+    print("Complete email (y rol, jefe_cedula o fecha_nacimiento si corresponde) y cárguelo con este "
+          "mismo comando. Las filas que deje con el correo vacío se omiten.")
+    return 0
+
+
 async def principal(args) -> int:
+    if args.exportar_pendientes:
+        return await exportar_pendientes(Path(args.archivo).expanduser())
     archivo = Path(args.archivo)
     if not archivo.exists():
         raise SystemExit(f"No existe {archivo}")
@@ -250,6 +278,8 @@ if __name__ == "__main__":
     parser.add_argument("archivo")
     parser.add_argument("--aplicar", action="store_true", help="escribir de verdad (si no, solo muestra)")
     parser.add_argument("--quitar", action="store_true", help="borrar a las personas del archivo")
+    parser.add_argument("--exportar-pendientes", action="store_true",
+                        help="escribir en ARCHIVO la lista de quienes aún no tienen correo")
     parser.add_argument("--con-problemas", action="store_true",
                         help="cargar las filas correctas aunque otras tengan problemas")
     sys.exit(asyncio.run(principal(parser.parse_args())))

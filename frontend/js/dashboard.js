@@ -59,7 +59,7 @@ async function cargar() {
   $("pestana-anulaciones").classList.toggle("hidden", !resuelveAnulaciones);
 
   const [saldo, notificaciones, solicitudes, catalogo, reglas, calendario,
-         pendientes, anulaciones, bloques] =
+         pendientes, anulaciones, bloques, porConfirmar] =
     await Promise.all([
       api.saldo().catch(() => null),
       api.notificaciones().catch(() => []),
@@ -72,6 +72,8 @@ async function cargar() {
       // `null` y no `[]` a propósito: hay que poder distinguir «el
       // administrador no dejó ningún bloque» de «no se pudo preguntar».
       api.misBloques().then((r) => r.bloques).catch(() => null),
+      // Reemplazos que Talento Humano asignó a su gente y que usted confirma.
+      aprueba ? api.reemplazosPorConfirmar().catch(() => []) : Promise.resolve([]),
     ]);
 
   estado.reglas = reglas ? {
@@ -81,10 +83,10 @@ async function cargar() {
     tabla: reglas.tabla, lineamientos: reglas.lineamientos,
     avisos: reglas.avisos || [],
   } : null;
-  Object.assign(estado, { saldo, solicitudes, calendario, pendientes, anulaciones });
+  Object.assign(estado, { saldo, solicitudes, calendario, pendientes, anulaciones, porConfirmar });
   montarNavegacion($("barra"), {
     activo: "panel",
-    contadores: { pendientes: pendientes.length, anulaciones: anulaciones.length },
+    contadores: { pendientes: pendientes.length + porConfirmar.length, anulaciones: anulaciones.length },
   });
 
   pintarResumen(perfil, saldo);
@@ -569,19 +571,61 @@ async function cambiarMes(delta) {
 }
 
 /* ------------------------------------------------------------ aprobaciones */
+/* Reemplazos que Talento Humano asignó a gente de este jefe.
+
+   El jefe es quien sabe si esa persona ya tiene otras tareas; por eso se le
+   pide que confirme o elija a otro, en vez de enterarse cuando ya está hecho. */
+function pintarPorConfirmar() {
+  const lista = estado.porConfirmar || [];
+  if (!lista.length) return "";
+  return `
+    <section class="rounded-2xl bg-amber-50 p-5 ring-1 ring-amber-200">
+      <h3 class="font-semibold text-amber-950">Reemplazos por confirmar</h3>
+      <p class="mt-0.5 text-sm text-amber-900">
+        Talento Humano asignó estos reemplazos porque usted no había elegido a nadie.
+        Confírmelos o elija a otra persona.</p>
+      <div class="mt-3 space-y-2">${lista.map((r) => `
+        <div class="flex flex-wrap items-center gap-3 rounded-xl bg-white p-3 ring-1 ring-amber-200">
+          <div class="min-w-0 flex-1 text-sm">
+            <p class="font-medium">Nº ${r.folio} · ${esc(r.empleado)}</p>
+            <p class="text-slate-600">${fecha(r.fecha_inicio, false)} – ${fecha(r.fecha_fin)} ·
+              lo cubre <span class="font-medium">${esc(r.reemplazo || "—")}</span>
+              ${r.asignado_por ? `· asignó ${esc(r.asignado_por)}` : ""}</p>
+          </div>
+          <button data-cambiar-reemplazo="${r.id}"
+                  class="rounded-xl bg-white px-3 py-2 text-sm font-medium ring-1 ring-slate-300 hover:bg-slate-50">
+            Elegir a otro</button>
+          <button data-confirmar-reemplazo="${r.id}"
+                  class="rounded-xl bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700">
+            Confirmar</button>
+        </div>`).join("")}
+      </div>
+    </section>`;
+}
+
+function textoReemplazo(s) {
+  if (!s.reemplazo) return "—";
+  const origen = s.reemplazo_asignado_por === "rrhh"
+    ? (s.reemplazo_confirmado ? " (asignado por Talento Humano, confirmado por el jefe)"
+                              : " (asignado por Talento Humano, falta que el jefe lo confirme)")
+    : " (elegido por el jefe)";
+  return `${esc(s.reemplazo)}<span class="block text-xs font-normal text-slate-500">${origen}</span>`;
+}
+
 function pintarPendientes() {
   const caja = $("vista-aprobaciones");
   const cuenta = $("cuenta-pendientes");
-  cuenta.textContent = estado.pendientes.length;
-  cuenta.classList.toggle("hidden", estado.pendientes.length === 0);
+  const total = estado.pendientes.length + (estado.porConfirmar || []).length;
+  cuenta.textContent = total;
+  cuenta.classList.toggle("hidden", total === 0);
 
   if (!estado.pendientes.length) {
-    caja.innerHTML = `<p class="rounded-2xl bg-white p-8 text-center text-sm text-slate-500 ring-1 ring-slate-200">
+    caja.innerHTML = pintarPorConfirmar() || `<p class="rounded-2xl bg-white p-8 text-center text-sm text-slate-500 ring-1 ring-slate-200">
         No tiene solicitudes por aprobar. 🎉</p>`;
     return;
   }
 
-  caja.innerHTML = estado.pendientes.map((s) => {
+  caja.innerHTML = pintarPorConfirmar() + estado.pendientes.map((s) => {
     const rango = s.fecha_inicio === s.fecha_fin
       ? fecha(s.fecha_inicio)
       : `${fecha(s.fecha_inicio, false)} – ${fecha(s.fecha_fin)}`;
@@ -621,7 +665,7 @@ function pintarPendientes() {
         <div><dt class="text-xs text-slate-500">Días</dt><dd class="font-medium">${s.dias_solicitados}</dd></div>
         <div><dt class="text-xs text-slate-500">Saldo</dt><dd class="font-medium">${s.saldo_actual} días</dd></div>
         <div><dt class="text-xs text-slate-500">Lo cubre</dt>
-             <dd class="font-medium">${s.reemplazo ? esc(s.reemplazo) : "—"}</dd></div>
+             <dd class="font-medium">${textoReemplazo(s)}</dd></div>
       </dl>
 
       <p class="mt-3 text-sm text-slate-700">${esc(s.descripcion)}</p>
@@ -661,6 +705,21 @@ document.addEventListener("click", async (e) => {
     return;
   }
 
+  const confirmarR = e.target.closest("[data-confirmar-reemplazo]");
+  if (confirmarR) {
+    try {
+      avisar((await api.confirmarReemplazo(confirmarR.dataset.confirmarReemplazo, "confirmar")).mensaje);
+    } catch (err) { avisar(err.message, "error"); }
+    await cargar();
+    mostrarPestana("aprobaciones");
+    return;
+  }
+  const cambiarR = e.target.closest("[data-cambiar-reemplazo]");
+  if (cambiarR) {
+    await abrirReemplazo(cambiarR.dataset.cambiarReemplazo, "cambiar");
+    return;
+  }
+
   const rechazar = e.target.closest("[data-rechazar]");
   if (rechazar) {
     $("form-rechazo").dataset.id = rechazar.dataset.rechazar;
@@ -671,9 +730,36 @@ document.addEventListener("click", async (e) => {
   }
 });
 
-async function abrirReemplazo(solicitudId) {
+/* Quién elige el reemplazo depende de quién está aprobando.
+
+   El jefe inmediato elige. Talento Humano ve lo que eligió el jefe y lo
+   confirma para el registro, sin poder cambiarlo. Si nadie eligió, Talento
+   Humano puede asignar a alguien, y se le avisa al jefe para que lo confirme
+   o lo cambie. Con modo «cambiar», es el jefe corrigiendo esa asignación. */
+async function abrirReemplazo(solicitudId, modo = "aprobar") {
   const select = $("reemplazo-jefe");
+  const s = estado.pendientes.find((p) => p.id === solicitudId);
+  const esJefe = modo === "cambiar" || (s && String(s.jefe_id) === String(sesion.perfil.id));
+  const fijo = modo === "aprobar" && !esJefe && s?.reemplazo && s.reemplazo_asignado_por !== "rrhh";
+
   $("form-reemplazo").dataset.id = solicitudId;
+  $("form-reemplazo").dataset.modo = modo;
+  $("form-reemplazo").dataset.fijo = fijo ? "1" : "";
+  $("reemplazo-titulo").textContent = modo === "cambiar" ? "Elegir otro reemplazo" : "¿Quién cubre el puesto?";
+  $("reemplazo-ayuda").textContent = fijo
+    ? "Lo eligió el jefe inmediato. Talento Humano lo confirma para el registro."
+    : esJefe ? "Usted conoce la carga del equipo. Puede dejarlo sin asignar y decidirlo después."
+             : "Elija a quien cubrirá el puesto, o déjelo sin asignar.";
+  $("reemplazo-fijo").classList.toggle("hidden", !fijo);
+  $("reemplazo-elegir").classList.toggle("hidden", !!fijo);
+  $("reemplazo-aviso-jefe").classList.toggle("hidden", fijo || esJefe || !s?.jefe_id);
+  $("reemplazo-enviar").textContent = modo === "cambiar" ? "Guardar reemplazo" : "Aprobar solicitud";
+  if (fijo) {
+    $("reemplazo-fijo").textContent =
+      `Lo cubre ${s.reemplazo}, elegido por el jefe inmediato. Si hace falta otra persona, coordínelo con el jefe.`;
+    abrir("modal-reemplazo");
+    return;
+  }
   select.innerHTML = `<option value="">Cargando…</option>`;
   abrir("modal-reemplazo");
 
@@ -694,7 +780,11 @@ $("form-reemplazo").addEventListener("submit", async (e) => {
   const id = $("form-reemplazo").dataset.id;
   $("modal-reemplazo").close();
   try {
-    const r = await api.decidir(id, "aprobar", null, $("reemplazo-jefe").value || null);
+    const form = $("form-reemplazo");
+    const elegido = form.dataset.fijo ? null : ($("reemplazo-jefe").value || null);
+    const r = form.dataset.modo === "cambiar"
+      ? await api.confirmarReemplazo(id, "cambiar", elegido)
+      : await api.decidir(id, "aprobar", null, elegido);
     avisar(r.mensaje);
   } catch (err) {
     avisar(err.message, "error");

@@ -181,7 +181,10 @@ def _orden(clave: tuple) -> tuple:
 
 def comparar_tabla(pg, cur, tabla: str, info: dict, tipos: dict) -> list[str]:
     """Las diferencias entre origen y destino en una tabla. Vacía si son iguales."""
-    columnas = info["columnas"]
+    # Solo las columnas que existen en los dos lados: las que el destino
+    # agregó después (sin equivalente en origen) no se copian, y compararlas
+    # no tiene sentido.
+    columnas = [c for c in info["columnas"] if c in tipos]
     pk = info["pk"] or columnas
     de_pg = pg.execute(select_origen(tabla, columnas, tipos)).fetchall()
     cur.execute(f"SELECT {', '.join(f'`{c}`' for c in columnas)} FROM `{tabla}`")

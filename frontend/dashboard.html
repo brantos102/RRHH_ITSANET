@@ -456,12 +456,16 @@
 <dialog id="modal-reemplazo" class="w-[min(100vw-1.5rem,30rem)] rounded-2xl p-0">
   <form id="form-reemplazo" method="dialog">
     <div class="border-b border-slate-200 px-5 py-4">
-      <h2 class="font-semibold">¿Quién cubre el puesto?</h2>
-      <p class="mt-0.5 text-sm text-slate-500">
+      <h2 id="reemplazo-titulo" class="font-semibold">¿Quién cubre el puesto?</h2>
+      <p id="reemplazo-ayuda" class="mt-0.5 text-sm text-slate-500">
         Usted conoce la carga del equipo. Puede dejarlo sin asignar y decidirlo después.
       </p>
     </div>
     <div class="px-5 py-4">
+      <!-- Talento Humano no cambia lo que eligió el jefe: lo ve y lo confirma. -->
+      <p id="reemplazo-fijo" class="hidden rounded-xl bg-emerald-50 p-3 text-sm text-emerald-900
+                                    ring-1 ring-emerald-200"></p>
+      <div id="reemplazo-elegir">
       <label for="reemplazo-jefe" class="block text-sm font-medium text-slate-700">Reemplazo</label>
       <select id="reemplazo-jefe"
               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
@@ -471,12 +475,18 @@
       <p class="mt-1.5 text-xs text-slate-500">
         Quien también estará ausente en esas fechas aparece bloqueado.
       </p>
+      <p id="reemplazo-aviso-jefe" class="mt-2 hidden rounded-lg bg-amber-50 p-2 text-xs text-amber-900
+                                          ring-1 ring-amber-200">
+        El jefe inmediato no eligió reemplazo. Si asigna a alguien, se le avisará para que lo
+        confirme o lo cambie: puede tener otras tareas asignadas.
+      </p>
+      </div>
     </div>
     <div class="flex gap-3 border-t border-slate-200 px-5 py-4">
       <button type="button" data-cerrar class="flex-1 rounded-xl bg-slate-100 px-4 py-3 font-medium hover:bg-slate-200">
         Cancelar
       </button>
-      <button type="submit" class="flex-1 rounded-xl bg-emerald-600 px-4 py-3 font-medium text-white hover:bg-emerald-700">
+      <button type="submit" id="reemplazo-enviar" class="flex-1 rounded-xl bg-emerald-600 px-4 py-3 font-medium text-white hover:bg-emerald-700">
         Aprobar solicitud
       </button>
     </div>
