@@ -13,7 +13,7 @@ import { api, sesion, esc, fechaHora } from "./api.js";
 
 const $ = (id) => document.getElementById(id);
 const estado = { abierto: false, conversacion: null, contactos: null, sede: null, sondeo: null,
-                 vivo: null, vistos: 0 };
+                 vivo: null, vistos: 0, modo: "asistente", asistenteListo: false };
 
 /* Con la ventana abierta, la conversación se mantiene al día.
 
@@ -91,6 +91,30 @@ export function montarChat() {
                 class="rounded-lg p-1.5 text-slate-300 hover:bg-slate-800 hover:text-white">✕</button>
       </header>
 
+      <!-- Asistente o persona. El asistente responde al instante lo
+           repetitivo (saldo, estado de la solicitud, requisitos de un
+           permiso) con los datos de quien pregunta; lo que no sabe lo pasa a
+           Talento Humano de su sede, en la otra pestaña. -->
+      <div id="chat-modos" class="grid grid-cols-2 gap-1 border-b border-slate-200 bg-white p-1.5 text-sm">
+        <button type="button" data-modo="asistente" class="rounded-lg px-2 py-1.5 font-medium">Asistente</button>
+        <button type="button" data-modo="humano" class="rounded-lg px-2 py-1.5 font-medium">Talento Humano</button>
+      </div>
+      <div id="chat-asis" class="flex min-h-[12rem] flex-1 flex-col overflow-hidden">
+        <div id="asis-mensajes" class="sin-barra flex-1 space-y-2 overflow-y-auto bg-slate-50 px-3 py-3"></div>
+        <div id="asis-chips" class="sin-barra flex gap-1.5 overflow-x-auto border-t border-slate-200 bg-white px-2 py-2"></div>
+        <form id="asis-form" class="flex items-end gap-2 border-t border-slate-200 p-2">
+          <input id="asis-texto" maxlength="300" autocomplete="off" placeholder="Pregunte, por ejemplo: ¿cuántos días tengo?"
+                 class="min-h-[2.5rem] flex-1 rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                        focus:bg-white focus:ring-2 focus:ring-slate-900">
+          <button type="submit" aria-label="Preguntar"
+                  class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-900 text-white hover:bg-slate-800">
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="m4 12 16-8-5 16-3-6-8-2Z"/>
+            </svg>
+          </button>
+        </form>
+      </div>
+
       <!-- A qué sede va la consulta.
 
            Talento Humano está en Quito y en Guayaquil, y cada equipo atiende
@@ -137,8 +161,91 @@ export function montarChat() {
     $(id).addEventListener("click", () => abrirMeet(modo))
   );
 
+  document.querySelectorAll("#chat-modos [data-modo]").forEach((b) =>
+    b.addEventListener("click", () => cambiarModo(b.dataset.modo)));
+  $("asis-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const texto = $("asis-texto").value.trim();
+    if (texto) preguntar(texto);
+  });
+  cambiarModo("asistente", false);
+
   revisarSinLeer();
   estado.sondeo = setInterval(revisarSinLeer, 60000);
+}
+
+/* ------------------------------------------------------------- asistente */
+function cambiarModo(modo, cargarAhora = true) {
+  estado.modo = modo;
+  document.querySelectorAll("#chat-modos [data-modo]").forEach((b) => {
+    b.className = `rounded-lg px-2 py-1.5 font-medium ${b.dataset.modo === modo
+      ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`;
+  });
+  const asis = modo === "asistente";
+  $("chat-asis").classList.toggle("hidden", !asis);
+  $("chat-asis").classList.toggle("flex", asis);
+  $("chat-mensajes").classList.toggle("hidden", asis);
+  $("chat-form").classList.toggle("hidden", asis);
+  if (asis) $("chat-sedes").classList.add("hidden");
+  if (!cargarAhora || !estado.abierto) return;
+  if (asis) iniciarAsistente(); else cargar();
+}
+
+function burbujaAsistente(r) {
+  const acciones = (r.acciones || []).map((a) => a.url
+    ? `<a href="${esc(a.url)}" class="inline-block rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-sky-700 ring-1 ring-sky-200 hover:bg-sky-50">${esc(a.texto)}</a>`
+    : `<button type="button" data-hablar class="rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-medium text-white">${esc(a.texto)}</button>`).join(" ");
+  return `<div class="max-w-[90%] rounded-2xl rounded-bl-sm bg-white px-3 py-2 text-sm shadow-sm ring-1 ring-slate-200">
+    <p>${esc(r.texto)}</p>
+    ${r.detalles?.length ? `<ul class="mt-1.5 list-disc space-y-0.5 pl-4 text-slate-700">${
+      r.detalles.map((d) => `<li>${esc(d)}</li>`).join("")}</ul>` : ""}
+    ${acciones ? `<div class="mt-2 flex flex-wrap gap-1.5">${acciones}</div>` : ""}
+  </div>`;
+}
+
+function agregarAsistente(html) {
+  const caja = $("asis-mensajes");
+  caja.insertAdjacentHTML("beforeend", html);
+  caja.querySelectorAll("[data-hablar]").forEach((b) => {
+    b.onclick = () => cambiarModo("humano");
+  });
+  caja.scrollTop = caja.scrollHeight;
+}
+
+function pintarChips(sugerencias) {
+  $("asis-chips").innerHTML = (sugerencias || []).map((t) =>
+    `<button type="button" class="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200">${esc(t)}</button>`).join("");
+  $("asis-chips").querySelectorAll("button").forEach((b) =>
+    b.addEventListener("click", () => preguntar(b.textContent)));
+}
+
+async function iniciarAsistente() {
+  if (estado.asistenteListo) return;
+  estado.asistenteListo = true;
+  try {
+    const r = await api.asistenteInicio();
+    agregarAsistente(burbujaAsistente(r));
+    pintarChips(r.sugerencias);
+  } catch (err) {
+    agregarAsistente(`<p class="text-center text-sm text-rose-600">${esc(err.message)}</p>`);
+    estado.asistenteListo = false;
+  }
+  setTimeout(() => $("asis-texto").focus(), 50);
+}
+
+async function preguntar(texto) {
+  $("asis-texto").value = "";
+  agregarAsistente(`<div class="ml-auto max-w-[85%] rounded-2xl rounded-br-sm bg-slate-900 px-3 py-2 text-sm text-white">${esc(texto)}</div>`);
+  agregarAsistente('<p data-pensando class="text-xs text-slate-400">Buscando…</p>');
+  try {
+    const r = await api.asistentePreguntar(texto);
+    $("asis-mensajes").querySelector("[data-pensando]")?.remove();
+    agregarAsistente(burbujaAsistente(r));
+    pintarChips(r.sugerencias);
+  } catch (err) {
+    $("asis-mensajes").querySelector("[data-pensando]")?.remove();
+    agregarAsistente(`<p class="text-sm text-rose-600">${esc(err.message)}</p>`);
+  }
 }
 
 function alternar() {
@@ -147,7 +254,11 @@ function alternar() {
   $("chat-panel").classList.toggle("flex", estado.abierto);
   $("chat-burbuja").classList.toggle("hidden", estado.abierto);
   seguirEnVivo(estado.abierto);
-  if (estado.abierto) cargar();
+  if (!estado.abierto) return;
+  // Si Talento Humano le respondió, se abre en esa conversación; si no, en el
+  // asistente, que resuelve al instante lo más frecuente.
+  const hayRespuesta = !$("chat-punto").classList.contains("hidden");
+  cambiarModo(hayRespuesta ? "humano" : estado.modo);
 }
 
 async function cargar() {

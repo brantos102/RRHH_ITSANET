@@ -24,6 +24,8 @@ const MODULOS = [
   {
     id: "rrhh", texto: "Talento Humano", roles: ["rrhh", "admin"],
     opciones: [
+      // Todo lo que espera a Talento Humano, por sede y con quién lo revisa.
+      { texto: "Pendientes por sede", href: "administracion.html#pendientes" },
       { texto: "Por autorizar", href: "dashboard.html#aprobaciones", contador: "pendientes" },
       { texto: "Anulaciones por resolver", href: "dashboard.html#anulaciones", contador: "anulaciones" },
       { texto: "Colaboradores", href: "colaboradores.html" },
@@ -124,6 +126,7 @@ const ICONOS_OPCION = {
   "Depuración":               'M4 4h16v3l-6 6v6l-4-2v-4L4 7V4Z',
   "Jefaturas":                'M12 7a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm0 0v4m0 0H6a2 2 0 0 0-2 2v2m8-4h6a2 2 0 0 1 2 2v2M4 21h4v-4H4v4Zm12 0h4v-4h-4v4Z',
   "Talento Humano":           'M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Zm0 .5 9 6 9-6',
+  "Pendientes por sede":      'M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2m-6 9 2 2 4-4',
   // Una pluma: quién firma, y cómo entra por primera vez la gente.
   "Ingreso y firmas":         'M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4 11.5-11.5ZM14 6l3 3',
   "Lineamientos":             'M9 3h6a1 1 0 0 1 1 1v1h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2V4a1 1 0 0 1 1-1Zm-1 8h8m-8 4h5',
@@ -472,6 +475,7 @@ function montarNotificaciones(contenedor) {
             <div class="min-w-0">
               <p class="font-medium">${esc(n.titulo)}</p>
               <p class="mt-1 text-sm leading-relaxed text-slate-600">${esc(n.mensaje)}</p>
+              ${n.atendido_por ? `<p class="mt-1 text-xs font-medium text-emerald-700">✓ Ya lo atendió ${esc(n.atendido_por)}</p>` : ""}
               ${n.articulo_texto ? `<details class="mt-2">
                    <summary class="cursor-pointer text-xs font-medium text-slate-500">
                      ${esc(n.norma)} · ${esc(n.articulo)}</summary>

@@ -645,6 +645,8 @@ function pintarPendientes() {
     if (s.es_adelanto) banderas.push(["amber", "Supera su saldo: días adelantados"]);
     if (s.tipo === "permiso" && !s.adjuntos) banderas.push(["rose", "Sin respaldo adjunto"]);
     if (!s.reemplazo) banderas.push(["slate", "Sin reemplazo asignado"]);
+    // Otra persona de Talento Humano la tomó en «Pendientes»: no duplicar.
+    if (s.en_revision_por) banderas.unshift(["amber", `En revisión por ${s.en_revision_por}`]);
 
     return `
     <article class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">

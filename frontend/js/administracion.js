@@ -34,12 +34,13 @@ const CARGADORES = {
   "cambios-ficha": cargarCambiosFicha, lineamientos: cargarLineamientos,
   jefaturas: cargarJefaturasAdmin, "talento-humano": cargarTalentoHumano,
   depuracion: cargarDepuracion, "ingreso-firmas": cargarIngresoFirmas,
+  pendientes: cargarPendientes, asistente: cargarAsistente,
 };
 
 function mostrar(seccion) {
   document.querySelectorAll("[data-seccion]").forEach((b) => {
     const activa = b.dataset.seccion === seccion;
-    b.className = `shrink-0 rounded-xl px-4 py-2 text-sm font-medium ${
+    b.className = `shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium ${
       activa ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`;
     // La cinta de pestañas ya no cabe en pantalla. Llegando por el menú
     // lateral a una de las últimas —Jefaturas, Depuración—, el panel se
@@ -1127,7 +1128,7 @@ async function descargarCotejo(formato) {
 document.querySelectorAll("[data-cotejo]").forEach((b) =>
   b.addEventListener("click", () => descargarCotejo(b.dataset.cotejo)));
 
-mostrar(seccionInicial in CARGADORES ? seccionInicial : "usuarios");
+// (El arranque está al final del archivo: así ya existen todas las secciones.)
 
 /* ------------------------------------------------- cambios de ficha
    Lo que un colaborador pidió corregir de su propio expediente. La mayoría
@@ -1847,3 +1848,164 @@ $("form-firmante")?.addEventListener("submit", async (e) => {
     cargarIngresoFirmas();
   } catch (err) { avisar(err.message, true); }
 });
+
+
+/* ------------------------------------------------------ pendientes por sede */
+const TIPO_PENDIENTE = {
+  solicitud: ["Solicitudes", "bg-sky-50 text-sky-800"],
+  cambio_ficha: ["Cambios de ficha", "bg-violet-50 text-violet-800"],
+  chat: ["Consultas del chat", "bg-emerald-50 text-emerald-800"],
+  firma: ["Por firmar", "bg-amber-50 text-amber-800"],
+};
+let sedePendientes = (() => { try { return localStorage.getItem("rrhh_sede_pend") || "mia"; } catch { return "mia"; } })();
+
+function hace(minutos) {
+  if (minutos == null) return "";
+  if (minutos < 1) return "ahora";
+  if (minutos < 60) return `hace ${minutos} min`;
+  return `hace ${Math.floor(minutos / 60)} h`;
+}
+
+async function cargarPendientes() {
+  document.querySelectorAll("#pen-sedes [data-sede]").forEach((b) => {
+    b.className = `rounded-lg px-3 py-1.5 font-medium ${b.dataset.sede === sedePendientes
+      ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"}`;
+  });
+  const d = await api.pendientesRRHH(sedePendientes);
+  $("pen-conteo").innerHTML = Object.entries(TIPO_PENDIENTE).map(([t, [nombre, tono]]) => `
+    <div class="rounded-xl p-3 ${tono}">
+      <p class="text-xs">${nombre}</p>
+      <p class="text-2xl font-semibold tabular-nums">${d.conteo[t] || 0}</p>
+    </div>`).join("");
+  $("pen-lista").innerHTML = d.items.length ? d.items.map((i) => {
+    const [nombre, tono] = TIPO_PENDIENTE[i.tipo];
+    const a = i.atencion;
+    const estadoAt = !a
+      ? '<span class="text-xs text-slate-500">Sin tomar</span>'
+      : a.propio
+        ? `<span class="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">Lo revisa usted</span>`
+        : `<span class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">En revisión por ${esc(a.por)} ${hace(a.minutos)}</span>`;
+    const boton = i.tipo === "chat" ? "" : !a
+      ? `<button data-tomar="${esc(i.tipo)}|${esc(i.id)}" class="rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-medium text-white">Tomar</button>`
+      : a.propio
+        ? `<button data-soltar="${esc(i.tipo)}|${esc(i.id)}" class="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium">Soltar</button>`
+        : `<button data-tomar="${esc(i.tipo)}|${esc(i.id)}" data-forzar="1" data-de="${esc(a.por)}" class="rounded-lg px-2.5 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100">Tomarlo yo</button>`;
+    return `<li class="flex flex-wrap items-center gap-3 px-5 py-3">
+      <span class="rounded-md px-2 py-0.5 text-xs font-medium ${tono}">${nombre}</span>
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-medium">${esc(i.persona)} <span class="text-xs font-normal text-slate-500">· ${esc(i.sede)} · ${fechaHora(i.desde)}</span></p>
+        <p class="truncate text-sm text-slate-600">${esc(i.detalle)}</p>
+      </div>
+      ${estadoAt} ${boton}
+      <a href="${esc(i.url)}" class="rounded-lg px-2.5 py-1 text-xs font-medium text-sky-700 hover:bg-sky-50">Abrir</a>
+    </li>`;
+  }).join("") : '<li class="px-5 py-10 text-center text-sm text-slate-500">Nada pendiente en esta sede. 🎉</li>';
+  $("pen-hoy").innerHTML = d.atendidos_hoy.length ? d.atendidos_hoy.map((a) => `
+    <li class="flex flex-wrap gap-2 py-2"><span class="text-slate-500">${fechaHora(a.cuando)}</span>
+      <b>${esc(a.persona)}</b> · ${esc(a.detalle)} · <span class="text-slate-500">${esc(a.sede)}</span>
+      <span class="ml-auto text-emerald-700">por ${esc(a.por || "—")}</span></li>`).join("")
+    : '<li class="py-3 text-slate-500">Todavía nada hoy.</li>';
+}
+
+document.querySelectorAll("#pen-sedes [data-sede]").forEach((b) => b.addEventListener("click", () => {
+  sedePendientes = b.dataset.sede;
+  try { localStorage.setItem("rrhh_sede_pend", sedePendientes); } catch { /* sin preferencia */ }
+  cargarPendientes().catch((err) => avisar(err.message, true));
+}));
+
+$("pen-lista").addEventListener("click", async (e) => {
+  const tomar = e.target.closest("[data-tomar]"), soltar = e.target.closest("[data-soltar]");
+  if (!tomar && !soltar) return;
+  const [tipo, id] = (tomar || soltar).dataset[tomar ? "tomar" : "soltar"].split("|");
+  try {
+    if (tomar?.dataset.forzar && !confirm(`${tomar.dataset.de} lo está revisando. ¿Tomarlo usted?`)) return;
+    const r = tomar ? await api.tomarPendiente(tipo, id, !!tomar.dataset.forzar)
+                    : await api.soltarPendiente(tipo, id);
+    avisar(r.mensaje);
+  } catch (err) { avisar(err.message, true); }
+  cargarPendientes().catch(() => {});
+});
+
+// Con la pantalla abierta, lo que toman los demás se ve sin recargar.
+setInterval(() => {
+  if (location.hash === "#pendientes" && !document.hidden) cargarPendientes().catch(() => {});
+}, 30000);
+
+/* ----------------------------------------------------------------- asistente */
+let respuestasAsistente = [];
+
+function limpiarAsistente() {
+  $("form-asis").reset();
+  $("asis-id").value = "";
+  $("asis-activo").checked = true;
+}
+
+async function cargarAsistente() {
+  const d = await api.asistenteAdmin();
+  respuestasAsistente = d.respuestas;
+  $("asis-lista").innerHTML = d.respuestas.length ? d.respuestas.map((r) => `
+    <li class="flex flex-wrap items-start gap-2 px-3 py-2.5 text-sm ${r.activo ? "" : "opacity-50"}">
+      <div class="min-w-0 flex-1"><b>${esc(r.titulo)}</b>
+        <span class="block text-xs text-slate-500">${esc(r.palabras_clave)}</span>
+        <span class="block text-slate-700">${esc(r.respuesta)}</span></div>
+      <button data-asis-editar="${r.id}" class="rounded-lg px-2 py-1 text-xs font-medium hover:bg-slate-100">Editar</button>
+      <button data-asis-borrar="${r.id}" class="rounded-lg px-2 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50">Quitar</button>
+    </li>`).join("") : '<li class="px-3 py-3 text-sm text-slate-500">Todavía no hay respuestas propias.</li>';
+  $("asis-sin").innerHTML = d.sin_respuesta.length ? d.sin_respuesta.map((x) => `
+    <li><button data-asis-desde="${esc(x.texto)}" class="flex w-full gap-2 py-2 text-left hover:bg-slate-50">
+      <span class="min-w-0 flex-1">${esc(x.texto)}</span><span class="text-slate-500">${x.veces} vez/veces</span></button></li>`).join("")
+    : '<li class="py-3 text-slate-500">Nada por ahora.</li>';
+  const NOMBRE_TEMA = { saldo: "Saldo", solicitudes: "Estado de solicitudes", pedir_vacaciones: "Cómo pedir vacaciones",
+    permisos: "Permisos", jefe: "Jefe", documentos: "Documentos", feriados: "Feriados", garita: "Garita y QR",
+    mis_datos: "Mis datos", dispositivos: "Sesiones", talento_humano: "Hablar con TH", sin_respuesta: "Sin respuesta" };
+  $("asis-temas").innerHTML = d.temas.length ? d.temas.map((t) => `
+    <li class="flex py-1.5"><span class="flex-1">${esc(NOMBRE_TEMA[t.tema] || (t.tema.startsWith("rrhh:") ? "Respuesta propia" : t.tema))}</span>
+      <b class="tabular-nums">${t.veces}</b></li>`).join("") : '<li class="py-3 text-slate-500">Sin consultas todavía.</li>';
+}
+
+$("asis-nueva").addEventListener("click", limpiarAsistente);
+$("form-asis").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const datos = {
+    titulo: $("asis-titulo").value.trim(), palabras_clave: $("asis-claves").value.trim(),
+    respuesta: $("asis-respuesta").value.trim(), enlace_texto: $("asis-enlace-texto").value.trim() || null,
+    enlace_url: $("asis-enlace").value.trim() || null, activo: $("asis-activo").checked,
+  };
+  try {
+    const id = $("asis-id").value;
+    avisar((id ? await api.asistenteCambiar(id, datos) : await api.asistenteCrear(datos)).mensaje);
+    limpiarAsistente();
+    cargarAsistente();
+  } catch (err) { avisar(err.message, true); }
+});
+document.addEventListener("click", async (e) => {
+  const ed = e.target.closest("[data-asis-editar]");
+  if (ed) {
+    const r = respuestasAsistente.find((x) => String(x.id) === ed.dataset.asisEditar);
+    if (!r) return;
+    $("asis-id").value = r.id; $("asis-titulo").value = r.titulo; $("asis-claves").value = r.palabras_clave;
+    $("asis-respuesta").value = r.respuesta; $("asis-enlace-texto").value = r.enlace_texto || "";
+    $("asis-enlace").value = r.enlace_url || ""; $("asis-activo").checked = r.activo;
+    $("form-asis").scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+  const bo = e.target.closest("[data-asis-borrar]");
+  if (bo) {
+    if (!confirm("¿Quitar esta respuesta del asistente?")) return;
+    try { avisar((await api.asistenteBorrar(bo.dataset.asisBorrar)).mensaje); cargarAsistente(); }
+    catch (err) { avisar(err.message, true); }
+    return;
+  }
+  const desde = e.target.closest("[data-asis-desde]");
+  if (desde) {
+    limpiarAsistente();
+    $("asis-claves").value = desde.dataset.asisDesde;
+    $("asis-titulo").focus();
+    $("form-asis").scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+});
+
+/* ---------------------------------------------------------------- arranque
+   Al final a propósito: la sección inicial usa variables declaradas en todo
+   el archivo, y llamarla antes las encontraba sin inicializar. */
+mostrar(seccionInicial in CARGADORES ? seccionInicial : "pendientes");

@@ -325,6 +325,16 @@ async def mis_notificaciones(usuario: Annotated[dict, Depends(usuario_actual)]) 
         """
         select n.id, n.tipo, n.severidad, n.titulo, n.mensaje, n.accion_url,
                n.leida_en, n.created_at,
+               -- Un pedido de cambio de ficha llega a todo Talento Humano de
+               -- la sede: la campana dice si ya lo atendió alguien, para no
+               -- revisarlo dos veces.
+               case when n.entidad = 'cambios_ficha' then
+                 (select q.nombre from cambios_ficha c join users q on q.id = c.resuelto_por
+                   where c.user_id = n.entidad_id and c.resuelto_en >= n.created_at
+                     and not exists (select 1 from cambios_ficha p
+                                      where p.user_id = n.entidad_id and p.estado = 'pendiente')
+                   order by c.resuelto_en desc limit 1)
+               end as atendido_por,
                l.norma, l.articulo, l.titulo as articulo_titulo, l.texto as articulo_texto
         from notifications n
         left join v_legal_colaborador l on l.codigo = n.legal_ref

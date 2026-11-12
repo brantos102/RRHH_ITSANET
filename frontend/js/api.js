@@ -410,6 +410,20 @@ export const api = {
   cerrarSesionesDe: (userId) =>
     peticion(`/auth/admin/usuarios/${userId}/cerrar-sesiones`, { method: "POST" }),
   catalogoCargos: () => peticion("/catalogos/cargos"),
+  pendientesRRHH: (sede = "mia") => peticion(`/rrhh/pendientes?sede=${encodeURIComponent(sede)}`),
+  tomarPendiente: (tipo, id, forzar = false) =>
+    peticion(`/rrhh/pendientes/${tipo}/${encodeURIComponent(id)}/tomar${forzar ? "?forzar=true" : ""}`,
+             { method: "POST" }),
+  soltarPendiente: (tipo, id) =>
+    peticion(`/rrhh/pendientes/${tipo}/${encodeURIComponent(id)}/tomar`, { method: "DELETE" }),
+  asistenteInicio: () => peticion("/asistente/inicio"),
+  asistentePreguntar: (texto) =>
+    peticion("/asistente/preguntar", { method: "POST", body: JSON.stringify({ texto }) }),
+  asistenteAdmin: () => peticion("/admin/asistente"),
+  asistenteCrear: (d) => peticion("/admin/asistente/respuestas", { method: "POST", body: JSON.stringify(d) }),
+  asistenteCambiar: (id, d) =>
+    peticion(`/admin/asistente/respuestas/${id}`, { method: "PATCH", body: JSON.stringify(d) }),
+  asistenteBorrar: (id) => peticion(`/admin/asistente/respuestas/${id}`, { method: "DELETE" }),
   registrarFirma: (id) => peticion(`/admin/papeles/${id}/firmado`, { method: "POST" }),
 
   panelConfiguracion: () => peticion("/panel/configuracion"),

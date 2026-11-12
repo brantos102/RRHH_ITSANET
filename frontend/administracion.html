@@ -18,23 +18,116 @@
 <body class="min-h-dvh bg-slate-100 text-slate-900 antialiased">
 <div id="barra"></div>
 
-<main class="mx-auto max-w-6xl px-4 py-5 pb-24">
-  <nav class="mb-5 flex gap-1 overflow-x-auto rounded-2xl bg-white p-1.5 shadow-sm ring-1 ring-slate-200">
-    <button data-seccion="usuarios" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Usuarios</button>
-    <button data-seccion="tipos" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Tipos de solicitud</button>
-    <button data-seccion="feriados" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Días no laborables</button>
-    <button data-seccion="antiguedades" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Antigüedades</button>
-    <button data-seccion="configuracion" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Configuración</button>
-    <button data-seccion="papeles" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Papeles firmados</button>
-    <button data-seccion="bitacora" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Bitácora</button>
-    <button data-seccion="cotejo" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Cotejo de la carga</button>
-    <button data-seccion="cambios-ficha" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Cambios de ficha</button>
-    <button data-seccion="lineamientos" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Lineamientos</button>
-    <button data-seccion="jefaturas" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Jefaturas</button>
-    <button data-seccion="talento-humano" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Talento Humano</button>
-    <button data-seccion="ingreso-firmas" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Ingreso y firmas</button>
-    <button data-seccion="depuracion" class="shrink-0 rounded-xl px-4 py-2 text-sm font-medium">Depuración</button>
-  </nav>
+<main class="mx-auto max-w-7xl px-4 py-5 pb-24">
+<!-- Administración agrupada por tema. Eran catorce pestañas en una sola fila
+     que no cabía en pantalla; ahora un menú por grupos a la izquierda (en el
+     celular, una cinta que se desliza) y «Pendientes» como inicio: lo
+     primero que necesita Talento Humano al entrar es saber qué le espera. -->
+<div class="lg:grid lg:grid-cols-[13.5rem_1fr] lg:items-start lg:gap-5">
+  <aside class="mb-4 lg:sticky lg:top-4 lg:mb-0">
+    <nav class="flex gap-1 overflow-x-auto rounded-2xl bg-white p-2 shadow-sm ring-1 ring-slate-200
+                lg:flex-col lg:overflow-visible">
+      <p class="mt-3 hidden px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 first:mt-0 lg:block">Hoy</p>
+      <button data-seccion="pendientes" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Pendientes por sede</button>
+      <p class="mt-3 hidden px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 first:mt-0 lg:block">Personas</p>
+      <button data-seccion="usuarios" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Usuarios</button>
+      <button data-seccion="jefaturas" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Jefaturas</button>
+      <button data-seccion="cambios-ficha" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Cambios de ficha</button>
+      <button data-seccion="talento-humano" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Talento Humano</button>
+      <p class="mt-3 hidden px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 first:mt-0 lg:block">Solicitudes y documentos</p>
+      <button data-seccion="papeles" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Papeles firmados</button>
+      <button data-seccion="tipos" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Tipos de solicitud</button>
+      <button data-seccion="lineamientos" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Lineamientos</button>
+      <p class="mt-3 hidden px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 first:mt-0 lg:block">Calendario y saldos</p>
+      <button data-seccion="feriados" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Días no laborables</button>
+      <button data-seccion="antiguedades" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Antigüedades</button>
+      <p class="mt-3 hidden px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 first:mt-0 lg:block">Configuración</p>
+      <button data-seccion="ingreso-firmas" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Ingreso y firmas</button>
+      <button data-seccion="asistente" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Asistente</button>
+      <button data-seccion="configuracion" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Parámetros y base legal</button>
+      <p class="mt-3 hidden px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 first:mt-0 lg:block">Control</p>
+      <button data-seccion="bitacora" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Bitácora</button>
+      <button data-seccion="cotejo" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Cotejo de la carga</button>
+      <button data-seccion="depuracion" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Depuración</button>
+    </nav>
+  </aside>
+  <div class="min-w-0 space-y-4">
+
+  <!-- ===== Pendientes por sede =====
+       Todo lo que espera a Talento Humano, junto y por sede, con quién lo está
+       revisando: dos personas no trabajan lo mismo sin saberlo. -->
+  <section data-panel="pendientes" class="hidden space-y-4">
+    <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="font-medium">Pendientes de Talento Humano</h2>
+          <p class="mt-0.5 text-sm text-slate-600">
+            Tome lo que va a revisar: los demás lo verán «en revisión» y no lo duplicarán.
+          </p>
+        </div>
+        <div id="pen-sedes" class="flex flex-wrap gap-1 rounded-xl bg-slate-100 p-1 text-sm">
+          <button data-sede="mia" class="rounded-lg px-3 py-1.5 font-medium">Mi sede</button>
+          <button data-sede="sierra" class="rounded-lg px-3 py-1.5 font-medium">Quito</button>
+          <button data-sede="costa" class="rounded-lg px-3 py-1.5 font-medium">Guayaquil</button>
+          <button data-sede="todas" class="rounded-lg px-3 py-1.5 font-medium">Todas</button>
+        </div>
+      </div>
+      <div id="pen-conteo" class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4"></div>
+    </div>
+    <div class="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+      <ul id="pen-lista" class="divide-y divide-slate-100"></ul>
+    </div>
+    <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <h2 class="font-medium">Atendido hoy</h2>
+      <ul id="pen-hoy" class="mt-2 divide-y divide-slate-100 text-sm"></ul>
+    </div>
+  </section>
+
+  <!-- ===== Asistente =====
+       Lo que el asistente del chat responde además de lo que ya sabe del
+       sistema, y lo que la gente preguntó y no supo responder. -->
+  <section data-panel="asistente" class="hidden space-y-4">
+    <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <h2 class="font-medium">Respuestas del asistente</h2>
+      <p class="mt-0.5 text-sm text-slate-600">
+        El asistente ya responde solo: saldo, estado de solicitudes, jefe, documentos por firmar,
+        feriados, cómo pedir vacaciones y permisos. Aquí agregan lo propio de la empresa
+        (uniformes, horarios, transporte…). Escriba las palabras con que la gente lo preguntaría.
+      </p>
+      <form id="form-asis" class="mt-3 grid gap-3 sm:grid-cols-2">
+        <input type="hidden" id="asis-id">
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Título</span>
+          <input id="asis-titulo" maxlength="120" required placeholder="Uniformes" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Palabras clave (separadas por coma)</span>
+          <input id="asis-claves" maxlength="500" required placeholder="uniforme, dotación, ropa de trabajo" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <label class="sm:col-span-2"><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Respuesta</span>
+          <textarea id="asis-respuesta" rows="3" maxlength="2000" required class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></textarea></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Texto del enlace (opcional)</span>
+          <input id="asis-enlace-texto" maxlength="80" placeholder="Ver lineamientos" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Enlace (opcional)</span>
+          <input id="asis-enlace" maxlength="300" placeholder="dashboard.html o https://…" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <div class="flex flex-wrap items-center gap-3 sm:col-span-2">
+          <label class="flex items-center gap-2 text-sm"><input id="asis-activo" type="checkbox" checked class="h-4 w-4"> Activa</label>
+          <button class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">Guardar</button>
+          <button type="button" id="asis-nueva" class="rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium hover:bg-slate-200">Nueva</button>
+        </div>
+      </form>
+      <ul id="asis-lista" class="mt-4 divide-y divide-slate-100 rounded-xl ring-1 ring-slate-200"></ul>
+    </div>
+    <div class="grid gap-4 lg:grid-cols-2">
+      <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+        <h2 class="font-medium">Lo que no supo responder</h2>
+        <p class="mt-0.5 text-xs text-slate-500">Últimos 90 días. Sin datos de quién preguntó.
+          Pulse una para crear su respuesta.</p>
+        <ul id="asis-sin" class="mt-2 divide-y divide-slate-100 text-sm"></ul>
+      </div>
+      <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+        <h2 class="font-medium">De qué se pregunta</h2>
+        <p class="mt-0.5 text-xs text-slate-500">Últimos 30 días.</p>
+        <ul id="asis-temas" class="mt-2 divide-y divide-slate-100 text-sm"></ul>
+      </div>
+    </div>
+  </section>
 
   <!-- ===== Talento Humano =====
        Quiénes integran el departamento y a qué buzón llegan sus avisos. El
@@ -570,6 +663,8 @@
   <!-- Sugerencias para escribir siempre igual las áreas y los cargos -->
   <datalist id="lista-areas"></datalist>
   <datalist id="lista-cargos"></datalist>
+  </div>
+</div>
 </main>
 
 <!-- ===== Alta / edición de usuario ===== -->

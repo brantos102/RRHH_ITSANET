@@ -364,6 +364,9 @@ async def pendientes(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[
                r.ruta_aprobacion, r.bloque_menor_justificado, r.reemplazo_id, r.user_id, r.jefe_id,
                r.reemplazo_asignado_por, r.reemplazo_confirmado_en is not null as reemplazo_confirmado,
                r.region,
+               (select q.nombre from atenciones a join users q on q.id = a.user_id
+                 where a.tipo = 'solicitud' and a.entidad_id = r.id and a.user_id <> %s
+                   and a.tomado_en > NOW(6) - INTERVAL 4 HOUR) as en_revision_por,
                u.nombre as empleado, u.cedula, u.departamento, u.cargo, rp.nombre as reemplazo,
                u.dias_vacaciones as saldo_actual,
                pt.nombre as categoria, j.nombre as jefe_nombre,
@@ -380,7 +383,7 @@ async def pendientes(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[
         where {filtro}
         order by r.created_at
         """,
-        parametros,
+        (usuario["id"], *parametros),
     )
     return [
         {**f, "id": str(f["id"]), "dias_solicitados": float(f["dias_solicitados"]),
