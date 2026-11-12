@@ -144,6 +144,12 @@ async def _limpiar() -> None:
         # La bitácora es inmutable: borrar de ella exige la retención
         # autorizada, encendida y apagada en esta misma conexión.
         await ejecutar("SET @retencion = 'autorizada'")
+        # Los avisos de «cambio de ficha por revisar» quedan en la campana de
+        # Talento Humano, que no es persona de prueba: se borran aquí.
+        await ejecutar("""DELETE FROM notifications WHERE entidad = 'cambios_ficha'
+                           AND (entidad_id IN (SELECT id FROM users WHERE cedula IN %s)
+                                OR entidad_id NOT IN (SELECT id FROM users))""",
+                       (cedulas,))
         try:
             # Los códigos de acceso se borran por dueño y no por una lista fija
             # de cédulas: el límite de envíos cuenta por hora, y cada módulo de

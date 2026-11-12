@@ -1377,7 +1377,12 @@ function filaJefatura(j) {
       <a href="persona.html?id=${esc(j.id)}" class="font-medium hover:underline">${esc(j.nombre)}</a>${alerta}
       ${j.reporta_a ? `<div class="text-xs text-slate-500">reporta a ${esc(j.reporta_a)}</div>` : ""}
     </td>
-    <td class="px-3 py-2.5 text-slate-600">${esc(j.departamento || "—")}</td>
+    <td class="px-3 py-2.5 text-slate-600" data-area-de="${esc(j.id)}">
+      <button type="button" data-editar-area="${esc(j.id)}" data-area="${esc(j.departamento || "")}"
+              title="Cambiar el área"
+              class="rounded-lg px-1.5 py-0.5 text-left hover:bg-slate-100 ${j.departamento ? "" : "text-sky-700 underline"}">
+        ${j.departamento ? esc(j.departamento) : "Asignar área"}</button>
+    </td>
     <td class="px-3 py-2.5 text-slate-600">${esc(ROL_TEXTO[j.rol] || j.rol)}</td>
     <td class="px-3 py-2.5 text-right font-medium">${j.a_cargo}</td>
     <td class="px-3 py-2.5 text-right ${j.esperando ? "font-medium text-amber-700" : "text-slate-500"}">
@@ -1412,6 +1417,40 @@ function pintarJefaturas() {
 
   $("jef-tabla").querySelectorAll("[data-quitar-jefatura]").forEach((b) =>
     b.addEventListener("click", () => abrirBajaJefatura(b.dataset.quitarJefatura)));
+  $("jef-tabla").querySelectorAll("[data-editar-area]").forEach((b) =>
+    b.addEventListener("click", () => editarAreaJefatura(b)));
+}
+
+/* El área de una jefatura, editada en la misma fila: con sugerencias de las
+   áreas que ya existen, para escribirlas siempre igual. */
+function editarAreaJefatura(boton) {
+  cargarCatalogo();
+  const celda = boton.closest("td");
+  const id = boton.dataset.editarArea;
+  celda.innerHTML = `
+    <form class="flex items-center gap-1" data-form-area>
+      <input list="lista-areas" maxlength="80" value="${esc(boton.dataset.area)}" autocomplete="off"
+             class="w-40 rounded-lg border-0 bg-white px-2 py-1 text-sm ring-1 ring-slate-300 focus:ring-2 focus:ring-slate-900">
+      <button class="rounded-lg bg-slate-900 px-2 py-1 text-xs font-medium text-white">Guardar</button>
+      <button type="button" data-cancelar class="rounded-lg px-2 py-1 text-xs text-slate-500 hover:bg-slate-100">✕</button>
+    </form>`;
+  const entrada = celda.querySelector("input");
+  entrada.focus();
+  celda.querySelector("[data-cancelar]").addEventListener("click", () => pintarJefaturas());
+  celda.querySelector("[data-form-area]").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const area = entrada.value.trim().replace(/\s+/g, " ");
+    if (!area) return avisar("Escriba el área.", true);
+    try {
+      await api.editarUsuario(id, { departamento: area });
+      const j = estado.jefaturas.find((x) => String(x.id) === String(id));
+      if (j) j.departamento = area;
+      estado.catalogoCargado = false;          // por si es un área nueva
+      avisar(`Área guardada: ${area}.`);
+      pintarJefaturas();
+      pintarJefesDelEquipo();
+    } catch (err) { avisar(err.message, true); }
+  });
 }
 
 /* Las áreas y cargos que ya existen, como sugerencias: «Operaciones» y

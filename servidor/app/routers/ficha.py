@@ -36,6 +36,47 @@ from ..reglas.personal import rrhh_de_region
 
 router = APIRouter(tags=["Ficha personal"])
 
+
+async def avisar_pedidos_a_rrhh(tareas: BackgroundTasks, persona_id, nombre: str, cedula: str,
+                                pedidos: list[tuple[str, str]]) -> None:
+    """Que Talento Humano se entere de un pedido de cambio de ficha.
+
+    Dos vías, porque una sola fallaba en silencio: un pedido hecho desde
+    «Mi ficha» quedaba guardado sin avisar a nadie, y quien revisa no sabía
+    que tenía algo pendiente. Ahora:
+      · aviso dentro del sistema (la campana) a cada integrante de Talento
+        Humano de la sede —o a todo el equipo si la sede no tiene a nadie—,
+        con enlace directo a «Cambios de ficha»;
+      · y el correo de siempre.
+    """
+    if not pedidos:
+        return
+    region = (await obtener_uno("select coalesce(region, 'sierra') as r from users where id = %s",
+                                (str(persona_id),)) or {}).get("r", "sierra")
+    destinos = await rrhh_de_region(region)
+    ultimo = await obtener_uno("select max(id) as n from cambios_ficha where user_id = %s",
+                               (str(persona_id),))
+    resumen = "; ".join(f"{e}: {v}" for e, v in pedidos)
+    for d in destinos:
+        if str(d["id"]) == str(persona_id):
+            continue                      # nadie se avisa a sí mismo
+        try:
+            await ejecutar(
+                """insert into notifications (user_id, tipo, severidad, titulo, mensaje, entidad,
+                                              entidad_id, clave_dedupe, accion_url)
+                   values (%s, 'informativo', 'advertencia', %s, %s, 'cambios_ficha', %s, %s,
+                           'administracion.html#cambios-ficha')
+                   on duplicate key update clave_dedupe = clave_dedupe""",
+                (str(d["id"]), "Cambio de ficha por revisar",
+                 f"{nombre} ({cedula}) pide: {resumen}"[:500], str(persona_id),
+                 f"ficha-{persona_id}-{(ultimo or {}).get('n')}-{d['id']}"))
+        except Exception:  # noqa: BLE001 — el correo sale igual
+            pass
+    correos = [{"email": d["email"], "nombre": d["nombre"]} for d in destinos
+               if d.get("email") and str(d["id"]) != str(persona_id)]
+    if correos:
+        tareas.add_task(notificaciones.avisar_correccion_de_ficha, correos, nombre, cedula, pedidos)
+
 RRHH = Annotated[dict, Depends(exigir_rol("rrhh", "admin"))]
 
 
@@ -150,7 +191,7 @@ async def corregir_ficha(
 
 @router.post("/mi-ficha/cambios", status_code=status.HTTP_201_CREATED)
 async def pedir_cambio(
-    datos: SolicitudCambio, request: Request,
+    datos: SolicitudCambio, request: Request, tareas: BackgroundTasks,
     usuario: Annotated[dict, Depends(usuario_actual)],
 ) -> dict:
     """Lo que Talento Humano debe validar antes de que rija."""
@@ -162,6 +203,14 @@ async def pedir_cambio(
 
     await registrar(request, "ficha_cambio_solicitado", user_id=str(usuario["id"]),
                     cedula=usuario["cedula"], detalle={"campo": datos.campo})
+    etiqueta = (await obtener_uno("select etiqueta from campos_ficha where campo = %s",
+                                  (datos.campo,)) or {}).get("etiqueta", datos.campo)
+    valor = datos.valor
+    if datos.campo == "jefe_id":
+        valor = (await obtener_uno("select nombre from users where id = %s", (datos.valor,))
+                 or {}).get("nombre", datos.valor)
+    await avisar_pedidos_a_rrhh(tareas, usuario["id"], usuario["nombre"], usuario["cedula"],
+                                [(etiqueta, valor)])
     return {
         "id": int(nuevo),
         "mensaje": "Su solicitud quedó registrada. Talento Humano la revisará; "
@@ -254,11 +303,8 @@ async def confirmar_cargo_y_jefe(
             detail={"mensaje": " ".join(errores)},
         )
 
-    if pedidos:
-        destinos = [{"email": d["email"], "nombre": d["nombre"]}
-                    for d in await rrhh_de_region(usuario.get("region") or "sierra")]
-        tareas.add_task(notificaciones.avisar_correccion_de_ficha, destinos,
-                        usuario["nombre"], usuario["cedula"], pedidos)
+    await avisar_pedidos_a_rrhh(tareas, usuario["id"], usuario["nombre"], usuario["cedula"],
+                                pedidos)
 
     await registrar(request, "ficha_datos_confirmados", user_id=str(usuario["id"]),
                     cedula=usuario["cedula"],
@@ -296,7 +342,11 @@ async def cambios_pendientes(usuario: RRHH) -> list[dict]:
     if usuario["rol"] == "admin":
         filtro, parametros = "TRUE", ()
     else:
-        filtro, parametros = "region = %s", (usuario.get("region") or "sierra",)
+        # Su sede, y además las sedes que no tienen a nadie de Talento Humano:
+        # si no, esos pedidos no los vería nadie.
+        filtro = ("(region = %s or region not in "
+                  "(select distinct region from v_rrhh_por_region))")
+        parametros = (usuario.get("region") or "sierra",)
 
     filas = await obtener_todos(
         f"""select id, user_id, cedula, persona, departamento, ciudad, region,
@@ -530,14 +580,7 @@ async def guardar_ficha_inicial(
     await registrar(request, "ficha_inicial_guardada", user_id=uid, cedula=usuario["cedula"],
                     detalle={"respondido": falta, "pedidos": [e for e, _ in pedidos]})
 
-    if pedidos:
-        region = (await obtener_uno("select coalesce(region, 'sierra') as r from users where id = %s",
-                                    (uid,)))["r"]
-        destinos = [{"email": d["email"], "nombre": d["nombre"]}
-                    for d in await rrhh_de_region(region)]
-        if destinos:
-            tareas.add_task(notificaciones.avisar_correccion_de_ficha, destinos,
-                            usuario["nombre"], usuario["cedula"], pedidos)
+    await avisar_pedidos_a_rrhh(tareas, uid, usuario["nombre"], usuario["cedula"], pedidos)
     return {
         "pendientes": quedan,
         "en_revision": [e for e, _ in pedidos],

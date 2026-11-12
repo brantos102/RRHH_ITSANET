@@ -160,3 +160,25 @@ async def test_no_se_puede_reclamar_el_correo_de_otro(cliente, auth):
         assert "otra persona" in str(r.json()).lower()
     finally:
         await ejecutar("delete from users where cedula = %s", (ajeno,))
+
+
+# ------------------------------------------- Talento Humano se entera
+async def test_un_pedido_desde_mi_ficha_avisa_a_talento_humano(cliente, auth, empleado, monkeypatch):
+    """Antes quedaba guardado sin avisar a nadie."""
+    from app import notificaciones
+    from app.db import ejecutar as _ejecutar, obtener_todos as _todos
+    correos: list = []
+
+    async def falso(destinos, nombre, cedula, pedidos):
+        correos.append(pedidos)
+
+    monkeypatch.setattr(notificaciones, "avisar_correccion_de_ficha", falso)
+    r = await cliente.post("/mi-ficha/cambios", headers=auth,
+                           json={"campo": "cargo", "valor": "Analista de inventarios"})
+    assert r.status_code == 201, r.text
+    assert correos == [[("Cargo", "Analista de inventarios")]]
+    avisos = await _todos("select user_id, accion_url from notifications "
+                          "where entidad = 'cambios_ficha' and entidad_id = %s", (empleado["id"],))
+    assert avisos and all(a["accion_url"] == "administracion.html#cambios-ficha" for a in avisos)
+    await _ejecutar("delete from notifications where entidad = 'cambios_ficha' and entidad_id = %s",
+                    (empleado["id"],))
