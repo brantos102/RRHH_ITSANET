@@ -249,5 +249,5 @@ async def test_el_catalogo_sugiere_cargos_y_areas_sin_datos_personales(cliente, 
     auth = await _sesion(cliente, codigos)
     r = await cliente.get("/catalogos/cargos", headers=auth)
     assert r.status_code == 200
-    assert set(r.json()) == {"cargos", "areas"}
+    assert set(r.json()) == {"cargos", "areas", "ciudades"}
     assert all(set(c) == {"cargo", "area"} for c in r.json()["cargos"])

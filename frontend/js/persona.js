@@ -12,6 +12,7 @@
 import { api, sesion, esc, fecha, fechaHora, ESTADOS } from "./api.js";
 import { montarNavegacion } from "./navegacion.js";
 import { montarBuscador } from "./buscador.js";
+import { montarContactos } from "./contactos.js";
 
 const $ = (id) => document.getElementById(id);
 if (!sesion.vigente) location.replace("index.html");
@@ -163,6 +164,7 @@ async function cargar() {
   try {
     const d = await api.expediente(ID);
     pintarPersona(d.persona, d.resumen, d.devengo);
+    if (d.ficha) pintarFicha(d.persona, d.ficha);
     pintarVacaciones(d.vacaciones);
     pintarSolicitudes(d.solicitudes);
     pintarPeriodos(d.periodos);
@@ -180,5 +182,69 @@ async function cargar() {
     $("error").classList.remove("hidden");
   }
 }
+
+/* -------------------------------------------- ficha editable (Talento Humano) */
+let fichaOriginal = {};
+const CAMPOS_FICHA = {
+  "fi-nombre": "nombre", "fi-telefono": "telefono", "fi-telefono-alt": "telefono_alternativo",
+  "fi-region": "region", "fi-ciudad": "ciudad", "fi-direccion": "direccion", "fi-cargo": "cargo",
+  "fi-area": "departamento", "fi-jefe": "jefe_id", "fi-nacimiento": "fecha_nacimiento",
+  "fi-bodega": "bodega", "fi-centro": "centro_costo",
+};
+
+function avisarFicha(texto, error = false) {
+  const p = $("fi-nota");
+  p.textContent = texto;
+  p.className = `text-sm sm:col-span-2 lg:col-span-3 ${error ? "text-rose-700" : "text-emerald-700"}`;
+}
+
+async function pintarFicha(p, f) {
+  $("caja-ficha").classList.remove("hidden");
+  const valores = {
+    nombre: p.nombre, telefono: p.telefono, telefono_alternativo: f.telefono_alternativo,
+    region: f.region, ciudad: p.ciudad, direccion: f.direccion, cargo: p.cargo,
+    departamento: p.departamento, jefe_id: f.jefe_id, fecha_nacimiento: f.fecha_nacimiento
+      ? String(f.fecha_nacimiento).slice(0, 10) : "", bodega: f.bodega, centro_costo: f.centro_costo,
+  };
+  try {
+    const [jefes, cat] = await Promise.all([api.jefaturas(), api.catalogoCargos()]);
+    $("fi-jefe").insertAdjacentHTML("beforeend", jefes.filter((j) => String(j.id) !== ID)
+      .map((j) => `<option value="${esc(j.id)}">${esc(j.nombre)}</option>`).join(""));
+    $("fi-ciudades").innerHTML = cat.ciudades.map((c) => `<option value="${esc(c.ciudad)}">`).join("");
+    $("fi-cargos").innerHTML = [...new Set(cat.cargos.map((c) => c.cargo))].map((c) => `<option value="${esc(c)}">`).join("");
+    $("fi-areas").innerHTML = cat.areas.map((a) => `<option value="${esc(a)}">`).join("");
+  } catch { /* sin sugerencias se escribe igual */ }
+  for (const [id, campo] of Object.entries(CAMPOS_FICHA)) $(id).value = valores[campo] || "";
+  fichaOriginal = Object.fromEntries(Object.entries(CAMPOS_FICHA).map(([id, c]) => [c, $(id).value]));
+
+  montarContactos($("fi-contactos"), {
+    listar: async () => f.contactos,
+    guardar: (cid, d) => api.guardarContactoDe(ID, cid, d),
+    quitar: (cid) => api.quitarContactoDe(ID, cid),
+  }, avisarFicha).cargar();
+}
+
+$("form-ficha").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  // Solo lo que cambió: así la bitácora dice exactamente qué se corrigió.
+  const cambios = {};
+  for (const [id, campo] of Object.entries(CAMPOS_FICHA)) {
+    const v = $(id).value.trim();
+    if (v !== (fichaOriginal[campo] || "")) cambios[campo] = v || null;
+  }
+  if (!Object.keys(cambios).length) return avisarFicha("No cambió ningún dato.", true);
+  try {
+    const r = await api.editarUsuario(ID, cambios);
+    avisarFicha(r.mensaje);
+    Object.assign(fichaOriginal, Object.fromEntries(Object.entries(cambios).map(([k, v]) => [k, v || ""])));
+    if ("region" in cambios || "ciudad" in cambios) setTimeout(() => location.reload(), 1500);
+  } catch (err) { avisarFicha(err.message, true); }
+});
+
+$("ficha-cerrar-sesiones").addEventListener("click", async () => {
+  if (!confirm("¿Cerrar todas sus sesiones abiertas? Tendrá que volver a ingresar.")) return;
+  try { avisarFicha((await api.cerrarSesionesDe(ID)).mensaje); }
+  catch (err) { avisarFicha(err.message, true); }
+});
 
 cargar();

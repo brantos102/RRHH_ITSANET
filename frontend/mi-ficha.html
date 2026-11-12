@@ -96,8 +96,10 @@
                       focus:bg-white focus:ring-2 focus:ring-slate-900">
       </div>
       <div>
+        <!-- Era «Teléfono de emergencia» y se confundía con los contactos de
+             emergencia, que van en su propia sección: es un segundo número. -->
         <label for="mf-telefono-alt" class="block text-sm font-medium text-slate-700">
-          Teléfono de emergencia
+          Otro teléfono (opcional)
         </label>
         <input id="mf-telefono-alt" type="tel" inputmode="numeric" maxlength="13"
                class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
@@ -132,6 +134,13 @@
   </section>
 
   <!-- ===== Correo ===== -->
+  <!-- ===== Contactos de emergencia ===== -->
+  <section class="mt-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <h2 class="font-medium">Contactos de emergencia</h2>
+    <p class="mt-0.5 text-sm text-slate-600">A quién avisamos si algo ocurre en la jornada. Los corrige usted.</p>
+    <div id="mf-contactos" class="mt-3"></div>
+  </section>
+
   <section class="mt-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
     <h2 class="font-medium">Correo de acceso</h2>
     <p class="mt-1 text-sm text-slate-500">

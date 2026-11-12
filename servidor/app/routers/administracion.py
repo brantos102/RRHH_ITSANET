@@ -20,6 +20,7 @@ from ..errores import es_unicidad, restriccion_de, traducir
 from ..exportar import Informe, entregar
 from ..reglas import administracion as reglas_admin
 from ..reglas import periodos
+from ..reglas import personal as reglas_personal
 from ..reglas.saldo import saldo_desglosado
 
 router = APIRouter(tags=["Administración"])
@@ -41,6 +42,8 @@ class NuevoUsuario(BaseModel):
     jefe_id: uuid.UUID | None = None
     fecha_ingreso: date
     saldo_inicial: float | None = Field(None, description="Días que RRHH tiene en planilla")
+    # La sede define qué Talento Humano atiende a la persona.
+    region: Literal["sierra", "costa"] = "sierra"
 
     @field_validator("cedula")
     @classmethod
@@ -60,6 +63,15 @@ class CambioUsuario(BaseModel):
     departamento: str | None = None
     jefe_id: uuid.UUID | None = None
     activo: bool | None = None
+    # La ficha completa se administra desde el sistema, no desde la base:
+    # sede (traslados y errores de la carga inicial), ciudad, nacimiento…
+    region: Literal["sierra", "costa"] | None = None
+    ciudad: str | None = Field(None, max_length=80)
+    fecha_nacimiento: date | None = None
+    bodega: str | None = Field(None, max_length=120)
+    centro_costo: str | None = Field(None, max_length=120)
+    direccion: str | None = Field(None, max_length=200)
+    telefono_alternativo: str | None = Field(None, max_length=20)
     fecha_salida: date | None = None
 
 
@@ -101,6 +113,7 @@ async def listar_usuarios(usuario: RRHH, q: str = "", incluir_inactivos: bool = 
         """
         select u.id, u.cedula, u.nombre, u.email, u.telefono, u.rol, u.cargo,
                u.departamento, u.fecha_ingreso, u.fecha_salida, u.activo,
+               coalesce(u.region, 'sierra') as region,
                u.dias_vacaciones, anios_cumplidos(u.fecha_ingreso) as anios_servicio,
                j.nombre as jefe_nombre, u.jefe_id,
                (select count(*) from requests r where r.user_id = u.id) as solicitudes
@@ -189,14 +202,16 @@ async def crear_usuario(datos: NuevoUsuario, request: Request, usuario: RRHH) ->
             await ejecutar(
                 """
                 insert into users
-                    (id, cedula, nombre, email, telefono, rol, cargo, departamento, jefe_id, fecha_ingreso)
+                    (id, cedula, nombre, email, telefono, rol, cargo, departamento, jefe_id,
+                     fecha_ingreso, ciudad)
                 values (%(id)s, %(cedula)s, %(nombre)s, %(email)s, %(telefono)s, %(rol)s,
-                        %(cargo)s, %(depto)s, %(jefe)s, %(ingreso)s)
+                        %(cargo)s, %(depto)s, %(jefe)s, %(ingreso)s,
+                        (select sede from regiones where codigo = %(region)s))
                 """,
                 {"id": nuevo, "cedula": datos.cedula, "nombre": datos.nombre.strip(),
                  "email": str(datos.email), "telefono": datos.telefono, "rol": datos.rol,
                  "cargo": datos.cargo, "depto": datos.departamento, "jefe": datos.jefe_id,
-                 "ingreso": datos.fecha_ingreso},
+                 "ingreso": datos.fecha_ingreso, "region": datos.region},
             )
             # El saldo se cuadra con lo que RRHH ya tiene registrado en planilla
             if datos.saldo_inicial is not None:
@@ -250,21 +265,45 @@ async def editar_usuario(user_id: uuid.UUID, cambios: CambioUsuario,
                     "a_cargo": int(cuenta["a_cargo"])},
             )
 
+    # La sede sale de la ciudad: un disparador de la base recalcula la región
+    # cada vez que cambia la ciudad. Si se cambia la sede y la ciudad que
+    # consta es de la otra región, la ciudad pasa a ser la de la sede; si no,
+    # las dos dirían cosas distintas y la próxima edición desharía el traslado.
+    antes = await obtener_uno("select coalesce(region, 'sierra') as region, ciudad from users "
+                              "where id = %s", (str(user_id),))
+    if campos.get("region"):
+        ciudad = campos.get("ciudad") or (antes or {}).get("ciudad")
+        de_la_ciudad = await obtener_uno(
+            "select region from ciudades_region where ciudad = trim(%s) limit 1", (ciudad or "",))
+        if not de_la_ciudad or de_la_ciudad["region"] != campos["region"]:
+            sede = await obtener_uno("select sede from regiones where codigo = %s", (campos["region"],))
+            campos["ciudad"] = (sede or {}).get("sede") or ciudad
+
     asignaciones = ", ".join(f"{k} = %({k})s" for k in campos)
     try:
         await ejecutar(f"update users set {asignaciones} where id = %(id)s",
                        {**campos, "id": user_id})
-        actualizado = await obtener_uno("select id, nombre from users where id = %s", (user_id,))
+        actualizado = await obtener_uno("select id, nombre, coalesce(region, 'sierra') as region "
+                                        "from users where id = %s", (user_id,))
     except Exception as exc:  # noqa: BLE001
         raise await _choque_de_ficha(exc, email=campos.get("email")) from exc
 
     if actualizado is None:
         raise HTTPException(status_code=404, detail={"mensaje": "No se encontró a esa persona."})
 
+    traslado = ""
+    if antes and actualizado["region"] != antes["region"]:
+        movidas = await reglas_personal.mover_pendientes_de_sede(str(user_id))
+        nueva = await obtener_uno("select sede from regiones where codigo = %s", (actualizado["region"],))
+        traslado = (f" Ahora pertenece a la sede {(nueva or {}).get('sede', actualizado['region'])}"
+                    + (f"; {movidas} solicitud(es) en trámite pasaron a esa sede." if movidas else "."))
     await registrar(request, "usuario_modificado", user_id=str(usuario["id"]),
                     cedula=usuario["cedula"], entidad="users", entidad_id=str(user_id),
-                    detalle={"cambios": list(campos)})
-    return {"id": str(actualizado["id"]), "mensaje": f"Datos de {actualizado['nombre']} actualizados."}
+                    detalle={"cambios": list(campos),
+                             "sede": {"antes": (antes or {}).get("region"),
+                                      "ahora": actualizado["region"]} if traslado else None})
+    return {"id": str(actualizado["id"]),
+            "mensaje": f"Datos de {actualizado['nombre']} actualizados.{traslado}"}
 
 
 class NuevoIntegranteRRHH(BaseModel):

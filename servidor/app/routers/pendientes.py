@@ -41,12 +41,13 @@ def _filtro_sede(usuario: dict, sede: str) -> tuple[str, tuple]:
 
 SQL_PENDIENTES = """
 SELECT * FROM (
-  SELECT 'cambio_ficha' AS tipo, CAST(c.id AS CHAR) AS id, c.persona, c.region AS reg,
+  SELECT 'cambio_ficha' AS tipo, CAST(c.id AS CHAR) AS id, c.user_id AS persona_id, c.persona,
+         c.region AS reg,
          CONCAT(c.etiqueta, ': ', COALESCE(c.nuevo_legible, c.valor_nuevo)) AS detalle,
          c.created_at AS desde, 'administracion.html#cambios-ficha' AS url
     FROM v_cambios_ficha_pendientes c
   UNION ALL
-  SELECT 'solicitud', r.id, u.nombre, COALESCE(r.region, 'sierra'),
+  SELECT 'solicitud', r.id, r.user_id, u.nombre, COALESCE(r.region, 'sierra'),
          CONCAT('N.º ', r.folio, ' · ', IF(r.tipo = 'vacacion', 'Vacaciones', 'Permiso'),
                 ' del ', DATE_FORMAT(r.fecha_inicio, '%%d/%%m/%%Y'),
                 ' al ', DATE_FORMAT(r.fecha_fin, '%%d/%%m/%%Y')),
@@ -54,13 +55,13 @@ SELECT * FROM (
     FROM requests r JOIN users u ON u.id = r.user_id
    WHERE r.estado = 'pendiente_rrhh' OR (r.estado = 'pendiente_jefe' AND r.jefe_id IS NULL)
   UNION ALL
-  SELECT 'chat', v.id, v.persona, v.region,
+  SELECT 'chat', v.id, v.user_id, v.persona, v.region,
          CONCAT(COALESCE(v.asunto, 'Consulta'), ' · ', LEFT(COALESCE(v.ultimo_mensaje, ''), 90)),
          v.updated_at, 'mensajes.html'
     FROM v_conversaciones_bandeja v
    WHERE v.estado = 'abierta' AND v.sin_leer > 0
   UNION ALL
-  SELECT 'firma', i.id, u.nombre, COALESCE(u.region, 'sierra'),
+  SELECT 'firma', i.id, i.user_id, u.nombre, COALESCE(u.region, 'sierra'),
          CONCAT('Firmar solicitud N.º ', r.folio, ' · folio ', i.folio),
          COALESCE(r.rrhh_aprobado_en, i.emitido_en), 'administracion.html#papeles'
     FROM informes_firmados i
@@ -113,6 +114,7 @@ async def pendientes(usuario: RRHH, sede: str = "mia") -> dict:
             atencion = {"por": chats[str(f["id"])], "minutos": None,
                         "propio": chats[str(f["id"])] == usuario.get("nombre")}
         items.append({"tipo": f["tipo"], "id": str(f["id"]), "persona": f["persona"],
+                      "persona_id": str(f["persona_id"]), "region": f["reg"],
                       "sede": SEDES.get(f["reg"], f["reg"]), "detalle": f["detalle"],
                       "desde": f["desde"], "url": f["url"], "atencion": atencion})
     atendidos = await obtener_todos(f"{SQL_ATENDIDOS} WHERE {filtro} ORDER BY cuando DESC LIMIT 40",

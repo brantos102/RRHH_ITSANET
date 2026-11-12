@@ -410,6 +410,18 @@ export const api = {
   cerrarSesionesDe: (userId) =>
     peticion(`/auth/admin/usuarios/${userId}/cerrar-sesiones`, { method: "POST" }),
   catalogoCargos: () => peticion("/catalogos/cargos"),
+  misContactos: () => peticion("/mi-ficha/contactos"),
+  guardarMiContacto: (id, d) => id
+    ? peticion(`/mi-ficha/contactos/${id}`, { method: "PATCH", body: JSON.stringify(d) })
+    : peticion("/mi-ficha/contactos", { method: "POST", body: JSON.stringify(d) }),
+  quitarMiContacto: (id) => peticion(`/mi-ficha/contactos/${id}`, { method: "DELETE" }),
+  contactosDe: (uid) => peticion(`/admin/usuarios/${uid}/contactos`),
+  guardarContactoDe: (uid, id, d) => id
+    ? peticion(`/admin/usuarios/${uid}/contactos/${id}`, { method: "PATCH", body: JSON.stringify(d) })
+    : peticion(`/admin/usuarios/${uid}/contactos`, { method: "POST", body: JSON.stringify(d) }),
+  quitarContactoDe: (uid, id) => peticion(`/admin/usuarios/${uid}/contactos/${id}`, { method: "DELETE" }),
+  resolverCambioFicha: (id, accion, motivo = null) =>
+    peticion(`/rrhh/cambios-ficha/${id}`, { method: "POST", body: JSON.stringify({ accion, motivo }) }),
   pendientesRRHH: (sede = "mia") => peticion(`/rrhh/pendientes?sede=${encodeURIComponent(sede)}`),
   tomarPendiente: (tipo, id, forzar = false) =>
     peticion(`/rrhh/pendientes/${tipo}/${encodeURIComponent(id)}/tomar${forzar ? "?forzar=true" : ""}`,

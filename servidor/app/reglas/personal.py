@@ -21,3 +21,16 @@ async def rrhh_de_region(region: str | None) -> list[dict[str, Any]]:
     if filas:
         return filas
     return await obtener_todos("SELECT * FROM v_rrhh_por_region")
+
+
+async def mover_pendientes_de_sede(user_id) -> int:
+    """Al cambiar de sede, lo que está en trámite pasa a la sede nueva: si no,
+    Talento Humano de la sede anterior seguiría recibiendo sus solicitudes y
+    la nueva no las vería."""
+    from ..db import ejecutar
+    return await ejecutar(
+        """UPDATE requests r JOIN users u ON u.id = r.user_id
+              SET r.region = COALESCE(u.region, 'sierra')
+            WHERE r.user_id = %s
+              AND r.estado IN ('pendiente_jefe', 'pendiente_rrhh', 'pendiente_anulacion')
+              AND NOT (r.region <=> COALESCE(u.region, 'sierra'))""", (str(user_id),))

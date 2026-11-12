@@ -41,6 +41,55 @@
       </div>
     </header>
 
+    <!-- Ficha completa, editable por Talento Humano y Administración.
+         Todo lo que antes había que corregir en la base se corrige aquí, con
+         validación y constancia en la bitácora. El jefe no ve esta sección. -->
+    <section id="caja-ficha" class="hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 class="font-medium">Ficha personal y laboral</h2>
+          <p class="mt-0.5 text-sm text-slate-600">Corrija aquí cualquier dato. Cada cambio queda en la bitácora.</p>
+        </div>
+        <button type="button" id="ficha-cerrar-sesiones"
+                class="rounded-lg px-3 py-1.5 text-xs font-medium text-rose-700 ring-1 ring-rose-200 hover:bg-rose-50">
+          Cerrar sus sesiones</button>
+      </div>
+      <form id="form-ficha" class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Nombre completo</span>
+          <input id="fi-nombre" maxlength="120" required class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Teléfono</span>
+          <input id="fi-telefono" inputmode="numeric" maxlength="13" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Otro teléfono</span>
+          <input id="fi-telefono-alt" inputmode="numeric" maxlength="13" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Sede</span>
+          <select id="fi-region" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"><option value="sierra">Quito</option><option value="costa">Guayaquil</option></select></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Ciudad</span>
+          <input id="fi-ciudad" list="fi-ciudades" maxlength="80" autocomplete="off" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Dirección</span>
+          <input id="fi-direccion" maxlength="200" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Cargo</span>
+          <input id="fi-cargo" list="fi-cargos" maxlength="80" autocomplete="off" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Área</span>
+          <input id="fi-area" list="fi-areas" maxlength="80" autocomplete="off" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Jefe inmediato</span>
+          <select id="fi-jefe" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"><option value="">Sin jefe</option></select></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Fecha de nacimiento</span>
+          <input id="fi-nacimiento" type="date" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Bodega / centro</span>
+          <input id="fi-bodega" maxlength="120" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Centro de costo</span>
+          <input id="fi-centro" maxlength="120" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <p id="fi-nota" class="text-xs text-slate-500 sm:col-span-2 lg:col-span-3">
+          Al cambiar la sede, sus solicitudes en trámite pasan a Talento Humano de la sede nueva.</p>
+        <div class="sm:col-span-2 lg:col-span-3">
+          <button class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">Guardar cambios</button>
+        </div>
+      </form>
+      <h3 class="mt-5 text-sm font-medium">Contactos de emergencia</h3>
+      <div id="fi-contactos" class="mt-2"></div>
+      <datalist id="fi-ciudades"></datalist><datalist id="fi-cargos"></datalist><datalist id="fi-areas"></datalist>
+    </section>
+
     <!-- Lo que se pregunta siempre -->
     <section class="grid gap-3 sm:grid-cols-4">
       <article class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">

@@ -124,8 +124,29 @@ async def expediente(user_id: str, usuario: MANDO) -> dict:
         (user_id,),
     )
 
+    # La ficha completa —sede, nacimiento, contactos de emergencia— solo para
+    # Talento Humano y Administración: el jefe ve el expediente laboral, no
+    # los datos personales de su equipo (LOPDP, Art. 10).
+    ficha = None
+    if usuario["rol"] in ("rrhh", "admin"):
+        ficha = await obtener_uno(
+            """select u.fecha_nacimiento, u.bodega, u.centro_costo, u.direccion,
+                      u.telefono_alternativo, coalesce(u.region, 'sierra') as region,
+                      r.sede, u.jefe_id, u.email, u.ficha_completa, u.correo_pendiente
+                 from users u left join regiones r on r.codigo = coalesce(u.region, 'sierra')
+                where u.id = %s""", (user_id,))
+        ficha = {**ficha, "jefe_id": str(ficha["jefe_id"]) if ficha["jefe_id"] else None,
+                 "ficha_completa": bool(ficha["ficha_completa"]),
+                 "correo_pendiente": bool(ficha["correo_pendiente"])}
+        ficha["contactos"] = [{**c, "id": str(c["id"]), "es_principal": bool(c["es_principal"])}
+                              for c in await obtener_todos(
+            """select id, nombre, parentesco, telefono, telefono_alternativo, es_principal
+                 from emergency_contacts where user_id = %s order by es_principal desc, created_at""",
+            (user_id,))]
+
     return {
         "persona": {**persona, "id": str(persona["id"])},
+        "ficha": ficha,
         "devengo": devengo,
         "periodos": periodos,
         "solicitudes": [{**s, "folio": int(s["folio"])} for s in solicitudes],

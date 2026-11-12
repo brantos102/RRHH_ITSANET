@@ -475,7 +475,10 @@ function montarNotificaciones(contenedor) {
             <div class="min-w-0">
               <p class="font-medium">${esc(n.titulo)}</p>
               <p class="mt-1 text-sm leading-relaxed text-slate-600">${esc(n.mensaje)}</p>
-              ${n.atendido_por ? `<p class="mt-1 text-xs font-medium text-emerald-700">✓ Ya lo atendió ${esc(n.atendido_por)}</p>` : ""}
+              ${n.atendido_por ? `<p class="mt-1 text-xs font-medium text-emerald-700">✓ Ya lo atendió ${esc(n.atendido_por)}</p>`
+                : n.accion_url ? `<a href="${esc(n.accion_url)}" data-ir-notif
+                    class="mt-2 inline-block rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800">
+                    Atender ahora →</a>` : ""}
               ${n.articulo_texto ? `<details class="mt-2">
                    <summary class="cursor-pointer text-xs font-medium text-slate-500">
                      ${esc(n.norma)} · ${esc(n.articulo)}</summary>

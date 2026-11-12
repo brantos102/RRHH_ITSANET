@@ -64,12 +64,14 @@ async def avisar_pedidos_a_rrhh(tareas: BackgroundTasks, persona_id, nombre: str
             await ejecutar(
                 """insert into notifications (user_id, tipo, severidad, titulo, mensaje, entidad,
                                               entidad_id, clave_dedupe, accion_url)
-                   values (%s, 'informativo', 'advertencia', %s, %s, 'cambios_ficha', %s, %s,
-                           'administracion.html#cambios-ficha')
+                   values (%s, 'informativo', 'advertencia', %s, %s, 'cambios_ficha', %s, %s, %s)
                    on duplicate key update clave_dedupe = clave_dedupe""",
                 (str(d["id"]), "Cambio de ficha por revisar",
                  f"{nombre} ({cedula}) pide: {resumen}"[:500], str(persona_id),
-                 f"ficha-{persona_id}-{(ultimo or {}).get('n')}-{d['id']}"))
+                 f"ficha-{persona_id}-{(ultimo or {}).get('n')}-{d['id']}",
+                 # Directo a resolverlo: abre Pendientes con los pedidos de
+                 # esa persona listos para aprobar o rechazar.
+                 f"administracion.html?atender=persona:{persona_id}#pendientes"))
         except Exception:  # noqa: BLE001 — el correo sale igual
             pass
     correos = [{"email": d["email"], "nombre": d["nombre"]} for d in destinos
@@ -427,8 +429,10 @@ async def catalogo_cargos(usuario: Annotated[dict, Depends(usuario_actual)]) -> 
         """select trim(departamento) as area, count(*) as n from users
             where activo and nullif(trim(coalesce(departamento, '')), '') is not null
             group by trim(departamento) order by area""")
+    ciudades = await obtener_todos("select ciudad, region from ciudades_region order by ciudad")
     return {"cargos": [{"cargo": c["cargo"], "area": c["area"] or None} for c in cargos],
-            "areas": [a["area"] for a in areas]}
+            "areas": [a["area"] for a in areas],
+            "ciudades": [{"ciudad": c["ciudad"], "region": c["region"]} for c in ciudades]}
 
 
 @router.get("/mi-ficha/inicial")
@@ -588,3 +592,137 @@ async def guardar_ficha_inicial(
                    + (" Lo que indicó como incorrecto lo revisará Talento Humano."
                       if pedidos else ""),
     }
+
+
+# ------------------------------------------------------ contactos de emergencia
+# Se registraban (en la bienvenida) y no se veían en ninguna parte: «Mi
+# ficha» solo mostraba el teléfono alternativo, que es otro dato. Ahora se
+# ven y se corrigen: la propia persona desde Mi ficha, y Talento Humano
+# desde el expediente.
+
+class Contacto(BaseModel):
+    nombre: str = Field(..., min_length=3, max_length=120)
+    parentesco: Literal["conyuge", "conviviente", "hijo", "padre", "madre", "hermano",
+                        "abuelo", "nieto", "suegro", "cunado", "otro"] = "otro"
+    telefono: str = Field(..., min_length=7, max_length=20)
+    telefono_alternativo: str | None = Field(None, max_length=20)
+    es_principal: bool = False
+
+
+async def _contactos(user_id) -> list[dict]:
+    filas = await obtener_todos(
+        """select id, nombre, parentesco, telefono, telefono_alternativo, es_principal
+             from emergency_contacts where user_id = %s order by es_principal desc, created_at""",
+        (str(user_id),))
+    return [{**c, "id": str(c["id"]), "es_principal": bool(c["es_principal"])} for c in filas]
+
+
+async def guardar_contacto(user_id, datos: Contacto, contacto_id: str | None = None) -> None:
+    telefono = _digitos(datos.telefono)
+    if len(telefono) < 7:
+        raise HTTPException(status_code=422, detail={"mensaje": "El teléfono debe tener al menos 7 dígitos."})
+    alterno = _digitos(datos.telefono_alternativo) or None
+    from ..db import transaccion
+    async with transaccion():
+        hay = await obtener_uno("select count(*) as n from emergency_contacts where user_id = %s",
+                                (str(user_id),))
+        principal = datos.es_principal or not int(hay["n"] or 0)   # el primero es el principal
+        if principal:
+            await ejecutar("update emergency_contacts set es_principal = false where user_id = %s",
+                           (str(user_id),))
+        if contacto_id:
+            n = await ejecutar(
+                """update emergency_contacts set nombre = %s, parentesco = %s, telefono = %s,
+                          telefono_alternativo = %s, es_principal = %s
+                    where id = %s and user_id = %s""",
+                (datos.nombre.strip(), datos.parentesco, telefono, alterno, principal,
+                 contacto_id, str(user_id)))
+            if not n:
+                existe = await obtener_uno("select 1 as x from emergency_contacts where id = %s "
+                                           "and user_id = %s", (contacto_id, str(user_id)))
+                if existe is None:
+                    raise HTTPException(status_code=404, detail={"mensaje": "Ese contacto no existe."})
+        else:
+            await ejecutar(
+                """insert into emergency_contacts (user_id, nombre, parentesco, telefono,
+                                                   telefono_alternativo, es_principal)
+                   values (%s, %s, %s, %s, %s, %s)""",
+                (str(user_id), datos.nombre.strip(), datos.parentesco, telefono, alterno, principal))
+        # Siempre queda uno principal si hay alguno.
+        await ejecutar(
+            """update emergency_contacts set es_principal = true
+                where user_id = %s and not exists (select 1 from (select id from emergency_contacts
+                      where user_id = %s and es_principal) x)
+                order by created_at limit 1""", (str(user_id), str(user_id)))
+
+
+async def quitar_contacto(user_id, contacto_id: str) -> None:
+    await ejecutar("delete from emergency_contacts where id = %s and user_id = %s",
+                   (contacto_id, str(user_id)))
+    await ejecutar(
+        """update emergency_contacts set es_principal = true
+            where user_id = %s and not exists (select 1 from (select id from emergency_contacts
+                  where user_id = %s and es_principal) x)
+            order by created_at limit 1""", (str(user_id), str(user_id)))
+
+
+@router.get("/mi-ficha/contactos")
+async def mis_contactos(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[dict]:
+    return await _contactos(usuario["id"])
+
+
+@router.post("/mi-ficha/contactos", status_code=status.HTTP_201_CREATED)
+async def agregar_mi_contacto(datos: Contacto, request: Request,
+                              usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
+    await guardar_contacto(usuario["id"], datos)
+    await registrar(request, "contacto_emergencia_guardado", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"])
+    return {"mensaje": "Contacto de emergencia guardado.", "contactos": await _contactos(usuario["id"])}
+
+
+@router.patch("/mi-ficha/contactos/{contacto_id}")
+async def cambiar_mi_contacto(contacto_id: str, datos: Contacto, request: Request,
+                              usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
+    await guardar_contacto(usuario["id"], datos, contacto_id)
+    await registrar(request, "contacto_emergencia_guardado", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"])
+    return {"mensaje": "Contacto de emergencia actualizado.", "contactos": await _contactos(usuario["id"])}
+
+
+@router.delete("/mi-ficha/contactos/{contacto_id}")
+async def quitar_mi_contacto(contacto_id: str, request: Request,
+                             usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
+    await quitar_contacto(usuario["id"], contacto_id)
+    await registrar(request, "contacto_emergencia_quitado", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"])
+    return {"mensaje": "Contacto quitado.", "contactos": await _contactos(usuario["id"])}
+
+
+@router.get("/admin/usuarios/{user_id}/contactos")
+async def contactos_de(user_id: str, usuario: RRHH) -> list[dict]:
+    return await _contactos(user_id)
+
+
+@router.post("/admin/usuarios/{user_id}/contactos", status_code=status.HTTP_201_CREATED)
+async def agregar_contacto_de(user_id: str, datos: Contacto, request: Request, usuario: RRHH) -> dict:
+    await guardar_contacto(user_id, datos)
+    await registrar(request, "contacto_emergencia_guardado", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="users", entidad_id=user_id)
+    return {"mensaje": "Contacto de emergencia guardado.", "contactos": await _contactos(user_id)}
+
+
+@router.patch("/admin/usuarios/{user_id}/contactos/{contacto_id}")
+async def cambiar_contacto_de(user_id: str, contacto_id: str, datos: Contacto, request: Request,
+                              usuario: RRHH) -> dict:
+    await guardar_contacto(user_id, datos, contacto_id)
+    await registrar(request, "contacto_emergencia_guardado", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="users", entidad_id=user_id)
+    return {"mensaje": "Contacto actualizado.", "contactos": await _contactos(user_id)}
+
+
+@router.delete("/admin/usuarios/{user_id}/contactos/{contacto_id}")
+async def quitar_contacto_de(user_id: str, contacto_id: str, request: Request, usuario: RRHH) -> dict:
+    await quitar_contacto(user_id, contacto_id)
+    await registrar(request, "contacto_emergencia_quitado", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="users", entidad_id=user_id)
+    return {"mensaje": "Contacto quitado.", "contactos": await _contactos(user_id)}

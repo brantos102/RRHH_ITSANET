@@ -179,6 +179,62 @@ async def test_un_pedido_desde_mi_ficha_avisa_a_talento_humano(cliente, auth, em
     assert correos == [[("Cargo", "Analista de inventarios")]]
     avisos = await _todos("select user_id, accion_url from notifications "
                           "where entidad = 'cambios_ficha' and entidad_id = %s", (empleado["id"],))
-    assert avisos and all(a["accion_url"] == "administracion.html#cambios-ficha" for a in avisos)
+    assert avisos and all(a["accion_url"].startswith("administracion.html?atender=persona:") for a in avisos)
     await _ejecutar("delete from notifications where entidad = 'cambios_ficha' and entidad_id = %s",
                     (empleado["id"],))
+
+
+# ---------------------------------------- contactos de emergencia y sede
+async def test_mis_contactos_se_ven_y_se_corrigen(cliente, auth, empleado):
+    r = await cliente.post("/mi-ficha/contactos", headers=auth, json={
+        "nombre": "Contacto Inventado", "parentesco": "madre", "telefono": "099 111 2224"})
+    assert r.status_code == 201, r.text
+    contactos = r.json()["contactos"]
+    assert len(contactos) == 1 and contactos[0]["es_principal"] and contactos[0]["telefono"] == "0991112224"
+    cid = contactos[0]["id"]
+    r = await cliente.post("/mi-ficha/contactos", headers=auth, json={
+        "nombre": "Otro Contacto", "parentesco": "hermano", "telefono": "0991112225",
+        "es_principal": True})
+    principal = [c for c in r.json()["contactos"] if c["es_principal"]]
+    assert len(principal) == 1 and principal[0]["nombre"] == "Otro Contacto"
+    r = await cliente.delete(f"/mi-ficha/contactos/{principal[0]['id']}", headers=auth)
+    queda = r.json()["contactos"]
+    assert len(queda) == 1 and queda[0]["id"] == cid and queda[0]["es_principal"], \
+        "siempre queda uno principal"
+    await ejecutar("delete from emergency_contacts where user_id = %s", (empleado["id"],))
+
+
+async def test_no_se_toca_el_contacto_de_otra_persona(cliente, auth, empleado):
+    otro = await obtener_uno("select id from emergency_contacts where user_id <> %s limit 1",
+                             (empleado["id"],))
+    if otro:
+        r = await cliente.patch(f"/mi-ficha/contactos/{otro['id']}", headers=auth, json={
+            "nombre": "Intruso Intento", "telefono": "0990000000"})
+        assert r.status_code == 404
+
+
+async def test_talento_humano_cambia_la_sede_y_lo_pendiente_se_va_con_ella(
+        cliente, rrhh_auth, empleado):
+    await ejecutar("update users set ciudad = 'Guayaquil' where id = %s", (empleado["id"],))
+    fila = await obtener_uno("select region from users where id = %s", (empleado["id"],))
+    assert fila["region"] == "costa"
+    from app.db import nuevo_id
+    rid = str(nuevo_id())
+    await ejecutar(
+        """insert into requests (id, user_id, tipo, estado, fecha_inicio, fecha_fin,
+                                 dias_solicitados, descripcion, justificacion, region)
+           values (%s, %s, 'vacacion', 'pendiente_rrhh', current_date() + interval 40 day,
+                   current_date() + interval 46 day, 5, 'Prueba de traslado de sede',
+                   'Justificación de la prueba de traslado', 'costa')""",
+        (rid, empleado["id"]))
+    try:
+        r = await cliente.patch(f"/admin/usuarios/{empleado['id']}", headers=rrhh_auth,
+                                json={"region": "sierra"})
+        assert r.status_code == 200, r.text
+        assert "Quito" in r.json()["mensaje"] and "1 solicitud" in r.json()["mensaje"]
+        u = await obtener_uno("select region, ciudad from users where id = %s", (empleado["id"],))
+        assert u["region"] == "sierra" and u["ciudad"] == "Quito", "ciudad y sede no se contradicen"
+        sol = await obtener_uno("select region from requests where id = %s", (rid,))
+        assert sol["region"] == "sierra"
+    finally:
+        await ejecutar("delete from requests where id = %s", (rid,))

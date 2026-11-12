@@ -14,6 +14,7 @@
      · Lo que no se toca desde aquí, y por qué. */
 import { api, sesion, esc, fecha, fechaHora } from "./api.js";
 import { montarNavegacion } from "./navegacion.js";
+import { montarContactos } from "./contactos.js";
 
 const $ = (id) => document.getElementById(id);
 if (!sesion.vigente) location.replace("index.html");
@@ -307,3 +308,8 @@ async function cargarDispositivos() {
 
 cargar();
 cargarDispositivos();
+montarContactos($("mf-contactos"), {
+  listar: () => api.misContactos(),
+  guardar: (id, d) => api.guardarMiContacto(id, d),
+  quitar: (id) => api.quitarMiContacto(id),
+}, avisar).cargar();

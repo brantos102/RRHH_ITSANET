@@ -174,6 +174,8 @@ $("btn-nuevo-usuario").addEventListener("click", () => {
   $("form-usuario").reset();
   delete $("form-usuario").dataset.id;
   $("titulo-usuario").textContent = "Nuevo usuario";
+  $("u-ficha-completa").classList.add("hidden");
+  delete $("u-region").dataset.original;
   $("u-cedula").disabled = false;
   $("campo-saldo").classList.remove("hidden");
   $("u-error").classList.add("hidden");
@@ -199,6 +201,10 @@ document.addEventListener("click", async (e) => {
     $("u-telefono").value = u.telefono || "";
     $("u-cargo").value = u.cargo || "";
     $("u-departamento").value = u.departamento || "";
+    $("u-region").value = u.region || "sierra";
+    $("u-region").dataset.original = u.region || "sierra";
+    $("u-ficha-completa").href = `persona.html?id=${encodeURIComponent(u.id)}`;
+    $("u-ficha-completa").classList.remove("hidden");
     $("u-jefe").value = u.jefe_id || "";
     $("u-ingreso").value = String(u.fecha_ingreso).slice(0, 10);
     $("campo-saldo").classList.add("hidden");  // el saldo se ajusta aparte
@@ -317,7 +323,11 @@ $("form-usuario").addEventListener("submit", async (e) => {
     cargo: $("u-cargo").value.trim() || null,
     departamento: $("u-departamento").value.trim() || null,
     jefe_id: $("u-jefe").value || null,
+    region: $("u-region").value,
   };
+  // Al editar, la sede va solo si cambió: cambiarla mueve la ciudad y lo que
+  // está en trámite, y no tiene sentido hacerlo por reenviar el mismo valor.
+  if (id && datos.region === $("u-region").dataset.original) delete datos.region;
 
   try {
     if (id) {
@@ -1857,6 +1867,7 @@ const TIPO_PENDIENTE = {
   chat: ["Consultas del chat", "bg-emerald-50 text-emerald-800"],
   firma: ["Por firmar", "bg-amber-50 text-amber-800"],
 };
+let ultimoPendientes = [];
 let sedePendientes = (() => { try { return localStorage.getItem("rrhh_sede_pend") || "mia"; } catch { return "mia"; } })();
 
 function hace(minutos) {
@@ -1872,6 +1883,7 @@ async function cargarPendientes() {
       ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"}`;
   });
   const d = await api.pendientesRRHH(sedePendientes);
+  ultimoPendientes = d.items;
   $("pen-conteo").innerHTML = Object.entries(TIPO_PENDIENTE).map(([t, [nombre, tono]]) => `
     <div class="rounded-xl p-3 ${tono}">
       <p class="text-xs">${nombre}</p>
@@ -1897,7 +1909,7 @@ async function cargarPendientes() {
         <p class="truncate text-sm text-slate-600">${esc(i.detalle)}</p>
       </div>
       ${estadoAt} ${boton}
-      <a href="${esc(i.url)}" class="rounded-lg px-2.5 py-1 text-xs font-medium text-sky-700 hover:bg-sky-50">Abrir</a>
+      <button data-atender="${esc(i.tipo)}|${esc(i.id)}" class="rounded-lg bg-sky-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-sky-700">Atender</button>
     </li>`;
   }).join("") : '<li class="px-5 py-10 text-center text-sm text-slate-500">Nada pendiente en esta sede. 🎉</li>';
   $("pen-hoy").innerHTML = d.atendidos_hoy.length ? d.atendidos_hoy.map((a) => `
@@ -1914,6 +1926,13 @@ document.querySelectorAll("#pen-sedes [data-sede]").forEach((b) => b.addEventLis
 }));
 
 $("pen-lista").addEventListener("click", async (e) => {
+  const atender = e.target.closest("[data-atender]");
+  if (atender) {
+    const [tipo, id] = atender.dataset.atender.split("|");
+    const item = ultimoPendientes.find((x) => x.tipo === tipo && String(x.id) === id);
+    if (item) abrirAtender(item);
+    return;
+  }
   const tomar = e.target.closest("[data-tomar]"), soltar = e.target.closest("[data-soltar]");
   if (!tomar && !soltar) return;
   const [tipo, id] = (tomar || soltar).dataset[tomar ? "tomar" : "soltar"].split("|");
@@ -2004,6 +2023,219 @@ document.addEventListener("click", async (e) => {
     $("form-asis").scrollIntoView({ behavior: "smooth", block: "center" });
   }
 });
+
+
+/* ---------------------------------------------------------------- atender
+   Resolver cada pendiente aquí mismo, sin ir a otra pantalla ni buscarlo:
+   desde la lista o directo desde la campana (…?atender=persona:<id>).
+   Al abrirlo se toma —los demás lo ven «en revisión»— y al resolverlo
+   desaparece de la lista de todos. */
+const CLASE_BTN = "rounded-xl px-4 py-2 text-sm font-medium";
+
+function dialogoAtender(titulo, subtitulo) {
+  document.getElementById("modal-atender")?.remove();
+  const d = document.createElement("dialog");
+  d.id = "modal-atender";
+  d.className = "w-[min(100vw-1.5rem,40rem)] rounded-2xl p-0";
+  d.innerHTML = `
+    <div class="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
+      <div><h2 class="font-semibold">${esc(titulo)}</h2>
+        <p class="mt-0.5 text-sm text-slate-500">${esc(subtitulo || "")}</p></div>
+      <button type="button" data-cerrar-atender class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100">✕</button>
+    </div>
+    <div data-cuerpo class="max-h-[65vh] space-y-3 overflow-y-auto px-5 py-4 text-sm"></div>
+    <p data-msg class="hidden px-5 pb-3 text-sm"></p>`;
+  document.body.appendChild(d);
+  d.querySelector("[data-cerrar-atender]").addEventListener("click", () => d.close());
+  d.addEventListener("close", () => { d.remove(); cargarPendientes().catch(() => {}); });
+  d.showModal();
+  const msg = (t, error = false) => {
+    const p = d.querySelector("[data-msg]");
+    p.textContent = t;
+    p.className = `px-5 pb-3 text-sm ${error ? "text-rose-700" : "text-emerald-700"}`;
+  };
+  return { d, cuerpo: d.querySelector("[data-cuerpo]"), msg };
+}
+
+async function tomarAlAbrir(tipo, id, msg) {
+  if (tipo === "chat" || tipo === "persona") return;
+  try { await api.tomarPendiente(tipo, id); }
+  catch (err) { msg(`${err.message} Puede seguir, pero coordínelo para no duplicar.`, true); }
+}
+
+async function abrirAtender(item) {
+  if (item.tipo === "cambio_ficha") return atenderCambios(item.persona_id, item.persona);
+  if (item.tipo === "solicitud") return atenderSolicitud(item);
+  if (item.tipo === "chat") return atenderChat(item);
+  if (item.tipo === "firma") return atenderFirma(item);
+}
+
+async function atenderCambios(personaId, nombre = "") {
+  const v = dialogoAtender("Cambios de ficha por revisar", nombre);
+  async function pintar() {
+    const todos = await api.cambiosFichaPendientes();
+    const suyos = todos.filter((c) => String(c.user_id) === String(personaId));
+    if (!suyos.length) {
+      v.cuerpo.innerHTML = '<p class="text-emerald-700">No quedan pedidos pendientes de esta persona.</p>';
+      return;
+    }
+    if (!nombre) v.d.querySelector("h2 + p").textContent = suyos[0].persona;
+    v.cuerpo.innerHTML = suyos.map((c) => `
+      <article class="rounded-xl p-3 ring-1 ring-slate-200">
+        <p class="font-medium">${esc(c.etiqueta)}</p>
+        <p class="mt-1"><span class="text-slate-500 line-through">${esc(c.anterior_legible || "—")}</span>
+          → <b>${esc(c.nuevo_legible || c.valor_nuevo)}</b></p>
+        ${c.motivo ? `<p class="mt-1 text-xs text-slate-500">${esc(c.motivo)}</p>` : ""}
+        ${c.campo === "jefe_por_registrar" ? `<p class="mt-1 text-xs text-amber-800">
+          Primero nombre a esa persona en <a class="underline" href="#jefaturas" data-cerrar-y-ir>Jefaturas</a>
+          y asígnela; luego márquelo como atendido.</p>` : ""}
+        <div class="mt-2 flex gap-2">
+          <button data-rechazar-cambio="${c.id}" class="${CLASE_BTN} bg-white text-rose-700 ring-1 ring-rose-200 hover:bg-rose-50">Rechazar</button>
+          <button data-aprobar-cambio="${c.id}" class="${CLASE_BTN} bg-emerald-600 text-white hover:bg-emerald-700">
+            ${c.campo === "jefe_por_registrar" ? "Marcar atendido" : "Aprobar"}</button>
+        </div>
+      </article>`).join("");
+  }
+  v.cuerpo.addEventListener("click", async (e) => {
+    if (e.target.closest("[data-cerrar-y-ir]")) { v.d.close(); return; }
+    const ap = e.target.closest("[data-aprobar-cambio]"), re = e.target.closest("[data-rechazar-cambio]");
+    if (!ap && !re) return;
+    let motivo = null;
+    if (re) {
+      motivo = prompt("¿Por qué se rechaza? La persona lo verá para corregirlo.");
+      if (motivo === null) return;
+      if (motivo.trim().length < 5) return v.msg("Explique el motivo (mínimo 5 caracteres).", true);
+    }
+    try {
+      await api.resolverCambioFicha((ap || re).dataset[ap ? "aprobarCambio" : "rechazarCambio"],
+                                    ap ? "aprobar" : "rechazar", motivo);
+      v.msg(ap ? "Aprobado: el dato ya rige." : "Rechazado: se le avisó a la persona.");
+      await pintar();
+    } catch (err) { v.msg(err.message, true); }
+  });
+  await pintar().catch((err) => v.msg(err.message, true));
+}
+
+async function atenderSolicitud(item) {
+  const v = dialogoAtender("Solicitud por decidir", item.persona);
+  await tomarAlAbrir("solicitud", item.id, v.msg);
+  let s;
+  try { s = (await api.pendientes()).find((x) => String(x.id) === String(item.id)); }
+  catch (err) { return v.msg(err.message, true); }
+  if (!s) { v.cuerpo.innerHTML = '<p class="text-emerald-700">Esta solicitud ya fue resuelta.</p>'; return; }
+  v.cuerpo.innerHTML = `
+    <dl class="grid grid-cols-2 gap-x-4 gap-y-2">
+      <div><dt class="text-xs text-slate-500">Nº</dt><dd class="font-medium">${esc(s.folio)}</dd></div>
+      <div><dt class="text-xs text-slate-500">Tipo</dt><dd class="font-medium">${s.tipo === "vacacion" ? "Vacaciones" : esc(s.categoria || "Permiso")}</dd></div>
+      <div><dt class="text-xs text-slate-500">Fechas</dt><dd class="font-medium">${fecha(s.fecha_inicio)} al ${fecha(s.fecha_fin)}</dd></div>
+      <div><dt class="text-xs text-slate-500">Días</dt><dd class="font-medium">${esc(s.dias_solicitados)}</dd></div>
+      <div><dt class="text-xs text-slate-500">Saldo actual</dt><dd class="font-medium">${esc(s.saldo_actual)} días</dd></div>
+      <div><dt class="text-xs text-slate-500">Lo cubre</dt><dd class="font-medium">${esc(s.reemplazo || "Sin reemplazo")}</dd></div>
+      <div class="col-span-2"><dt class="text-xs text-slate-500">Jefe</dt><dd>${esc(s.jefe_nombre || "Sin jefe: decide Talento Humano")}</dd></div>
+    </dl>
+    <p class="rounded-xl bg-slate-50 p-3">${esc(s.descripcion || "")}</p>
+    ${s.es_adelanto ? '<p class="text-amber-800">Supera su saldo: días adelantados.</p>' : ""}
+    <div class="flex flex-wrap gap-2 pt-1">
+      ${s.tipo === "vacacion" ? `<button data-docs class="${CLASE_BTN} bg-slate-100 hover:bg-slate-200">📄 Documentos</button>` : ""}
+      <a href="dashboard.html#aprobaciones" class="${CLASE_BTN} bg-slate-100 hover:bg-slate-200">Asignar reemplazo…</a>
+      <span class="flex-1"></span>
+      <button data-rechazar class="${CLASE_BTN} bg-white text-rose-700 ring-1 ring-rose-200 hover:bg-rose-50">Rechazar</button>
+      <button data-aprobar class="${CLASE_BTN} bg-emerald-600 text-white hover:bg-emerald-700">Aprobar</button>
+    </div>`;
+  v.cuerpo.addEventListener("click", async (e) => {
+    try {
+      if (e.target.closest("[data-docs]")) {
+        const papel = await api.papelDeLaSolicitud(s.id);
+        const firmante = await elegirFirmante(s.region || item.region);
+        if (firmante !== null) await api.abrirPapel(papel.id, firmante);
+      } else if (e.target.closest("[data-aprobar]")) {
+        const r = await api.decidir(s.id, "aprobar");
+        v.cuerpo.innerHTML = `<p class="text-emerald-700">${esc(r.mensaje)}</p>`;
+      } else if (e.target.closest("[data-rechazar]")) {
+        const motivo = prompt("¿Por qué se rechaza? El colaborador lo verá.");
+        if (motivo === null) return;
+        if (motivo.trim().length < 5) return v.msg("Explique el motivo.", true);
+        const r = await api.decidir(s.id, "rechazar", motivo.trim());
+        v.cuerpo.innerHTML = `<p class="text-emerald-700">${esc(r.mensaje)}</p>`;
+      }
+    } catch (err) { v.msg(err.message, true); }
+  });
+}
+
+async function atenderChat(item) {
+  const v = dialogoAtender("Consulta del chat", `${item.persona} · ${item.sede}`);
+  async function pintar() {
+    const h = await api.leerConversacion(item.id);
+    v.cuerpo.innerHTML = `
+      <div class="space-y-2">${(h.mensajes || []).slice(-15).map((m) => `
+        <div class="max-w-[85%] rounded-2xl px-3 py-2 ${m.es_rrhh
+          ? "ml-auto bg-slate-900 text-white" : "bg-slate-100"}">
+          <p class="whitespace-pre-line">${esc(m.texto)}</p>
+          <p class="mt-0.5 text-[11px] opacity-60">${esc(m.autor || "")} · ${fechaHora(m.created_at)}</p>
+        </div>`).join("")}</div>
+      <form data-responder class="flex gap-2 pt-2">
+        <textarea rows="2" maxlength="2000" required placeholder="Responder…"
+                  class="flex-1 rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></textarea>
+        <button class="${CLASE_BTN} bg-slate-900 text-white hover:bg-slate-800">Enviar</button>
+      </form>
+      <button data-resuelta class="text-xs font-medium text-slate-500 hover:text-slate-900">Dar por resuelta</button>`;
+    v.cuerpo.scrollTop = v.cuerpo.scrollHeight;
+  }
+  v.cuerpo.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const t = e.target.querySelector("textarea").value.trim();
+    if (!t) return;
+    try { await api.enviarMensaje({ conversacion_id: item.id, texto: t }); await pintar(); v.msg("Respuesta enviada; se le avisó por correo."); }
+    catch (err) { v.msg(err.message, true); }
+  });
+  v.cuerpo.addEventListener("click", async (e) => {
+    if (!e.target.closest("[data-resuelta]")) return;
+    try { await api.cerrarConversacion(item.id); v.cuerpo.innerHTML = '<p class="text-emerald-700">Consulta resuelta.</p>'; }
+    catch (err) { v.msg(err.message, true); }
+  });
+  await pintar().catch((err) => v.msg(err.message, true));
+}
+
+async function atenderFirma(item) {
+  const v = dialogoAtender("Documento por firmar", item.persona);
+  await tomarAlAbrir("firma", item.id, v.msg);
+  v.cuerpo.innerHTML = `
+    <p>${esc(item.detalle)}</p>
+    <p class="text-slate-600">Imprímalo (elija quién firma por Talento Humano), hágalo firmar por el
+      colaborador y registre la firma: con eso el trámite queda concluido.</p>
+    <div class="flex flex-wrap gap-2">
+      <button data-imprimir class="${CLASE_BTN} bg-slate-100 hover:bg-slate-200">🖨️ Imprimir</button>
+      <button data-firmado class="${CLASE_BTN} bg-emerald-600 text-white hover:bg-emerald-700">Registrar firma</button>
+    </div>`;
+  v.cuerpo.addEventListener("click", async (e) => {
+    try {
+      if (e.target.closest("[data-imprimir]")) {
+        const firmante = await elegirFirmante(item.region);
+        if (firmante !== null) await api.abrirPapel(item.id, firmante);
+      } else if (e.target.closest("[data-firmado]")) {
+        if (!confirm(`¿${item.persona} ya firmó y el documento está en su expediente?`)) return;
+        const r = await api.registrarFirma(item.id);
+        v.cuerpo.innerHTML = `<p class="text-emerald-700">${esc(r.mensaje)}</p>`;
+      }
+    } catch (err) { v.msg(err.message, true); }
+  });
+}
+
+/* Desde la campana: administracion.html?atender=persona:<id> o tipo:<id>. */
+(() => {
+  const pedido = new URLSearchParams(location.search).get("atender");
+  if (!pedido) return;
+  const [tipo, id] = pedido.split(":");
+  history.replaceState(null, "", `administracion.html${location.hash}`);
+  if (tipo === "persona") return void atenderCambios(id);
+  setTimeout(async () => {
+    try {
+      const d = await api.pendientesRRHH("todas");
+      const item = d.items.find((x) => x.tipo === tipo && String(x.id) === id);
+      if (item) abrirAtender(item); else avisar("Ese pendiente ya fue atendido.");
+    } catch (err) { avisar(err.message, true); }
+  }, 300);
+})();
 
 /* ---------------------------------------------------------------- arranque
    Al final a propósito: la sección inicial usa variables declaradas en todo

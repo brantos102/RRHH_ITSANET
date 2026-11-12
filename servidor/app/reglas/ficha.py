@@ -177,6 +177,9 @@ async def resolver_cambio_ficha(cambio_id: int, aprobar: bool, por, motivo: str 
             if confirmada:
                 await ejecutar(f"UPDATE users SET `{confirmada}` = NOW(6) WHERE id = %s",
                                (cambio["user_id"],))
+            if cambio["campo"] == "ciudad":
+                from .personal import mover_pendientes_de_sede
+                await mover_pendientes_de_sede(cambio["user_id"])
         elif len(_limpio(motivo)) < 5:
             raise ReglaDeNegocio("Indique por qué se rechaza: la persona debe saber qué corregir")
         await ejecutar(
