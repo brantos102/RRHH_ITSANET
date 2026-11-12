@@ -44,11 +44,11 @@ async def _tablero_de_fabrica():
 
 
 # ------------------------------------------------------------- los números
-async def test_los_nueve_indicadores_salen_con_su_cifra(cliente, rrhh_auth):
+async def test_los_diez_indicadores_salen_con_su_cifra(cliente, rrhh_auth):
     r = await cliente.get("/tablero", headers=rrhh_auth)
     assert r.status_code == 200
     bloques = r.json()["bloques"]
-    assert len(bloques) == 9
+    assert len(bloques) == 10   # el décimo: cuota de discapacidad
     for b in bloques:
         assert b["cifra"] is not None, b["clave"]
         assert b["pregunta"], b["clave"]
@@ -162,7 +162,7 @@ async def test_apagar_un_indicador_lo_quita_de_la_pantalla(cliente, rrhh_auth):
     claves = {b["clave"] for b in
               (await cliente.get("/tablero", headers=rrhh_auth)).json()["bloques"]}
     assert "pasivo" not in claves
-    assert len(claves) == 8
+    assert len(claves) == 9
 
 
 async def test_apagarlo_tambien_deja_de_calcularlo(cliente, rrhh_auth):

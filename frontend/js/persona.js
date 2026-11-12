@@ -9,7 +9,7 @@
    Se llega escribiendo el nombre en el buscador de la barra lateral. Quién
    puede ver a quién lo decide el servidor: un jefe ve a su gente y nada más,
    y probar direcciones a mano no le sirve de nada. */
-import { api, sesion, esc, fecha, fechaHora, ESTADOS } from "./api.js";
+import { api, sesion, esc, fecha, fechaHora, ESTADOS, llenarSedes } from "./api.js";
 import { montarNavegacion } from "./navegacion.js";
 import { montarBuscador } from "./buscador.js";
 import { montarContactos } from "./contactos.js";
@@ -36,6 +36,10 @@ const TIPO = { vacacion: "Vacaciones", permiso: "Permiso" };
 function pintarPersona(p, resumen, devengo) {
   $("iniciales").textContent =
     (p.nombre || "?").split(" ").map((x) => x[0]).slice(0, 2).join("");
+  // La foto, si tiene y si quien mira puede verla (su jefe o Talento Humano).
+  api.foto(p.id).then((url) => {
+    if (url) $("iniciales").innerHTML = `<img src="${url}" alt="" class="h-full w-full object-cover">`;
+  });
   $("nombre").textContent = p.nombre;
   document.title = `${p.nombre} · Expediente`;
   $("puesto").textContent =
@@ -189,8 +193,13 @@ const CAMPOS_FICHA = {
   "fi-nombre": "nombre", "fi-telefono": "telefono", "fi-telefono-alt": "telefono_alternativo",
   "fi-region": "region", "fi-ciudad": "ciudad", "fi-direccion": "direccion", "fi-cargo": "cargo",
   "fi-area": "departamento", "fi-jefe": "jefe_id", "fi-nacimiento": "fecha_nacimiento",
-  "fi-bodega": "bodega", "fi-centro": "centro_costo",
+  "fi-bodega": "bodega", "fi-centro": "centro_costo", "fi-contrato": "tipo_contrato",
+  "fi-contrato-fin": "contrato_fin", "fi-sangre": "tipo_sangre",
+  "fi-disc-porcentaje": "porcentaje_discapacidad", "fi-disc-tipo": "tipo_discapacidad",
+  "fi-disc-carnet": "carnet_conadis",
 };
+// Casillas: se mandan como verdadero o falso, no como texto.
+const CASILLAS_FICHA = { "fi-disc": "tiene_discapacidad", "fi-sustituto": "sustituto_discapacidad" };
 
 function avisarFicha(texto, error = false) {
   const p = $("fi-nota");
@@ -205,7 +214,11 @@ async function pintarFicha(p, f) {
     region: f.region, ciudad: p.ciudad, direccion: f.direccion, cargo: p.cargo,
     departamento: p.departamento, jefe_id: f.jefe_id, fecha_nacimiento: f.fecha_nacimiento
       ? String(f.fecha_nacimiento).slice(0, 10) : "", bodega: f.bodega, centro_costo: f.centro_costo,
+    tipo_contrato: f.tipo_contrato, contrato_fin: f.contrato_fin ? String(f.contrato_fin).slice(0, 10) : "",
+    tipo_sangre: f.tipo_sangre, porcentaje_discapacidad: f.porcentaje_discapacidad,
+    tipo_discapacidad: f.tipo_discapacidad, carnet_conadis: f.carnet_conadis,
   };
+  await llenarSedes($("fi-region"), f.region);
   try {
     const [jefes, cat] = await Promise.all([api.jefaturas(), api.catalogoCargos()]);
     $("fi-jefe").insertAdjacentHTML("beforeend", jefes.filter((j) => String(j.id) !== ID)
@@ -216,6 +229,10 @@ async function pintarFicha(p, f) {
   } catch { /* sin sugerencias se escribe igual */ }
   for (const [id, campo] of Object.entries(CAMPOS_FICHA)) $(id).value = valores[campo] || "";
   fichaOriginal = Object.fromEntries(Object.entries(CAMPOS_FICHA).map(([id, c]) => [c, $(id).value]));
+  for (const [id, campo] of Object.entries(CASILLAS_FICHA)) {
+    $(id).checked = !!f[campo];
+    fichaOriginal[campo] = !!f[campo];
+  }
 
   montarContactos($("fi-contactos"), {
     listar: async () => f.contactos,
@@ -230,13 +247,19 @@ $("form-ficha").addEventListener("submit", async (e) => {
   const cambios = {};
   for (const [id, campo] of Object.entries(CAMPOS_FICHA)) {
     const v = $(id).value.trim();
-    if (v !== (fichaOriginal[campo] || "")) cambios[campo] = v || null;
+    if (v !== String(fichaOriginal[campo] ?? "")) {
+      cambios[campo] = campo === "porcentaje_discapacidad" ? (Number(v) || null) : (v || null);
+    }
+  }
+  for (const [id, campo] of Object.entries(CASILLAS_FICHA)) {
+    if ($(id).checked !== fichaOriginal[campo]) cambios[campo] = $(id).checked;
   }
   if (!Object.keys(cambios).length) return avisarFicha("No cambió ningún dato.", true);
   try {
     const r = await api.editarUsuario(ID, cambios);
     avisarFicha(r.mensaje);
-    Object.assign(fichaOriginal, Object.fromEntries(Object.entries(cambios).map(([k, v]) => [k, v || ""])));
+    Object.assign(fichaOriginal, Object.fromEntries(Object.entries(cambios).map(([k, v]) =>
+      [k, typeof v === "boolean" ? v : v ?? ""])));
     if ("region" in cambios || "ciudad" in cambios) setTimeout(() => location.reload(), 1500);
   } catch (err) { avisarFicha(err.message, true); }
 });

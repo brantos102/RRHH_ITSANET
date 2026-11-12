@@ -218,7 +218,7 @@ async def validar_token(datos: ValidacionToken, request: Request,
         """
         select u.id, u.cedula, u.nombre, u.email, u.rol, u.telefono, u.cargo,
                u.departamento, u.fecha_ingreso, u.dias_vacaciones, u.logros,
-               anios_cumplidos(u.fecha_ingreso) as anios_servicio,
+               anios_cumplidos(u.fecha_ingreso) as anios_servicio, u.foto_url,
                j.nombre as jefe_nombre
         from users u
         left join users j on j.id = u.jefe_id
@@ -240,7 +240,7 @@ async def validar_token(datos: ValidacionToken, request: Request,
         """
         select u.id, u.cedula, u.nombre, u.email, u.rol, u.telefono, u.cargo,
                u.departamento, u.fecha_ingreso, u.dias_vacaciones, u.logros,
-               anios_cumplidos(u.fecha_ingreso) as anios_servicio,
+               anios_cumplidos(u.fecha_ingreso) as anios_servicio, u.foto_url,
                j.nombre as jefe_nombre
         from users u
         left join users j on j.id = u.jefe_id
@@ -288,6 +288,7 @@ async def validar_token(datos: ValidacionToken, request: Request,
             jefe_nombre=usuario["jefe_nombre"],
             logros=usuario["logros"] or [],
             pendientes=await ingreso.pendientes(usuario["id"]),
+            tiene_foto=bool(usuario.get("foto_url")),
         ),
     )
 
@@ -310,6 +311,7 @@ async def perfil(usuario: Annotated[dict, Depends(usuario_actual)]) -> Perfil:
         jefe_nombre=usuario["jefe_nombre"],
         logros=usuario["logros"] or [],
         pendientes=await ingreso.pendientes(usuario["id"]),
+        tiene_foto=bool(usuario.get("foto_url")),
     )
 
 

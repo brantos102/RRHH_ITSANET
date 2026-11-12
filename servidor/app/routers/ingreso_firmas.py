@@ -21,6 +21,7 @@ from ..db import booleanos, ejecutar, obtener_todos, obtener_uno, transaccion
 from ..deps import exigir_rol
 from ..errores import es_unicidad, traducir
 from ..reglas import ingreso
+from ..reglas import sedes as reglas_sedes
 
 router = APIRouter(tags=["Primer ingreso y firmas"])
 RRHH = Annotated[dict, Depends(exigir_rol("rrhh", "admin"))]
@@ -33,7 +34,6 @@ ETIQUETAS = {
     "telefono": "Teléfono personal",
     "emergencia": "Contacto de emergencia",
 }
-SEDES = {"sierra": "Quito", "costa": "Guayaquil"}
 
 
 class ConfigIngreso(BaseModel):
@@ -43,7 +43,7 @@ class ConfigIngreso(BaseModel):
 
 
 class NuevoFirmante(BaseModel):
-    region: Literal["sierra", "costa"]
+    region: str = Field(..., max_length=20)
     user_id: str = Field(..., max_length=40)
     cargo_firma: str | None = Field(None, max_length=120)
     principal: bool = False
@@ -89,7 +89,7 @@ SQL_FIRMANTES = """
 """
 
 
-def _firmante(f: dict) -> dict:
+def _firmante(f: dict, SEDES: dict) -> dict:
     return {**f, "id": int(f["id"]), "user_id": str(f["user_id"]),
             "sede": SEDES.get(f["region"], f["region"]),
             "firma_como": f["cargo_firma"] or f["cargo"] or "Talento Humano"}
@@ -100,7 +100,8 @@ async def firmantes_de(region: str | None) -> list[dict]:
     filas = await obtener_todos(
         SQL_FIRMANTES + " WHERE f.region = %s AND u.activo ORDER BY f.principal DESC, u.nombre",
         (region or "sierra",))
-    return [_firmante(f) for f in booleanos(filas, "principal", "activo")]
+    SEDES = await reglas_sedes.nombres()
+    return [_firmante(f, SEDES) for f in booleanos(filas, "principal", "activo")]
 
 
 @router.get("/admin/firmantes")
@@ -110,7 +111,8 @@ async def listar_firmantes(usuario: RRHH) -> dict:
     candidatos = await obtener_todos(
         """SELECT id, nombre, cargo, COALESCE(region, 'sierra') AS region FROM users
             WHERE activo AND rol IN ('rrhh', 'admin') ORDER BY nombre""")
-    return {"firmantes": [_firmante(f) for f in filas],
+    SEDES = await reglas_sedes.nombres()
+    return {"firmantes": [_firmante(f, SEDES) for f in filas],
             "candidatos": [{**c, "id": str(c["id"])} for c in candidatos],
             "sedes": [{"region": r, "sede": s} for r, s in SEDES.items()]}
 
@@ -129,6 +131,11 @@ async def _quitar_principal(region: str, salvo: int | None = None) -> None:
 
 @router.post("/admin/firmantes", status_code=201)
 async def agregar_firmante(datos: NuevoFirmante, request: Request, usuario: RRHH) -> dict:
+    try:
+        await reglas_sedes.validar(datos.region)
+    except Exception as exc:  # noqa: BLE001
+        raise traducir(exc) from exc
+    SEDES = await reglas_sedes.nombres()
     persona = await obtener_uno(
         "SELECT nombre FROM users WHERE id = %s AND activo AND rol IN ('rrhh', 'admin')",
         (datos.user_id,))

@@ -20,16 +20,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from ..audit import registrar
 from ..db import ejecutar, obtener_todos, obtener_uno
 from ..deps import exigir_rol
+from ..reglas import sedes as reglas_sedes
 
 router = APIRouter(prefix="/rrhh/pendientes", tags=["Pendientes de Talento Humano"])
 RRHH = Annotated[dict, Depends(exigir_rol("rrhh", "admin"))]
 Tipo = Literal["cambio_ficha", "solicitud", "chat", "firma"]
 VIGENCIA_HORAS = 4
 
-SEDES = {"sierra": "Quito", "costa": "Guayaquil"}
-
-
-def _filtro_sede(usuario: dict, sede: str) -> tuple[str, tuple]:
+def _filtro_sede(usuario: dict, sede: str, SEDES: dict) -> tuple[str, tuple]:
     """Condición sobre una columna `region` (alias `reg`)."""
     if sede in SEDES:
         return "reg = %s", (sede,)
@@ -95,7 +93,8 @@ SELECT * FROM (
 
 @router.get("")
 async def pendientes(usuario: RRHH, sede: str = "mia") -> dict:
-    filtro, params = _filtro_sede(usuario, sede)
+    SEDES = await reglas_sedes.nombres()
+    filtro, params = _filtro_sede(usuario, sede, SEDES)
     filas = await obtener_todos(f"{SQL_PENDIENTES} WHERE {filtro} ORDER BY desde", params)
     tomados = {(t["tipo"], str(t["entidad_id"])): t for t in await obtener_todos(
         f"""SELECT a.tipo, a.entidad_id, a.user_id, a.tomado_en, u.nombre,
@@ -122,7 +121,7 @@ async def pendientes(usuario: RRHH, sede: str = "mia") -> dict:
     conteo: dict[str, int] = {}
     for i in items:
         conteo[i["tipo"]] = conteo.get(i["tipo"], 0) + 1
-    return {"sede": sede, "items": items, "conteo": conteo,
+    return {"sede": sede, "items": items, "conteo": conteo, "sedes": SEDES,
             "atendidos_hoy": [{**a, "sede": SEDES.get(a["reg"], a["reg"])} for a in atendidos]}
 
 

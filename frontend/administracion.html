@@ -23,10 +23,21 @@
      que no cabía en pantalla; ahora un menú por grupos a la izquierda (en el
      celular, una cinta que se desliza) y «Pendientes» como inicio: lo
      primero que necesita Talento Humano al entrar es saber qué le espera. -->
+<div class="mb-4 flex flex-wrap items-end justify-between gap-2">
+  <div>
+    <h1 class="text-xl font-semibold tracking-tight">Administración</h1>
+    <p class="text-sm text-slate-600">Personas, sedes, documentos y configuración del sistema.</p>
+  </div>
+</div>
+<!-- En el celular, un selector: la cinta que se deslizaba de lado escondía
+     la mitad de las opciones y no se sabía que estaban ahí. -->
+<label class="mb-4 block lg:hidden">
+  <span class="sr-only">Sección</span>
+  <select id="adm-selector" class="w-full rounded-xl border-0 bg-white px-3 py-2.5 text-sm font-medium shadow-sm ring-1 ring-slate-300"></select>
+</label>
 <div class="lg:grid lg:grid-cols-[13.5rem_1fr] lg:items-start lg:gap-5">
-  <aside class="mb-4 lg:sticky lg:top-4 lg:mb-0">
-    <nav class="flex gap-1 overflow-x-auto rounded-2xl bg-white p-2 shadow-sm ring-1 ring-slate-200
-                lg:flex-col lg:overflow-visible">
+  <aside class="mb-4 hidden lg:sticky lg:top-4 lg:mb-0 lg:block">
+    <nav id="adm-menu" class="flex flex-col gap-1 rounded-2xl bg-white p-2 shadow-sm ring-1 ring-slate-200">
       <p class="mt-3 hidden px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 first:mt-0 lg:block">Hoy</p>
       <button data-seccion="pendientes" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Pendientes por sede</button>
       <p class="mt-3 hidden px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 first:mt-0 lg:block">Personas</p>
@@ -34,8 +45,9 @@
       <button data-seccion="jefaturas" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Jefaturas</button>
       <button data-seccion="cambios-ficha" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Cambios de ficha</button>
       <button data-seccion="talento-humano" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Talento Humano</button>
+      <button data-seccion="sedes" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Sedes y regiones</button>
       <p class="mt-3 hidden px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 first:mt-0 lg:block">Solicitudes y documentos</p>
-      <button data-seccion="papeles" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Papeles firmados</button>
+      <button data-seccion="papeles" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Documentos firmados</button>
       <button data-seccion="tipos" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Tipos de solicitud</button>
       <button data-seccion="lineamientos" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Lineamientos</button>
       <p class="mt-3 hidden px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 first:mt-0 lg:block">Calendario y saldos</p>
@@ -129,6 +141,93 @@
     </div>
   </section>
 
+  <!-- ===== Sedes y regiones =====
+       Cada sede de Talento Humano, qué regiones del Ecuador atiende y qué
+       ciudades. La sede de cada persona sale de su ciudad. -->
+  <section data-panel="sedes" class="hidden space-y-4">
+    <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="font-medium">Sedes de Talento Humano</h2>
+          <p class="mt-0.5 max-w-2xl text-sm text-slate-600">
+            Cada persona pertenece a la sede que atiende su ciudad: Quito atiende la Sierra y la
+            Amazonía; Guayaquil, la Costa y Galápagos. Si abre una sede nueva, créela aquí y pásele
+            sus ciudades: quienes viven en ellas cambian de sede con sus trámites en curso.
+          </p>
+        </div>
+        <button type="button" id="sede-nueva" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">+ Nueva sede</button>
+      </div>
+      <div id="sedes-tarjetas" class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
+    </div>
+
+    <div id="sedes-sin-ciudad" class="hidden rounded-2xl bg-amber-50 p-5 ring-1 ring-amber-300">
+      <h2 class="font-medium text-amber-900">Ciudades que el sistema no reconoce</h2>
+      <p class="mt-0.5 text-sm text-amber-900">Estas personas quedaron en la sede de Quito porque su ciudad no
+        está registrada (o está escrita distinto). Registre la ciudad abajo o corrija la ficha de la persona.</p>
+      <ul id="sedes-sin-lista" class="mt-2 flex flex-wrap gap-2 text-sm"></ul>
+    </div>
+
+    <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <h2 class="font-medium">Ciudades</h2>
+      <form id="form-ciudad" class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_10rem_12rem_auto] lg:items-end">
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Ciudad</span>
+          <input id="ciu-nombre" maxlength="80" required placeholder="MANTA" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900 uppercase"></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Provincia</span>
+          <input id="ciu-provincia" maxlength="60" list="lista-provincias" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Región natural</span>
+          <select id="ciu-natural" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"><option value="">—</option><option value="costa">Costa</option>
+            <option value="sierra">Sierra</option><option value="amazonia">Amazonía</option><option value="insular">Galápagos</option></select></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">La atiende la sede</span>
+          <select id="ciu-sede" data-sedes class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></select></label>
+        <button class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">Guardar</button>
+      </form>
+      <datalist id="lista-provincias">
+        <option>Azuay</option><option>Bolívar</option><option>Cañar</option><option>Carchi</option>
+        <option>Chimborazo</option><option>Cotopaxi</option><option>El Oro</option><option>Esmeraldas</option>
+        <option>Galápagos</option><option>Guayas</option><option>Imbabura</option><option>Loja</option>
+        <option>Los Ríos</option><option>Manabí</option><option>Morona Santiago</option><option>Napo</option>
+        <option>Orellana</option><option>Pastaza</option><option>Pichincha</option><option>Santa Elena</option>
+        <option>Santo Domingo de los Tsáchilas</option><option>Sucumbíos</option><option>Tungurahua</option>
+        <option>Zamora Chinchipe</option>
+      </datalist>
+      <input id="ciu-buscar" type="search" placeholder="Buscar ciudad o provincia"
+             class="mt-4 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 sm:w-72">
+      <div class="mt-2 overflow-x-auto"><table class="w-full text-left text-sm">
+        <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+          <tr><th class="px-3 py-2">Ciudad</th><th class="px-3 py-2">Provincia</th><th class="px-3 py-2">Región</th>
+              <th class="px-3 py-2">Sede</th><th class="px-3 py-2 text-right">Personas</th><th></th></tr></thead>
+        <tbody id="ciu-tabla" class="divide-y divide-slate-100"></tbody>
+      </table></div>
+    </div>
+
+    <dialog id="dlg-sede" class="w-[min(100vw-1.5rem,32rem)] rounded-2xl p-0">
+      <form id="form-sede" method="dialog" class="space-y-3 p-5">
+        <h3 id="sede-titulo" class="font-medium">Nueva sede</h3>
+        <input type="hidden" id="sede-codigo">
+        <label class="block"><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Ciudad de la sede</span>
+          <input id="sede-ciudad" maxlength="60" required placeholder="Cuenca" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <label class="block"><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Nombre de la zona</span>
+          <input id="sede-nombre" maxlength="80" placeholder="Austro" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <fieldset><legend class="block text-xs font-medium uppercase tracking-wide text-slate-500">Regiones del Ecuador que atiende</legend>
+          <div class="mt-1 flex flex-wrap gap-3 text-sm">
+            <label class="flex items-center gap-1.5"><input type="checkbox" name="sede-rn" value="costa" class="h-4 w-4"> Costa</label>
+            <label class="flex items-center gap-1.5"><input type="checkbox" name="sede-rn" value="sierra" class="h-4 w-4"> Sierra</label>
+            <label class="flex items-center gap-1.5"><input type="checkbox" name="sede-rn" value="amazonia" class="h-4 w-4"> Amazonía</label>
+            <label class="flex items-center gap-1.5"><input type="checkbox" name="sede-rn" value="insular" class="h-4 w-4"> Galápagos</label>
+          </div></fieldset>
+        <label class="block"><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Correo del departamento en la sede (opcional)</span>
+          <input id="sede-correo" type="email" maxlength="120" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <label class="block"><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Descripción</span>
+          <textarea id="sede-descripcion" rows="2" maxlength="300" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></textarea></label>
+        <label id="sede-activa-caja" class="hidden items-center gap-2 text-sm"><input id="sede-activa" type="checkbox" class="h-4 w-4"> Activa</label>
+        <div class="flex justify-end gap-2 pt-2">
+          <button type="button" id="sede-cancelar" class="rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium hover:bg-slate-200">Cancelar</button>
+          <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">Guardar</button>
+        </div>
+      </form>
+    </dialog>
+  </section>
+
   <!-- ===== Talento Humano =====
        Quiénes integran el departamento y a qué buzón llegan sus avisos. El
        buzón del departamento existe porque los personales fallan en
@@ -186,7 +285,7 @@
         <label>
           <span class="block text-xs font-medium uppercase tracking-wide text-slate-500">
             Región</span>
-          <select id="th-region"
+          <select id="th-region" data-sedes
                   class="mt-1 rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
                          focus:bg-white focus:ring-2 focus:ring-slate-900">
             <option value="sierra">Sierra · Quito</option>
@@ -262,7 +361,7 @@
         <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Persona</span>
           <select id="fir-persona" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></select></label>
         <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Sede</span>
-          <select id="fir-region" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+          <select id="fir-region" data-sedes class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
             <option value="sierra">Quito</option><option value="costa">Guayaquil</option></select></label>
         <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Firma como</span>
           <input id="fir-cargo" maxlength="120" placeholder="Jefe de Talento Humano" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
@@ -618,9 +717,9 @@
   <section data-panel="papeles" class="hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
     <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
       <div>
-        <h2 class="font-medium">Papeles para firmar</h2>
+        <h2 class="font-medium">Documentos firmados</h2>
         <p class="mt-0.5 text-sm text-slate-500">
-          Lo emitido, quién lo imprimió y cuántas veces.
+          Lo emitido, quién lo imprimió, y el escaneo de lo firmado para auditoría.
         </p>
       </div>
       <div class="flex gap-2">
@@ -642,6 +741,13 @@
       hace falta otra —se extravió la firmada, se corrigió un registro antiguo—,
       se autoriza aquí con el motivo: nace con folio propio y <em>la anterior
       sigue siendo un documento válido</em>, porque está firmada.
+    </div>
+    <div class="border-b border-slate-200 bg-emerald-50 px-5 py-3 text-xs leading-relaxed text-emerald-900">
+      <strong>Archivo para auditoría.</strong> Cuando el colaborador firme, escanee el papel
+      (PDF de preferencia) y súbalo con «Subir escaneo firmado». Queda guardado en el servidor,
+      fuera de la web, con su huella SHA-256, quién lo subió y cuándo; el papel original va al
+      expediente físico. Subir el escaneo también registra la firma. Un reemplazo pide motivo
+      y conserva el archivo anterior.
     </div>
     <p id="papeles-vacio" class="hidden px-5 py-8 text-center text-sm text-slate-500"></p>
     <div id="tabla-papeles" class="overflow-x-auto"></div>
@@ -713,7 +819,7 @@
                placeholder="Elija una existente o escriba una nueva"
                class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300"></div>
       <div><label for="u-region" class="block text-sm font-medium text-slate-700">Sede</label>
-        <select id="u-region" class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300">
+        <select id="u-region" data-sedes class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300">
           <option value="sierra">Quito</option><option value="costa">Guayaquil</option>
         </select></div>
       <div><label for="u-jefe" class="block text-sm font-medium text-slate-700">Jefe inmediato</label>

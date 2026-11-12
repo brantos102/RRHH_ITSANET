@@ -20,10 +20,11 @@ jefe no necesita eso para autorizar cinco días (LOPDP, Art. 10).
 """
 from __future__ import annotations
 
+import hashlib
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 
 from ..audit import registrar
@@ -32,6 +33,7 @@ from ..errores import traducir
 from ..deps import exigir_rol, usuario_actual
 from ..reglas import papeles as reglas_papeles
 from ..documentos import armar, nombre_archivo
+from ..storage import leer_adjunto, subir_adjunto
 
 router = APIRouter(tags=["Papeles para firmar"])
 
@@ -47,7 +49,8 @@ CAMPOS = """i.id, i.user_id, i.tipo, i.request_id, i.folio,
             i.emitido_en, i.impresiones, i.ultima_impresion, i.datos,
             i.autorizado_en, i.autorizacion_motivo,
             i.autorizado_por is not null as es_reemision,
-            a.nombre as autorizado_por, i.firmado_en"""
+            a.nombre as autorizado_por, i.firmado_en,
+            i.escaneo_ruta is not null as tiene_escaneo, i.escaneo_subido_en"""
 
 
 async def _buscar(informe_id: uuid.UUID) -> dict | None:
@@ -67,7 +70,8 @@ async def mis_papeles(usuario: Usuario) -> dict:
     filas = await obtener_todos(
         """select id, tipo, folio, request_id, emitido_en,
                   impresiones, ultima_impresion,
-                  autorizado_por is not null as es_reemision
+                  autorizado_por is not null as es_reemision, firmado_en,
+                  escaneo_ruta is not null as tiene_escaneo
              from informes_firmados
             where user_id = %s
             order by emitido_en desc""",
@@ -75,7 +79,7 @@ async def mis_papeles(usuario: Usuario) -> dict:
     reemision = await obtener_uno(
         "select cfg_texto('trazabilidad_reemision') as modo")
     return {
-        "papeles": booleanos(filas, "es_reemision"),
+        "papeles": booleanos(filas, "es_reemision", "tiene_escaneo"),
         # Para que la pantalla sepa si ofrecer el botón o explicar a quién
         # pedírselo, en vez de ofrecerlo y fallar después.
         "trazabilidad_reemision": reemision["modo"],
@@ -185,16 +189,18 @@ async def listar_papeles(usuario: RRHH, q: str = "", tipo: str | None = None) ->
     filas = await obtener_todos(
         f"""select v.id, v.user_id, v.cedula, v.nombre, v.departamento, v.tipo, v.folio,
                    coalesce(v.region, 'sierra') as region,
-                   (select x.firmado_en from informes_firmados x where x.id = v.id) as firmado_en,
+                   x.firmado_en, x.escaneo_subido_en, x.escaneo_sha256,
+                   x.escaneo_ruta is not null as tiene_escaneo,
                    v.solicitud_folio, v.emitido_en, v.emitido_por, v.impresiones,
                    v.ultima_impresion, v.es_reemision, v.es_el_vigente,
                    v.autorizado_por, v.autorizacion_motivo
               from v_informes_firmados v
+              join informes_firmados x on x.id = v.id
               {donde}
              order by v.emitido_en desc
              limit 200""",
         tuple(parametros))
-    return booleanos(filas, "es_reemision", "es_el_vigente")
+    return booleanos(filas, "es_reemision", "es_el_vigente", "tiene_escaneo")
 
 
 @router.post("/admin/papeles/{user_id}/reemitir-trazabilidad")
@@ -243,3 +249,90 @@ async def registrar_firma(informe_id: uuid.UUID, request: Request, usuario: RRHH
                     detalle={"folio": informe["folio"], "de": informe["de_quien"]})
     return {"mensaje": f"Documento {informe['folio']} registrado como firmado por "
                        f"{informe['de_quien']}."}
+
+
+# ------------------------------------------------------------ escaneo firmado
+# El papel firmado es la prueba; su escaneo es lo que se presenta en una
+# auditoría sin ir al archivador. Se guarda tal cual llegó (sin recodificar:
+# lo que se audita es el archivo original) en ADJUNTOS_DIR/firmados/, fuera
+# de la web y del repositorio, con su huella SHA-256. La huella permite
+# demostrar después que el archivo no se alteró.
+ESCANEO_MAXIMO = 15 * 1024 * 1024
+ESCANEO_TIPOS = {"application/pdf": "pdf", "image/jpeg": "jpg", "image/png": "png"}
+FIRMAS_DE_ARCHIVO = {"pdf": b"%PDF", "jpg": b"\xff\xd8\xff", "png": b"\x89PNG"}
+
+
+@router.post("/admin/papeles/{informe_id}/escaneo")
+async def subir_escaneo(informe_id: uuid.UUID, request: Request, usuario: RRHH,
+                        archivo: UploadFile = File(...),
+                        motivo_reemplazo: str | None = Form(None)) -> dict:
+    """Sube el documento firmado y escaneado. Si aún no constaba como firmado,
+    queda registrado como firmado en el mismo acto."""
+    informe = await _buscar(informe_id)
+    if informe is None:
+        raise HTTPException(status_code=404, detail={"mensaje": "Ese documento no existe."})
+    contenido = await archivo.read()
+    extension = ESCANEO_TIPOS.get(archivo.content_type or "")
+    if not contenido:
+        raise HTTPException(status_code=422, detail={"mensaje": "El archivo está vacío."})
+    if len(contenido) > ESCANEO_MAXIMO:
+        raise HTTPException(status_code=413, detail={"mensaje": "El escaneo debe pesar menos de 15 MB."})
+    if extension is None or not contenido.startswith(FIRMAS_DE_ARCHIVO[extension]):
+        raise HTTPException(status_code=422, detail={
+            "mensaje": "Suba el escaneo en PDF (recomendado), JPG o PNG."})
+
+    previo = await obtener_uno(
+        "select escaneo_ruta, escaneo_sha256 from informes_firmados where id = %s", (str(informe_id),))
+    if previo and previo["escaneo_ruta"]:
+        # Reemplazar es excepcional (se escaneó mal una hoja) y deja rastro.
+        # El archivo anterior no se borra: queda en el disco y en la bitácora.
+        if len((motivo_reemplazo or "").strip()) < 10:
+            raise HTTPException(status_code=409, detail={
+                "mensaje": "Este documento ya tiene su escaneo. Para reemplazarlo indique el motivo."})
+
+    huella = hashlib.sha256(contenido).hexdigest()
+    ruta = f"firmados/{informe['user_id']}/{informe['folio']}-{huella[:12]}.{extension}"
+    await subir_adjunto(ruta, contenido, archivo.content_type)
+    from ..db import ejecutar
+    await ejecutar(
+        """UPDATE informes_firmados
+              SET escaneo_ruta = %s, escaneo_nombre = %s, escaneo_mime = %s, escaneo_bytes = %s,
+                  escaneo_sha256 = %s, escaneo_subido_por = %s, escaneo_subido_en = NOW(6),
+                  firmado_en = COALESCE(firmado_en, NOW(6)),
+                  firmado_registrado_por = COALESCE(firmado_registrado_por, %s)
+            WHERE id = %s""",
+        (ruta, (archivo.filename or "")[:160], archivo.content_type, len(contenido), huella,
+         str(usuario["id"]), str(usuario["id"]), str(informe_id)))
+    await registrar(request, "papel_escaneo_subido", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="informes_firmados",
+                    entidad_id=str(informe_id),
+                    detalle={"folio": informe["folio"], "de": informe["de_quien"],
+                             "sha256": huella, "bytes": len(contenido),
+                             "reemplaza": (previo or {}).get("escaneo_sha256"),
+                             "motivo_reemplazo": (motivo_reemplazo or "").strip() or None})
+    return {"mensaje": f"Escaneo del documento {informe['folio']} guardado.", "sha256": huella}
+
+
+@router.get("/papeles/{informe_id}/escaneo", response_class=Response)
+async def ver_escaneo(informe_id: uuid.UUID, request: Request, usuario: Usuario) -> Response:
+    """El escaneo firmado. Lo ven Talento Humano y el propio colaborador."""
+    fila = await obtener_uno(
+        """select user_id, folio, escaneo_ruta, escaneo_mime, escaneo_sha256
+             from informes_firmados where id = %s""", (str(informe_id),))
+    es_rrhh = usuario["rol"] in ("rrhh", "admin")
+    if fila is None or not fila["escaneo_ruta"] or (
+            not es_rrhh and str(fila["user_id"]) != str(usuario["id"])):
+        raise HTTPException(status_code=404, detail={"mensaje": "No hay escaneo de ese documento."})
+    contenido = await leer_adjunto(fila["escaneo_ruta"])
+    if contenido is None:
+        raise HTTPException(status_code=404, detail={
+            "mensaje": "El archivo no está en el servidor. Revise el respaldo de adjuntos."})
+    integro = hashlib.sha256(contenido).hexdigest() == fila["escaneo_sha256"]
+    await registrar(request, "papel_escaneo_visto", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="informes_firmados",
+                    entidad_id=str(informe_id), detalle={"folio": fila["folio"], "integro": integro})
+    nombre = f"{fila['folio']}-firmado.{ESCANEO_TIPOS.get(fila['escaneo_mime'], 'pdf')}"
+    return Response(contenido, media_type=fila["escaneo_mime"] or "application/octet-stream",
+                    headers={"Content-Disposition": f'inline; filename="{nombre}"',
+                             "Cache-Control": "private, no-store",
+                             "X-Integridad": "ok" if integro else "ALTERADO"})

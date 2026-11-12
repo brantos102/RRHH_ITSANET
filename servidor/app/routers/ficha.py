@@ -88,7 +88,7 @@ class CambiosLibres(BaseModel):
     telefono_alternativo: str | None = Field(None, max_length=20)
     direccion: str | None = Field(None, max_length=200)
     tipo_sangre: str | None = Field(None, max_length=3)
-    foto_url: str | None = Field(None, max_length=500)
+    # La foto ya no es una dirección que se escribe: se sube a /mi-ficha/foto.
 
 
 class SolicitudCambio(BaseModel):
@@ -128,7 +128,9 @@ async def mi_ficha(usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
                   u.tipo_sangre, u.foto_url, u.fecha_nacimiento, u.estado_civil,
                   u.fecha_ingreso, u.cargo, u.departamento, u.bodega, u.cliente,
                   u.centro_costo, u.dias_vacaciones, u.tiene_discapacidad,
-                  u.porcentaje_discapacidad, coalesce(u.region, 'sierra') as region,
+                  u.porcentaje_discapacidad, u.carnet_conadis, u.tipo_discapacidad,
+                  u.sustituto_discapacidad, u.tipo_contrato, u.contrato_fin,
+                  coalesce(u.region, 'sierra') as region,
                   r.nombre as region_nombre, r.sede as region_sede,
                   j.nombre as jefe_nombre, u.jefe_id,
                   u.cargo_confirmado_en, u.jefe_confirmado_en, u.correo_pendiente,
@@ -218,6 +220,60 @@ async def pedir_cambio(
         "mensaje": "Su solicitud quedó registrada. Talento Humano la revisará; "
                    "mientras tanto sigue vigente el dato anterior.",
     }
+
+
+class Discapacidad(BaseModel):
+    """Lo que la persona declara sobre discapacidad. Dato sensible (LOPDP
+    Art. 26): lo ven solo la persona y Talento Humano, y rige cuando Talento
+    Humano lo verifica con el carné o el certificado."""
+    tiene: bool
+    porcentaje: int | None = Field(None, ge=1, le=100)
+    tipo: Literal["fisica", "intelectual", "auditiva", "visual", "psicosocial", "multiple"] | None = None
+    carnet: str | None = Field(None, max_length=40)
+    sustituto: bool = False
+
+
+@router.post("/mi-ficha/discapacidad", status_code=status.HTTP_201_CREATED)
+async def declarar_discapacidad(
+    datos: Discapacidad, request: Request, tareas: BackgroundTasks,
+    usuario: Annotated[dict, Depends(usuario_actual)],
+) -> dict:
+    if datos.tiene and (not datos.porcentaje or not (datos.carnet or "").strip()):
+        raise HTTPException(status_code=422, detail={
+            "mensaje": "Indique el porcentaje y el número del carné o certificado."})
+    actual = await obtener_uno(
+        """select tiene_discapacidad, porcentaje_discapacidad, carnet_conadis,
+                  tipo_discapacidad, sustituto_discapacidad from users where id = %s""",
+        (usuario["id"],))
+    propuestos = {
+        "porcentaje_discapacidad": str(datos.porcentaje) if datos.tiene and datos.porcentaje else None,
+        "carnet_conadis": ((datos.carnet or "").strip() or None) if datos.tiene else None,
+        "tipo_discapacidad": datos.tipo if datos.tiene else None,
+        "tiene_discapacidad": "1" if datos.tiene else "0",
+        "sustituto_discapacidad": "1" if datos.sustituto else "0",
+    }
+    pedidos = []
+    try:
+        for campo, valor in propuestos.items():
+            previo = actual.get(campo)
+            previo = None if previo is None else str(int(previo)) if isinstance(previo, (bool, int)) \
+                else str(previo)
+            if valor is None or valor == previo:
+                continue
+            await reglas_ficha.solicitar_cambio_ficha(usuario["id"], campo, valor, None)
+            etiqueta = (await obtener_uno("select etiqueta from campos_ficha where campo = %s",
+                                          (campo,)) or {}).get("etiqueta", campo)
+            pedidos.append((etiqueta, {"1": "Sí", "0": "No"}.get(valor, valor)
+                            if campo.endswith("discapacidad") and valor in ("0", "1") else valor))
+    except Exception as exc:  # noqa: BLE001
+        raise traducir(exc) from exc
+    if not pedidos:
+        return {"mensaje": "No hay cambios respecto de lo registrado."}
+    await registrar(request, "ficha_cambio_solicitado", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], detalle={"campos": "discapacidad"})
+    await avisar_pedidos_a_rrhh(tareas, usuario["id"], usuario["nombre"], usuario["cedula"], pedidos)
+    return {"mensaje": "Registrado. Talento Humano lo verificará con su carné o certificado; "
+                       "llévelo o envíelo por el chat."}
 
 
 @router.post("/mi-ficha/correo", status_code=status.HTTP_202_ACCEPTED)

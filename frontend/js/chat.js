@@ -41,6 +41,26 @@ const ES_RRHH = ["rrhh", "admin"].includes(sesion.perfil?.rol);
 
 const PAGINA = location.pathname.split("/").pop() || "index.html";
 
+/* El asistente, igual para todos. Talento Humano también lo ve: es la forma
+   de saber qué responde antes de que lo pregunte un colaborador, y de
+   probar las respuestas que redacta en Administración. */
+const ASIS_HTML = `
+      <div id="chat-asis" class="flex min-h-[12rem] flex-1 flex-col overflow-hidden">
+        <div id="asis-mensajes" class="sin-barra flex-1 space-y-2 overflow-y-auto bg-slate-50 px-3 py-3"></div>
+        <div id="asis-chips" class="sin-barra flex gap-1.5 overflow-x-auto border-t border-slate-200 bg-white px-2 py-2"></div>
+        <form id="asis-form" class="flex items-end gap-2 border-t border-slate-200 p-2">
+          <input id="asis-texto" maxlength="300" autocomplete="off" placeholder="Pregunte, por ejemplo: ¿cuántos días tengo?"
+                 class="min-h-[2.5rem] flex-1 rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
+                        focus:bg-white focus:ring-2 focus:ring-slate-900">
+          <button type="submit" aria-label="Preguntar"
+                  class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-900 text-white hover:bg-slate-800">
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="m4 12 16-8-5 16-3-6-8-2Z"/>
+            </svg>
+          </button>
+        </form>
+      </div>`;
+
 export function montarChat() {
   if (!sesion.vigente) return;
   // Se monta desde la barra, que está en todas las pantallas; sin esta
@@ -99,22 +119,7 @@ export function montarChat() {
         <button type="button" data-modo="asistente" class="rounded-lg px-2 py-1.5 font-medium">Asistente</button>
         <button type="button" data-modo="humano" class="rounded-lg px-2 py-1.5 font-medium">Talento Humano</button>
       </div>
-      <div id="chat-asis" class="flex min-h-[12rem] flex-1 flex-col overflow-hidden">
-        <div id="asis-mensajes" class="sin-barra flex-1 space-y-2 overflow-y-auto bg-slate-50 px-3 py-3"></div>
-        <div id="asis-chips" class="sin-barra flex gap-1.5 overflow-x-auto border-t border-slate-200 bg-white px-2 py-2"></div>
-        <form id="asis-form" class="flex items-end gap-2 border-t border-slate-200 p-2">
-          <input id="asis-texto" maxlength="300" autocomplete="off" placeholder="Pregunte, por ejemplo: ¿cuántos días tengo?"
-                 class="min-h-[2.5rem] flex-1 rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300
-                        focus:bg-white focus:ring-2 focus:ring-slate-900">
-          <button type="submit" aria-label="Preguntar"
-                  class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-900 text-white hover:bg-slate-800">
-            <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" d="m4 12 16-8-5 16-3-6-8-2Z"/>
-            </svg>
-          </button>
-        </form>
-      </div>
-
+${ASIS_HTML}
       <!-- A qué sede va la consulta.
 
            Talento Humano está en Quito y en Guayaquil, y cada equipo atiende
@@ -207,7 +212,7 @@ function agregarAsistente(html) {
   const caja = $("asis-mensajes");
   caja.insertAdjacentHTML("beforeend", html);
   caja.querySelectorAll("[data-hablar]").forEach((b) => {
-    b.onclick = () => cambiarModo("humano");
+    b.onclick = () => (ES_RRHH ? modoBandeja("bandeja") : cambiarModo("humano"));
   });
   caja.scrollTop = caja.scrollHeight;
 }
@@ -454,6 +459,12 @@ function montarAtajoBandeja() {
                 class="rounded-lg p-1.5 text-slate-300 hover:bg-slate-800 hover:text-white">✕</button>
       </header>
 
+      <div id="chat-modos" class="grid grid-cols-2 gap-1 border-b border-slate-200 bg-white p-1.5 text-sm">
+        <button type="button" data-modo="bandeja" class="rounded-lg px-2 py-1.5 font-medium">Consultas</button>
+        <button type="button" data-modo="asistente" class="rounded-lg px-2 py-1.5 font-medium">Asistente</button>
+      </div>
+${ASIS_HTML}
+
       <div id="bandeja-lista" class="sin-barra min-h-[12rem] flex-1 divide-y divide-slate-100
                                      overflow-y-auto"></div>
 
@@ -486,6 +497,14 @@ function montarAtajoBandeja() {
   $("chat-burbuja").addEventListener("click", alternarBandeja);
   $("chat-cerrar").addEventListener("click", alternarBandeja);
   $("bandeja-volver").addEventListener("click", () => mostrarLista());
+  document.querySelectorAll("#chat-modos [data-modo]").forEach((b) =>
+    b.addEventListener("click", () => modoBandeja(b.dataset.modo)));
+  $("asis-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const texto = $("asis-texto").value.trim();
+    if (texto) preguntar(texto);
+  });
+  modoBandeja("bandeja", false);
   $("bandeja-cerrar-hilo").addEventListener("click", resolverHilo);
   $("chat-form").addEventListener("submit", responder);
   $("chat-texto").addEventListener("keydown", (e) => {
@@ -517,9 +536,34 @@ function alternarBandeja() {
   // En la lista, cada vuelta trae las consultas nuevas; en un hilo, sus mensajes.
   clearInterval(estado.vivo);
   estado.vivo = estado.abierto
-    ? setInterval(() => (estado.conversacion ? refrescarHilo() : cargarBandeja()), CADA)
+    ? setInterval(() => (estado.modo === "asistente" ? null
+        : estado.conversacion ? refrescarHilo() : cargarBandeja()), CADA)
     : null;
-  if (estado.abierto) { mostrarLista(); cargarBandeja(); }
+  if (estado.abierto) modoBandeja(estado.modo === "asistente" ? "asistente" : "bandeja");
+}
+
+/* Talento Humano: «Consultas» (la bandeja) o «Asistente» (lo que verá el
+   colaborador, para probar las respuestas). */
+function modoBandeja(modo, cargarAhora = true) {
+  estado.modo = modo;
+  document.querySelectorAll("#chat-modos [data-modo]").forEach((b) => {
+    b.className = `rounded-lg px-2 py-1.5 font-medium ${b.dataset.modo === modo
+      ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`;
+  });
+  const asis = modo === "asistente";
+  $("chat-asis").classList.toggle("hidden", !asis);
+  $("chat-asis").classList.toggle("flex", asis);
+  if (asis) {
+    $("bandeja-lista").classList.add("hidden");
+    $("bandeja-hilo").classList.add("hidden");
+    $("bandeja-hilo").classList.remove("flex");
+    $("bandeja-volver").classList.add("hidden");
+    $("bandeja-cerrar-hilo").classList.add("hidden");
+    $("bandeja-titulo").textContent = "Asistente";
+    if (cargarAhora) iniciarAsistente();
+  } else if (cargarAhora) {
+    mostrarLista();
+  }
 }
 
 function mostrarLista() {

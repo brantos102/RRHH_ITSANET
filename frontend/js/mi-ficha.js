@@ -43,6 +43,9 @@ const EXPEDIENTE = [
   // Con año: de la fecha de ingreso dependen los días de vacaciones, y «1 feb»
   // sin año no dice nada sobre la antigüedad, que es lo único que interesa.
   ["fecha_ingreso", "Fecha de ingreso", (v) => fecha(v)],
+  // El contrato se muestra, no se edita: lo registra Talento Humano.
+  ["tipo_contrato", "Tipo de contrato", (v) => CONTRATO[v] || v],
+  ["contrato_fin", "Fin del contrato", (v) => fecha(v)],
   ["cargo", "Cargo"],
   ["departamento", "Área"],
   ["jefe_nombre", "Jefe inmediato"],
@@ -55,6 +58,11 @@ const EXPEDIENTE = [
   ["fecha_nacimiento", "Fecha de nacimiento", (v) => fecha(v)],
   ["estado_civil", "Estado civil"],
 ];
+
+const CONTRATO = {
+  indefinido: "Indefinido", eventual: "Eventual", ocasional: "Ocasional", temporada: "De temporada",
+  obra_cierta: "Por obra cierta", prueba: "A prueba", aprendizaje: "De aprendizaje", pasantia: "Pasantía",
+};
 
 const NIVEL_TEXTO = {
   libre: "Lo corrige usted",
@@ -109,6 +117,17 @@ function pintarExpediente(filtro = "") {
     : `<p class="py-6 text-center text-sm text-slate-500">Nada coincide con esa búsqueda.</p>`;
 }
 
+const SI_NO = new Set(["tiene_discapacidad", "sustituto_discapacidad"]);
+const TIPO_DISC = { fisica: "Física", intelectual: "Intelectual", auditiva: "Auditiva", visual: "Visual",
+                    psicosocial: "Psicosocial", multiple: "Múltiple" };
+function legible(campo, valor) {
+  if (valor == null || valor === "") return valor;
+  if (SI_NO.has(campo)) return valor === "1" ? "Sí" : valor === "0" ? "No" : valor;
+  if (campo === "tipo_discapacidad") return TIPO_DISC[valor] || valor;
+  if (campo === "porcentaje_discapacidad") return `${valor} %`;
+  return valor;
+}
+
 function pintarCambios() {
   const cambios = estado.ficha.cambios || [];
   $("caja-cambios").classList.toggle("hidden", cambios.length === 0);
@@ -126,7 +145,7 @@ function pintarCambios() {
           <span class="text-xs">${texto}</span>
         </div>
         <p class="mt-1 text-slate-700">
-          ${esc(c.valor_anterior || "sin dato")} → <strong>${esc(c.valor_nuevo)}</strong>
+          ${esc(legible(c.campo, c.valor_anterior) || "sin dato")} → <strong>${esc(legible(c.campo, c.valor_nuevo))}</strong>
         </p>
         ${c.motivo_rechazo ? `<p class="mt-1 text-xs text-rose-800">${esc(c.motivo_rechazo)}</p>` : ""}
         <p class="mt-1 text-xs text-slate-500">${fechaHora(c.created_at)}</p>
@@ -170,6 +189,7 @@ function pintar() {
       "mientras tanto sigue vigente el correo de arriba.";
   }
 
+  pintarDiscapacidad();
   pintarConfirmacion();
   pintarExpediente($("buscar-campo").value);
   pintarCambios();
@@ -183,6 +203,95 @@ async function cargar() {
     avisar(err.message, true);
   }
 }
+
+/* ------------------------------------------------------- discapacidad */
+function pintarDiscapacidad() {
+  // Lo enviado y aún sin verificar se muestra en el formulario: si no,
+  // parecería que no se registró nada.
+  const enviado = Object.fromEntries((estado.ficha.cambios || [])
+    .filter((c) => c.estado === "pendiente").map((c) => [c.campo, c.valor_nuevo]));
+  const p = { ...estado.ficha.persona };
+  for (const campo of ["porcentaje_discapacidad", "tipo_discapacidad", "carnet_conadis"]) {
+    if (campo in enviado) p[campo] = enviado[campo];
+  }
+  for (const campo of ["tiene_discapacidad", "sustituto_discapacidad"]) {
+    if (campo in enviado) p[campo] = enviado[campo] === "1";
+  }
+  $("mf-disc-tiene").checked = !!p.tiene_discapacidad;
+  $("mf-disc-porcentaje").value = p.porcentaje_discapacidad || "";
+  $("mf-disc-tipo").value = p.tipo_discapacidad || "";
+  $("mf-disc-carnet").value = p.carnet_conadis || "";
+  $("mf-disc-sustituto").checked = !!p.sustituto_discapacidad;
+  mostrarCamposDiscapacidad();
+  const espera = (estado.ficha.cambios || []).some((c) => c.estado === "pendiente"
+    && /discapacidad|conadis/.test(c.campo));
+  $("mf-disc-estado").textContent = espera
+    ? "Tiene datos enviados que Talento Humano todavía no verifica."
+    : p.tiene_discapacidad ? "Verificado por Talento Humano." : "";
+}
+
+function mostrarCamposDiscapacidad() {
+  document.querySelectorAll("[data-disc]").forEach((el) =>
+    el.classList.toggle("hidden", !$("mf-disc-tiene").checked));
+}
+$("mf-disc-tiene").addEventListener("change", mostrarCamposDiscapacidad);
+
+$("form-discapacidad").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const tiene = $("mf-disc-tiene").checked;
+  try {
+    const r = await api.declararDiscapacidad({
+      tiene,
+      porcentaje: tiene ? Number($("mf-disc-porcentaje").value) || null : null,
+      tipo: tiene ? $("mf-disc-tipo").value || null : null,
+      carnet: tiene ? $("mf-disc-carnet").value.trim() || null : null,
+      sustituto: $("mf-disc-sustituto").checked,
+    });
+    avisar(r.mensaje);
+    await cargar();
+  } catch (err) {
+    avisar(err.message, true);
+  }
+});
+
+/* --------------------------------------------------------------- foto */
+async function pintarFoto() {
+  const caja = $("mf-foto");
+  const url = sesion.perfil?.tiene_foto ? await api.foto() : null;
+  if (url) {
+    caja.innerHTML = `<img src="${url}" alt="Su foto" class="h-full w-full object-cover">`;
+  } else {
+    caja.textContent = (sesion.perfil?.nombre || "?").split(" ").map((x) => x[0]).slice(0, 2).join("");
+  }
+  $("mf-foto-quitar").classList.toggle("hidden", !url);
+}
+
+$("mf-foto-archivo").addEventListener("change", async (e) => {
+  const archivo = e.target.files[0];
+  e.target.value = "";
+  if (!archivo) return;
+  if (archivo.size > 8 * 1024 * 1024) return avisar("La foto debe pesar menos de 8 MB.", true);
+  try {
+    avisar((await api.subirFoto(archivo)).mensaje);
+    sesion.actualizarPerfil({ tiene_foto: true });
+    await pintarFoto();
+    document.dispatchEvent(new CustomEvent("rrhh:foto"));
+  } catch (err) {
+    avisar(err.message, true);
+  }
+});
+
+$("mf-foto-quitar").addEventListener("click", async () => {
+  if (!confirm("¿Quitar su foto de perfil?")) return;
+  try {
+    avisar((await api.quitarFoto()).mensaje);
+    sesion.actualizarPerfil({ tiene_foto: false });
+    await pintarFoto();
+    document.dispatchEvent(new CustomEvent("rrhh:foto"));
+  } catch (err) {
+    avisar(err.message, true);
+  }
+});
 
 /* --------------------------------------------------- cargo y jefe */
 
@@ -307,6 +416,7 @@ async function cargarDispositivos() {
 }
 
 cargar();
+pintarFoto();
 cargarDispositivos();
 montarContactos($("mf-contactos"), {
   listar: () => api.misContactos(),

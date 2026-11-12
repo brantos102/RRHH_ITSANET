@@ -322,6 +322,13 @@ export const api = {
   baseLegal: () => peticion("/admin/base-legal"),
   papelesDeTodos: (parametros = "") => peticion(`/admin/papeles${parametros}`),
   tablero: () => peticion("/tablero"),
+  explorador: () => peticion("/tablero/explorador"),
+  explorar: (q) => peticion(`/tablero/explorar?${new URLSearchParams(
+    Object.entries(q).filter(([, v]) => v !== null && v !== undefined && v !== ""))}`),
+  vistasTablero: () => peticion("/tablero/vistas"),
+  guardarVista: (d) => peticion("/tablero/vistas", { method: "POST", body: JSON.stringify(d) }),
+  cambiarVista: (id, d) => peticion(`/tablero/vistas/${id}`, { method: "PATCH", body: JSON.stringify(d) }),
+  quitarVista: (id) => peticion(`/tablero/vistas/${id}`, { method: "DELETE" }),
   tableroConfiguracion: () => peticion("/admin/tablero"),
   cambiarBloqueTablero: (clave, cambio) =>
     peticion(`/admin/tablero/${clave}`, { method: "PATCH", body: JSON.stringify(cambio) }),
@@ -437,6 +444,60 @@ export const api = {
     peticion(`/admin/asistente/respuestas/${id}`, { method: "PATCH", body: JSON.stringify(d) }),
   asistenteBorrar: (id) => peticion(`/admin/asistente/respuestas/${id}`, { method: "DELETE" }),
   registrarFirma: (id) => peticion(`/admin/papeles/${id}/firmado`, { method: "POST" }),
+  subirEscaneo: (id, archivo, motivo = "") => {
+    const fd = new FormData();
+    fd.append("archivo", archivo);
+    if (motivo) fd.append("motivo_reemplazo", motivo);
+    return peticion(`/admin/papeles/${id}/escaneo`, { method: "POST", body: fd });
+  },
+  /* El escaneo firmado se abre igual que el PDF: con la sesión en la cabecera. */
+  async abrirEscaneo(id) {
+    const r = await fetch(`${API}/papeles/${id}/escaneo`, {
+      headers: { Authorization: `Bearer ${sesion.token}` },
+    });
+    if (!r.ok) throw new ErrorApi("No se encontró el escaneo de ese documento.", r.status);
+    const tipo = r.headers.get("content-type") || "application/pdf";
+    const url = URL.createObjectURL(new Blob([await r.arrayBuffer()], { type: tipo }));
+    const ventana = window.open(url, "_blank");
+    if (!ventana) {
+      URL.revokeObjectURL(url);
+      throw new ErrorApi("El navegador bloqueó la ventana. Permita las ventanas emergentes de este sitio.", 0);
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
+    return r.headers.get("x-integridad");
+  },
+
+  // Sedes y regiones
+  sedes: () => peticion("/catalogos/sedes"),
+  sedesAdmin: () => peticion("/admin/sedes"),
+  crearSede: (d) => peticion("/admin/sedes", { method: "POST", body: JSON.stringify(d) }),
+  cambiarSede: (codigo, d) =>
+    peticion(`/admin/sedes/${encodeURIComponent(codigo)}`, { method: "PATCH", body: JSON.stringify(d) }),
+  guardarCiudad: (d) => peticion("/admin/ciudades", { method: "POST", body: JSON.stringify(d) }),
+  quitarCiudad: (ciudad) =>
+    peticion(`/admin/ciudades/${encodeURIComponent(ciudad)}`, { method: "DELETE" }),
+
+  // Ficha: discapacidad y foto
+  declararDiscapacidad: (d) =>
+    peticion("/mi-ficha/discapacidad", { method: "POST", body: JSON.stringify(d) }),
+  subirFoto: (archivo) => {
+    const fd = new FormData();
+    fd.append("archivo", archivo);
+    return peticion("/mi-ficha/foto", { method: "POST", body: fd });
+  },
+  quitarFoto: () => peticion("/mi-ficha/foto", { method: "DELETE" }),
+  /* La foto viaja con la sesión; se devuelve como dirección local del
+     navegador (blob:) o null si no tiene. */
+  async foto(userId = null) {
+    const ruta = userId ? `/personas/${encodeURIComponent(userId)}/foto` : "/mi-ficha/foto";
+    try {
+      const r = await fetch(`${API}${ruta}`, { headers: { Authorization: `Bearer ${sesion.token}` } });
+      if (!r.ok) return null;
+      return URL.createObjectURL(await r.blob());
+    } catch {
+      return null;
+    }
+  },
 
   panelConfiguracion: () => peticion("/panel/configuracion"),
   panelCambiar: (clave, cambios) =>
@@ -521,3 +582,24 @@ export const ESTADOS = {
   rechazado: { etiqueta: "Rechazada", clase: "bg-rose-100 text-rose-800 ring-rose-200" },
   cancelado: { etiqueta: "Cancelada", clase: "bg-slate-100 text-slate-600 ring-slate-200" },
 };
+
+/* Las sedes de los selectores salen del catálogo, no del HTML: así una sede
+   nueva (creada en Administración › Sedes y regiones) aparece sola en todas
+   las pantallas. Se pide una vez por pantalla. */
+let catalogoSedes = null;
+export function olvidarSedes() { catalogoSedes = null; }
+
+export async function sedesActivas() {
+  if (!catalogoSedes) catalogoSedes = api.sedes().catch(() => null);
+  return (await catalogoSedes) || [
+    { codigo: "sierra", sede: "Quito" }, { codigo: "costa", sede: "Guayaquil" }];
+}
+
+export async function llenarSedes(select, valor = null, { conNombre = false } = {}) {
+  if (!select) return;
+  const actual = valor ?? select.value;
+  const sedes = await sedesActivas();
+  select.innerHTML = sedes.map((s) =>
+    `<option value="${esc(s.codigo)}">${esc(conNombre && s.nombre ? `${s.sede} · ${s.nombre}` : s.sede)}</option>`).join("");
+  if (actual && sedes.some((s) => s.codigo === actual)) select.value = actual;
+}

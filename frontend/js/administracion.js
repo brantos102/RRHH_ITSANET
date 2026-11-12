@@ -1,5 +1,5 @@
 /* Administración: personal, tipos de solicitud, feriados, parámetros y bitácora. */
-import { api, sesion, esc, fecha, fechaHora, validarCedula } from "./api.js";
+import { api, sesion, esc, fecha, fechaHora, validarCedula, llenarSedes, sedesActivas, olvidarSedes } from "./api.js";
 import { montarNavegacion, ROL_TEXTO } from "./navegacion.js";
 import { montarBuscador } from "./buscador.js";
 import { elegirFirmante } from "./firmante.js";
@@ -34,19 +34,34 @@ const CARGADORES = {
   "cambios-ficha": cargarCambiosFicha, lineamientos: cargarLineamientos,
   jefaturas: cargarJefaturasAdmin, "talento-humano": cargarTalentoHumano,
   depuracion: cargarDepuracion, "ingreso-firmas": cargarIngresoFirmas,
-  pendientes: cargarPendientes, asistente: cargarAsistente,
+  pendientes: cargarPendientes, asistente: cargarAsistente, sedes: cargarSedes,
 };
 
+/* El selector del celular se arma con el mismo menú de escritorio: los
+   títulos de grupo pasan a ser <optgroup>. Una sola lista que mantener. */
+(() => {
+  const sel = $("adm-selector");
+  if (!sel) return;
+  let grupo = null;
+  for (const el of $("adm-menu").children) {
+    if (el.tagName === "P") {
+      grupo = document.createElement("optgroup");
+      grupo.label = el.textContent.trim();
+      sel.appendChild(grupo);
+    } else if (el.dataset.seccion) {
+      const o = new Option(el.textContent.trim(), el.dataset.seccion);
+      (grupo || sel).appendChild(o);
+    }
+  }
+  sel.addEventListener("change", () => mostrar(sel.value));
+})();
+
 function mostrar(seccion) {
+  if ($("adm-selector")) $("adm-selector").value = seccion;
   document.querySelectorAll("[data-seccion]").forEach((b) => {
     const activa = b.dataset.seccion === seccion;
     b.className = `shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium ${
       activa ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`;
-    // La cinta de pestañas ya no cabe en pantalla. Llegando por el menú
-    // lateral a una de las últimas —Jefaturas, Depuración—, el panel se
-    // abría pero la pestaña marcada quedaba fuera de la vista, y no se veía
-    // dónde estaba uno parado.
-    if (activa) b.scrollIntoView({ block: "nearest", inline: "center" });
   });
   document.querySelectorAll("[data-panel]").forEach((p) =>
     p.classList.toggle("hidden", p.dataset.panel !== seccion)
@@ -851,6 +866,15 @@ async function cargarPapelesFirmados() {
                            data-nombre="${esc(p.nombre)}"
                            class="rounded-lg px-2.5 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50">
                      Registrar firma</button>`}
+              ${p.tiene_escaneo
+                ? `<button type="button" data-ver-escaneo="${esc(p.id)}" title="SHA-256 ${esc(p.escaneo_sha256 || "")}"
+                           class="rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-100">
+                     📎 Ver firmado</button>
+                   <button type="button" data-subir-escaneo="${esc(p.id)}" data-folio="${esc(p.folio)}" data-reemplazo="1"
+                           class="rounded-lg px-2 py-1.5 text-xs text-slate-500 hover:bg-slate-100">Reemplazar</button>`
+                : `<button type="button" data-subir-escaneo="${esc(p.id)}" data-folio="${esc(p.folio)}"
+                           class="rounded-lg px-2.5 py-1.5 text-xs font-medium text-sky-700 ring-1 ring-sky-200 hover:bg-sky-50">
+                     ⬆ Subir escaneo firmado</button>`}
               <button type="button" data-ver-papel="${esc(p.id)}" data-region="${esc(p.region || "sierra")}"
                       class="rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200">
                 Imprimir</button>
@@ -876,6 +900,41 @@ document.addEventListener("click", async (e) => {
     } catch (err) {
       avisar(err.message, true);
     }
+    return;
+  }
+
+  const verEscaneo = e.target.closest("[data-ver-escaneo]");
+  if (verEscaneo) {
+    try {
+      const integridad = await api.abrirEscaneo(verEscaneo.dataset.verEscaneo);
+      if (integridad && integridad !== "ok") {
+        avisar("¡Atención! El archivo no coincide con la huella registrada: pudo ser alterado.", true);
+      }
+    } catch (err) { avisar(err.message, true); }
+    return;
+  }
+
+  const subirEscaneo = e.target.closest("[data-subir-escaneo]");
+  if (subirEscaneo) {
+    let motivo = "";
+    if (subirEscaneo.dataset.reemplazo) {
+      motivo = prompt(`El documento ${subirEscaneo.dataset.folio} ya tiene escaneo. El anterior se ` +
+                      "conserva en el servidor y en la bitácora.\n\n¿Por qué se reemplaza? (mínimo 10 caracteres)") || "";
+      if (motivo.trim().length < 10) return avisar("Indique el motivo del reemplazo.", true);
+    }
+    const entrada = document.createElement("input");
+    entrada.type = "file";
+    entrada.accept = "application/pdf,image/jpeg,image/png";
+    entrada.addEventListener("change", async () => {
+      const archivo = entrada.files[0];
+      if (!archivo) return;
+      if (archivo.size > 15 * 1024 * 1024) return avisar("El escaneo debe pesar menos de 15 MB.", true);
+      try {
+        avisar((await api.subirEscaneo(subirEscaneo.dataset.subirEscaneo, archivo, motivo.trim())).mensaje);
+        cargarPapelesFirmados();
+      } catch (err) { avisar(err.message, true); }
+    });
+    entrada.click();
     return;
   }
 
@@ -1877,7 +1936,19 @@ function hace(minutos) {
   return `hace ${Math.floor(minutos / 60)} h`;
 }
 
+/* Los botones de sede salen del catálogo: una sede nueva aparece sola. */
+let botonesSedeListos = false;
+async function botonesSedePendientes() {
+  if (botonesSedeListos) return;
+  botonesSedeListos = true;
+  const sedes = await sedesActivas();
+  $("pen-sedes").innerHTML = [["mia", "Mi sede"], ...sedes.map((x) => [x.codigo, x.sede]), ["todas", "Todas"]]
+    .map(([c, t]) => `<button data-sede="${esc(c)}" class="rounded-lg px-3 py-1.5 font-medium">${esc(t)}</button>`)
+    .join("");
+}
+
 async function cargarPendientes() {
+  await botonesSedePendientes();
   document.querySelectorAll("#pen-sedes [data-sede]").forEach((b) => {
     b.className = `rounded-lg px-3 py-1.5 font-medium ${b.dataset.sede === sedePendientes
       ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"}`;
@@ -1919,11 +1990,13 @@ async function cargarPendientes() {
     : '<li class="py-3 text-slate-500">Todavía nada hoy.</li>';
 }
 
-document.querySelectorAll("#pen-sedes [data-sede]").forEach((b) => b.addEventListener("click", () => {
+$("pen-sedes").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-sede]");
+  if (!b) return;
   sedePendientes = b.dataset.sede;
   try { localStorage.setItem("rrhh_sede_pend", sedePendientes); } catch { /* sin preferencia */ }
   cargarPendientes().catch((err) => avisar(err.message, true));
-}));
+});
 
 $("pen-lista").addEventListener("click", async (e) => {
   const atender = e.target.closest("[data-atender]");
@@ -2236,6 +2309,153 @@ async function atenderFirma(item) {
     } catch (err) { avisar(err.message, true); }
   }, 300);
 })();
+
+/* --------------------------------------------------------- sedes y regiones */
+const NATURAL = { costa: "Costa", sierra: "Sierra", amazonia: "Amazonía", insular: "Galápagos" };
+const datosSedes = { sedes: [], ciudades: [] };
+
+async function cargarSedes() {
+  const d = await api.sedesAdmin();
+  Object.assign(datosSedes, d);
+  const nombreSede = Object.fromEntries(d.sedes.map((x) => [x.codigo, x.sede]));
+  $("sedes-tarjetas").innerHTML = d.sedes.map((x) => `
+    <article class="rounded-xl p-4 ring-1 ${x.activo ? "ring-slate-200" : "bg-slate-50 opacity-70 ring-slate-200"}">
+      <div class="flex items-start justify-between gap-2">
+        <div>
+          <p class="text-lg font-semibold">${esc(x.sede)}</p>
+          <p class="text-sm text-slate-600">${esc(x.nombre)}${x.activo ? "" : " · desactivada"}</p>
+        </div>
+        <button type="button" data-editar-sede="${esc(x.codigo)}"
+                class="rounded-lg px-2.5 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100">Editar</button>
+      </div>
+      <div class="mt-2 flex flex-wrap gap-1">
+        ${(x.regiones_naturales || []).map((r) => `<span class="rounded-full bg-sky-100 px-2 py-0.5 text-xs text-sky-800">${esc(NATURAL[r] || r)}</span>`).join("")
+          || '<span class="text-xs text-amber-700">Sin regiones asignadas</span>'}
+      </div>
+      <dl class="mt-3 grid grid-cols-4 gap-2 text-center text-xs">
+        <div><dt class="text-slate-500">Personas</dt><dd class="text-base font-semibold tabular-nums">${x.personas}</dd></div>
+        <div><dt class="text-slate-500">Ciudades</dt><dd class="text-base font-semibold tabular-nums">${x.ciudades}</dd></div>
+        <div><dt class="text-slate-500">T. Humano</dt><dd class="text-base font-semibold tabular-nums ${x.talento_humano ? "" : "text-rose-600"}">${x.talento_humano}</dd></div>
+        <div><dt class="text-slate-500">Firmantes</dt><dd class="text-base font-semibold tabular-nums ${x.firmantes ? "" : "text-rose-600"}">${x.firmantes}</dd></div>
+      </dl>
+      ${x.correo ? `<p class="mt-2 truncate text-xs text-slate-500">Buzón: ${esc(x.correo)}</p>` : ""}
+      ${x.activo && !x.talento_humano ? '<p class="mt-2 text-xs text-rose-700">Nadie de Talento Humano en esta sede: sus avisos llegan a todo el equipo. Asígnelo en «Talento Humano».</p>' : ""}
+    </article>`).join("");
+  $("sedes-sin-ciudad").classList.toggle("hidden", !d.sin_ciudad.length);
+  $("sedes-sin-lista").innerHTML = d.sin_ciudad.map((c) => `
+    <li><button type="button" data-ciudad-nueva="${esc(c.ciudad === "(sin ciudad)" ? "" : c.ciudad)}"
+        class="rounded-full bg-white px-3 py-1 ring-1 ring-amber-300 hover:bg-amber-100">
+        ${esc(c.ciudad)} <b>${c.personas}</b></button></li>`).join("");
+  pintarCiudades(nombreSede);
+}
+
+function pintarCiudades(nombreSede = Object.fromEntries(datosSedes.sedes.map((x) => [x.codigo, x.sede]))) {
+  const aguja = ($("ciu-buscar").value || "").trim().toLowerCase();
+  const filas = datosSedes.ciudades.filter((c) => !aguja
+    || `${c.ciudad} ${c.provincia || ""}`.toLowerCase().includes(aguja));
+  $("ciu-tabla").innerHTML = filas.map((c) => `
+    <tr class="hover:bg-slate-50">
+      <td class="px-3 py-2 font-medium">${esc(c.ciudad)}</td>
+      <td class="px-3 py-2">${esc(c.provincia || "—")}</td>
+      <td class="px-3 py-2">${esc(NATURAL[c.region_natural] || "—")}</td>
+      <td class="px-3 py-2">${esc(nombreSede[c.region] || c.region)}</td>
+      <td class="px-3 py-2 text-right tabular-nums">${c.personas}</td>
+      <td class="px-3 py-2 text-right whitespace-nowrap">
+        <button type="button" data-editar-ciudad="${esc(c.ciudad)}" class="rounded-lg px-2 py-1 text-xs hover:bg-slate-100">Editar</button>
+        ${c.personas ? "" : `<button type="button" data-quitar-ciudad="${esc(c.ciudad)}" class="rounded-lg px-2 py-1 text-xs text-rose-700 hover:bg-rose-50">Quitar</button>`}
+      </td>
+    </tr>`).join("") || '<tr><td colspan="6" class="px-3 py-6 text-center text-slate-500">Nada coincide.</td></tr>';
+}
+
+$("ciu-buscar")?.addEventListener("input", () => pintarCiudades());
+
+$("form-ciudad")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const ciudad = $("ciu-nombre").value.trim();
+  const sede = $("ciu-sede").value;
+  const previa = datosSedes.ciudades.find((c) => c.ciudad === ciudad.toUpperCase());
+  if (previa && previa.region !== sede && previa.personas &&
+      !confirm(`${previa.personas} persona(s) de ${previa.ciudad} pasarán a la sede ` +
+               `${$("ciu-sede").selectedOptions[0].textContent}, con sus trámites en curso. ¿Continuar?`)) return;
+  try {
+    const r = await api.guardarCiudad({ ciudad, region: sede,
+      provincia: $("ciu-provincia").value.trim() || null, region_natural: $("ciu-natural").value || null });
+    avisar(r.mensaje);
+    $("form-ciudad").reset();
+    await cargarSedes();
+  } catch (err) { avisar(err.message, true); }
+});
+
+function abrirSede(codigo = null) {
+  const x = datosSedes.sedes.find((s) => s.codigo === codigo);
+  $("sede-titulo").textContent = x ? `Editar sede ${x.sede}` : "Nueva sede";
+  $("sede-codigo").value = x?.codigo || "";
+  $("sede-ciudad").value = x?.sede || "";
+  $("sede-nombre").value = x?.nombre || "";
+  $("sede-correo").value = x?.correo || "";
+  $("sede-descripcion").value = x?.descripcion || "";
+  document.querySelectorAll('input[name="sede-rn"]').forEach((c) => {
+    c.checked = (x?.regiones_naturales || []).includes(c.value);
+  });
+  $("sede-activa-caja").classList.toggle("hidden", !x);
+  $("sede-activa-caja").classList.toggle("flex", !!x);
+  $("sede-activa").checked = x ? x.activo : true;
+  $("dlg-sede").showModal();
+}
+
+$("sede-nueva")?.addEventListener("click", () => abrirSede());
+$("sede-cancelar")?.addEventListener("click", () => $("dlg-sede").close());
+$("form-sede")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const codigo = $("sede-codigo").value;
+  const datos = {
+    sede: $("sede-ciudad").value.trim(), nombre: $("sede-nombre").value.trim() || null,
+    descripcion: $("sede-descripcion").value.trim() || null,
+    regiones_naturales: [...document.querySelectorAll('input[name="sede-rn"]:checked')].map((c) => c.value),
+  };
+  const correo = $("sede-correo").value.trim();
+  try {
+    const r = codigo
+      ? await api.cambiarSede(codigo, { ...datos, correo, activo: $("sede-activa").checked })
+      : await api.crearSede({ ...datos, correo: correo || null });
+    avisar(r.mensaje);
+    $("dlg-sede").close();
+    olvidarSedes();
+    botonesSedeListos = false;
+    await cargarSedes();
+    document.querySelectorAll("select[data-sedes]").forEach((sel) => llenarSedes(sel));
+  } catch (err) { avisar(err.message, true); }
+});
+
+$("sedes-tarjetas")?.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-editar-sede]");
+  if (b) abrirSede(b.dataset.editarSede);
+});
+$("sedes-sin-lista")?.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-ciudad-nueva]");
+  if (!b) return;
+  $("ciu-nombre").value = b.dataset.ciudadNueva;
+  $("ciu-nombre").focus();
+});
+$("ciu-tabla")?.addEventListener("click", async (e) => {
+  const editar = e.target.closest("[data-editar-ciudad]");
+  if (editar) {
+    const c = datosSedes.ciudades.find((x) => x.ciudad === editar.dataset.editarCiudad);
+    $("ciu-nombre").value = c.ciudad;
+    $("ciu-provincia").value = c.provincia || "";
+    $("ciu-natural").value = c.region_natural || "";
+    $("ciu-sede").value = c.region;
+    $("ciu-nombre").scrollIntoView({ block: "center" });
+    return;
+  }
+  const quitar = e.target.closest("[data-quitar-ciudad]");
+  if (quitar && confirm(`¿Quitar ${quitar.dataset.quitarCiudad} de la lista?`)) {
+    try { avisar((await api.quitarCiudad(quitar.dataset.quitarCiudad)).mensaje); await cargarSedes(); }
+    catch (err) { avisar(err.message, true); }
+  }
+});
+
+document.querySelectorAll("select[data-sedes]").forEach((sel) => llenarSedes(sel));
 
 /* ---------------------------------------------------------------- arranque
    Al final a propósito: la sección inicial usa variables declaradas en todo

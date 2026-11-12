@@ -21,6 +21,7 @@ from ..exportar import Informe, entregar
 from ..reglas import administracion as reglas_admin
 from ..reglas import periodos
 from ..reglas import personal as reglas_personal
+from ..reglas import sedes as reglas_sedes
 from ..reglas.saldo import saldo_desglosado
 
 router = APIRouter(tags=["Administración"])
@@ -43,7 +44,7 @@ class NuevoUsuario(BaseModel):
     fecha_ingreso: date
     saldo_inicial: float | None = Field(None, description="Días que RRHH tiene en planilla")
     # La sede define qué Talento Humano atiende a la persona.
-    region: Literal["sierra", "costa"] = "sierra"
+    region: str = Field("sierra", max_length=20)
 
     @field_validator("cedula")
     @classmethod
@@ -65,7 +66,7 @@ class CambioUsuario(BaseModel):
     activo: bool | None = None
     # La ficha completa se administra desde el sistema, no desde la base:
     # sede (traslados y errores de la carga inicial), ciudad, nacimiento…
-    region: Literal["sierra", "costa"] | None = None
+    region: str | None = Field(None, max_length=20)
     ciudad: str | None = Field(None, max_length=80)
     fecha_nacimiento: date | None = None
     bodega: str | None = Field(None, max_length=120)
@@ -73,6 +74,18 @@ class CambioUsuario(BaseModel):
     direccion: str | None = Field(None, max_length=200)
     telefono_alternativo: str | None = Field(None, max_length=20)
     fecha_salida: date | None = None
+    # Lo que solo registra Talento Humano: el contrato, y los datos de
+    # discapacidad ya verificados con el carné o el certificado.
+    tipo_contrato: Literal["indefinido", "eventual", "ocasional", "temporada", "obra_cierta",
+                           "prueba", "aprendizaje", "pasantia"] | None = None
+    contrato_fin: date | None = None
+    tipo_sangre: Literal["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"] | None = None
+    tiene_discapacidad: bool | None = None
+    porcentaje_discapacidad: int | None = Field(None, ge=1, le=100)
+    carnet_conadis: str | None = Field(None, max_length=40)
+    tipo_discapacidad: Literal["fisica", "intelectual", "auditiva", "visual", "psicosocial",
+                               "multiple"] | None = None
+    sustituto_discapacidad: bool | None = None
 
 
 class CambioTipoPermiso(BaseModel):
@@ -196,6 +209,7 @@ async def _choque_de_ficha(exc: Exception, email: str | None = None,
 async def crear_usuario(datos: NuevoUsuario, request: Request, usuario: RRHH) -> dict:
     nuevo = nuevo_id()
     try:
+        await reglas_sedes.validar(datos.region)
         # La ficha y sus períodos van juntos: una persona creada sin períodos
         # vería saldo cero hasta que alguien lo notara.
         async with transaccion():
@@ -232,7 +246,17 @@ async def crear_usuario(datos: NuevoUsuario, request: Request, usuario: RRHH) ->
 async def editar_usuario(user_id: uuid.UUID, cambios: CambioUsuario,
                          request: Request, usuario: RRHH) -> dict:
     campos = {k: v for k, v in cambios.model_dump(exclude_unset=True).items() if v is not None
-              or k in ("fecha_salida", "jefe_id")}
+              or k in ("fecha_salida", "jefe_id", "contrato_fin", "carnet_conadis",
+                       "tipo_discapacidad", "porcentaje_discapacidad")}
+    if campos.get("tiene_discapacidad"):
+        previo = await obtener_uno("select porcentaje_discapacidad as p from users where id = %s",
+                                   (str(user_id),))
+        if not (campos.get("porcentaje_discapacidad") or (previo or {}).get("p")):
+            raise HTTPException(status_code=422, detail={
+                "mensaje": "Con discapacidad, indique el porcentaje (1 a 100)."})
+    if campos.get("tiene_discapacidad") is False:
+        # Sin discapacidad no quedan datos sueltos de una que ya no consta.
+        campos.update(porcentaje_discapacidad=None, carnet_conadis=None, tipo_discapacidad=None)
     if not campos:
         raise HTTPException(status_code=422, detail={"mensaje": "No indicó ningún cambio."})
 
@@ -269,6 +293,11 @@ async def editar_usuario(user_id: uuid.UUID, cambios: CambioUsuario,
     # cada vez que cambia la ciudad. Si se cambia la sede y la ciudad que
     # consta es de la otra región, la ciudad pasa a ser la de la sede; si no,
     # las dos dirían cosas distintas y la próxima edición desharía el traslado.
+    if campos.get("region"):
+        try:
+            await reglas_sedes.validar(campos["region"])
+        except Exception as exc:  # noqa: BLE001
+            raise traducir(exc) from exc
     antes = await obtener_uno("select coalesce(region, 'sierra') as region, ciudad from users "
                               "where id = %s", (str(user_id),))
     if campos.get("region"):
@@ -308,7 +337,7 @@ async def editar_usuario(user_id: uuid.UUID, cambios: CambioUsuario,
 
 class NuevoIntegranteRRHH(BaseModel):
     persona_id: uuid.UUID
-    region: Literal["sierra", "costa"] = "sierra"
+    region: str = Field("sierra", max_length=20)
 
 
 class BajaRRHH(BaseModel):
@@ -354,6 +383,7 @@ async def listar_talento_humano(usuario: RRHH) -> dict:
 async def integrar_a_talento_humano(datos: NuevoIntegranteRRHH, request: Request,
                                     usuario: RRHH) -> dict:
     try:
+        await reglas_sedes.validar(datos.region)
         fila = {"r": await reglas_admin.rrhh_integrar(datos.persona_id, datos.region,
                                                       usuario["id"])}
     except Exception as exc:  # noqa: BLE001

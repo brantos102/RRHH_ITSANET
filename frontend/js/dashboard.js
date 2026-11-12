@@ -1017,8 +1017,12 @@ function filaDePapel(p, destacado = false) {
           Folio ${esc(p.folio)} · emitido el ${fecha(p.emitido_en)}
           ${p.es_reemision ? " · reemisión autorizada" : ""}
           ${veces ? ` · impreso ${veces} ${veces === 1 ? "vez" : "veces"}` : ""}
+          ${p.firmado_en ? ` · <span class="text-emerald-700">firmado el ${fecha(p.firmado_en)}</span>` : ""}
         </p>
       </div>
+      ${p.tiene_escaneo ? `<button type="button" data-ver-escaneo="${esc(p.id)}"
+              class="shrink-0 rounded-xl bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-800
+                     ring-1 ring-emerald-200 hover:bg-emerald-100">Ver el firmado</button>` : ""}
       <button type="button" data-imprimir="${esc(p.id)}"
               class="shrink-0 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white
                      hover:bg-slate-800">
@@ -1043,6 +1047,8 @@ async function imprimirPapel(id, boton) {
 document.addEventListener("click", (e) => {
   const boton = e.target.closest("[data-imprimir]");
   if (boton) imprimirPapel(boton.dataset.imprimir, boton);
+  const firmado = e.target.closest("[data-ver-escaneo]");
+  if (firmado) api.abrirEscaneo(firmado.dataset.verEscaneo).catch((err) => avisar(err.message, true));
 });
 
 async function cargarPapeles() {

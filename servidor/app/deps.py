@@ -15,7 +15,7 @@ esquema = HTTPBearer(auto_error=False)
 SQL_PERFIL = """
     select u.id, u.cedula, u.nombre, u.email, u.rol, u.telefono, u.cargo,
            u.departamento, u.fecha_ingreso, u.dias_vacaciones, u.logros,
-           u.jefe_id, u.activo, u.region, u.ciudad, u.correo_pendiente,
+           u.jefe_id, u.activo, u.region, u.ciudad, u.correo_pendiente, u.foto_url,
            anios_cumplidos(u.fecha_ingreso) as anios_servicio,
            j.nombre as jefe_nombre
     from users u

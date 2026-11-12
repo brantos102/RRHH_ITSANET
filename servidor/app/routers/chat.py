@@ -25,6 +25,7 @@ from ..db import ejecutar, insertar, nuevo_id, obtener_todos, obtener_uno, trans
 from ..deps import exigir_rol, usuario_actual
 from ..errores import traducir
 from ..reglas.personal import rrhh_de_region
+from ..reglas.sedes import validar as validar_sede
 
 router = APIRouter(prefix="/chat", tags=["Chat con Talento Humano"])
 
@@ -40,7 +41,7 @@ class NuevoMensaje(BaseModel):
     # región y tiene su expediente en la otra, y quien pregunta por algo que
     # resuelve la otra sede. Antes no había forma de decirlo y la consulta
     # aterrizaba en la bandeja equivocada, donde nadie la esperaba.
-    region: Literal["sierra", "costa"] | None = None
+    region: str | None = Field(None, max_length=20)
 
 
 def _es_rrhh(usuario: dict) -> bool:
@@ -138,6 +139,8 @@ async def escribir(
                     detail={"mensaje": "Talento Humano responde conversaciones, no las inicia."},
                 )
             else:
+                if datos.region:
+                    await validar_sede(datos.region)
                 nueva = nuevo_id()
                 await ejecutar(
                     """insert into conversaciones (id, user_id, region, asunto)
@@ -229,7 +232,7 @@ async def cerrar(conversacion_id: str, usuario: RRHH) -> dict:
 
 @router.get("/contactos")
 async def contactos(usuario: Annotated[dict, Depends(usuario_actual)],
-                    region: Literal["sierra", "costa"] | None = None) -> dict:
+                    region: str | None = None) -> dict:
     """Con quién se puede hablar, y a qué sedes se puede escribir.
 
     La sede propia viene marcada, pero se devuelven las dos: hay quien
@@ -245,7 +248,7 @@ async def contactos(usuario: Annotated[dict, Depends(usuario_actual)],
         """select codigo, nombre, sede,
                   case sede when 'Quito' then 'UIO' when 'Guayaquil' then 'GYE'
                             else upper(left(sede, 3)) end as sigla
-             from regiones where activo order by codigo""")
+             from regiones where activo order by orden, codigo""")
 
     datos = await obtener_uno(
         "select nombre, sede from regiones where codigo = %s", (elegida,))

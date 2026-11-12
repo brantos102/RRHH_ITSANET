@@ -57,6 +57,8 @@ class Perfil(BaseModel):
     # Lo que la persona debe completar o confirmar antes de usar el sistema:
     # fecha_nacimiento, fecha_ingreso, jefe, cargo, telefono, emergencia.
     pendientes: list[str] = []
+    # Si subió foto de perfil: la pantalla la pide a /mi-ficha/foto.
+    tiene_foto: bool = False
 
 
 class Sesion(BaseModel):

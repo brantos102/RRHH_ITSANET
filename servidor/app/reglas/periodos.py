@@ -162,6 +162,30 @@ async def caducar_periodos_vencidos() -> int:
     return n
 
 
+async def devengar_todos() -> dict[str, int]:
+    """El devengo de toda la planilla, al día. Lo corre la tarea diaria.
+
+    Antes el saldo de cada persona se ponía al día solo cuando ella entraba
+    al sistema o pedía vacaciones: quien no entraba seguía con lo devengado
+    hasta su última visita, y los informes y el pasivo salían atrasados. Es
+    lo mismo que hace la hoja de Talento Humano con =DATEDIF(ingreso; hoy;
+    "M") × 1,25 más los días adicionales por antigüedad, pero guardado por
+    período: cada mes completo suma 1,25 días y, al cumplir el año, el
+    período se cierra con los días que le tocan (15, o 15 + uno por cada año
+    desde el sexto, hasta 15 adicionales; CT Art. 69).
+    """
+    personas = await obtener_todos(
+        "SELECT id FROM users WHERE activo AND fecha_ingreso IS NOT NULL AND fecha_ingreso <= CURRENT_DATE()")
+    al_dia = errores = 0
+    for p in personas:
+        try:
+            await generar_periodos_vacaciones(p["id"])
+            al_dia += 1
+        except Exception:  # noqa: BLE001 — una ficha con problemas no detiene al resto
+            errores += 1
+    return {"personas": al_dia, "con_error": errores}
+
+
 async def recalcular_saldos(user_id=None) -> int:
     """Recalcula el saldo de la ficha de una persona activa, o de todas."""
     async with transaccion():

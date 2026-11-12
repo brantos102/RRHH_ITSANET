@@ -148,7 +148,10 @@ async def aplicar_retencion() -> list[dict[str, Any]]:
 
 
 async def tarea_diaria() -> dict[str, Any]:
-    """Lo que antes hacía pg_cron cada mañana: caducar (si está activa) y avisar."""
+    """Cada mañana: devengar lo del mes a toda la planilla, caducar (si está
+    activa) y avisar."""
+    devengo = await periodos.devengar_todos()
     caducados = await periodos.caducar_periodos_vencidos()
     avisos = await generar_alertas_vacaciones()
-    return {"fecha": dt.date.today().isoformat(), "periodos_caducados": caducados, "avisos": avisos}
+    return {"fecha": dt.date.today().isoformat(), "devengo": devengo,
+            "periodos_caducados": caducados, "avisos": avisos}

@@ -254,6 +254,13 @@ $( [ -n "$CADENA" ] && echo "    SSLCertificateChainFile $CADENA" )
         Require all granted
     </Directory>
 
+    # Que el navegador pregunte siempre si cambió una pantalla (si no cambió,
+    # recibe un 304 vacío). Sin esto, tras actualizar el servidor seguía
+    # usando el HTML y el JavaScript viejos, y lo nuevo «no aparecía».
+    <FilesMatch "\.(html|js|mjs|css|json)\$">
+        Header set Cache-Control "no-cache"
+    </FilesMatch>
+
     # La API, por el mismo sitio. La IP real del colaborador la pone Apache:
     # se descarta la que mande el navegador, que podría inventarla.
     RequestHeader unset X-Forwarded-For early

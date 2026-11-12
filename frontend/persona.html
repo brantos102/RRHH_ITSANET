@@ -26,7 +26,7 @@
     <!-- Quién es -->
     <header class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
       <div class="flex flex-wrap items-start gap-4">
-        <span id="iniciales" class="grid h-14 w-14 shrink-0 place-items-center rounded-full
+        <span id="iniciales" class="grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-full
               bg-slate-900 text-lg font-semibold text-white"></span>
         <div class="min-w-0 flex-1">
           <h1 id="nombre" class="text-xl font-semibold"></h1>
@@ -62,7 +62,7 @@
         <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Otro teléfono</span>
           <input id="fi-telefono-alt" inputmode="numeric" maxlength="13" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
         <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Sede</span>
-          <select id="fi-region" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"><option value="sierra">Quito</option><option value="costa">Guayaquil</option></select></label>
+          <select id="fi-region" data-sedes class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"><option value="sierra">Quito</option><option value="costa">Guayaquil</option></select></label>
         <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Ciudad</span>
           <input id="fi-ciudad" list="fi-ciudades" maxlength="80" autocomplete="off" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
         <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Dirección</span>
@@ -79,6 +79,37 @@
           <input id="fi-bodega" maxlength="120" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
         <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Centro de costo</span>
           <input id="fi-centro" maxlength="120" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Tipo de contrato</span>
+          <select id="fi-contrato" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"><option value="">Sin registrar</option>
+            <option value="indefinido">Indefinido</option><option value="eventual">Eventual</option>
+            <option value="ocasional">Ocasional</option><option value="temporada">De temporada</option>
+            <option value="obra_cierta">Por obra cierta</option><option value="prueba">A prueba</option>
+            <option value="aprendizaje">De aprendizaje</option><option value="pasantia">Pasantía</option></select></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Fin del contrato (si es a plazo)</span>
+          <input id="fi-contrato-fin" type="date" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Tipo de sangre</span>
+          <select id="fi-sangre" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"><option value="">Sin indicar</option>
+            <option>O+</option><option>O-</option><option>A+</option><option>A-</option>
+            <option>B+</option><option>B-</option><option>AB+</option><option>AB-</option></select></label>
+        <!-- Discapacidad: dato sensible (LOPDP Art. 26). Se registra aquí ya
+             verificado con el carné o el certificado. -->
+        <fieldset class="rounded-xl p-3 ring-1 ring-slate-200 sm:col-span-2 lg:col-span-3">
+          <legend class="px-1 text-xs font-medium uppercase tracking-wide text-slate-500">Discapacidad (dato sensible)</legend>
+          <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <label class="flex items-center gap-2 text-sm"><input id="fi-disc" type="checkbox" class="h-4 w-4"> Tiene discapacidad</label>
+            <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Porcentaje</span>
+              <input id="fi-disc-porcentaje" type="number" min="1" max="100" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+            <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Tipo</span>
+              <select id="fi-disc-tipo" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"><option value="">Sin indicar</option>
+                <option value="fisica">Física</option><option value="intelectual">Intelectual</option>
+                <option value="auditiva">Auditiva</option><option value="visual">Visual</option>
+                <option value="psicosocial">Psicosocial</option><option value="multiple">Múltiple</option></select></label>
+            <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Carné / certificado</span>
+              <input id="fi-disc-carnet" maxlength="40" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+            <label class="flex items-center gap-2 text-sm sm:col-span-2 lg:col-span-4"><input id="fi-sustituto" type="checkbox" class="h-4 w-4">
+              Persona sustituta (tiene a cargo a un familiar con discapacidad, LOD Art. 48)</label>
+          </div>
+        </fieldset>
         <p id="fi-nota" class="text-xs text-slate-500 sm:col-span-2 lg:col-span-3">
           Al cambiar la sede, sus solicitudes en trámite pasan a Talento Humano de la sede nueva.</p>
         <div class="sm:col-span-2 lg:col-span-3">

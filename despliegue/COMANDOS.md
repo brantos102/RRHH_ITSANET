@@ -60,6 +60,18 @@ sudo mysqldump --single-transaction --routines --triggers rrhh > ~/bryan/rrhh_da
 ls -lh ~/bryan/rrhh_datos/respaldos/          # comprobar que pesa más de 0
 ```
 
+**Respaldo de los archivos** (certificados adjuntos, fotos de perfil y los
+escaneos de documentos firmados, que se guardan en `rrhh_datos/adjuntos/`:
+`fotos/` y `firmados/`). La base guarda la huella SHA-256 de cada escaneo; sin
+este respaldo, la auditoría tiene la huella pero no el documento:
+
+```bash
+tar -czf ~/bryan/rrhh_datos/respaldos/adjuntos_$(date +%F_%H%M).tar.gz -C ~/bryan/rrhh_datos adjuntos
+```
+
+Copie periódicamente la carpeta `respaldos/` fuera del servidor (a un disco o
+servidor de la empresa, nunca a nubes o correos personales: LOPDP).
+
 **Restaurar un respaldo** (reemplaza TODO lo actual por lo del respaldo; solo
 con autorización):
 
@@ -142,7 +154,7 @@ sudo mysql rrhh -e "UPDATE app_config SET valor = '2' WHERE clave = 'sesiones_si
 ## 10. Tareas programadas a mano
 
 ```bash
-sudo systemctl start rrhh-itsanet-tareas.service      # avisos diarios ahora (normalmente 06:50)
+sudo systemctl start rrhh-itsanet-tareas.service      # devengo, caducidad y avisos ahora (normalmente 06:50)
 .venv/bin/python mysql/tareas.py diaria               # lo mismo, viendo el resultado
 ```
 

@@ -22,65 +22,41 @@ const MODULOS = [
     ],
   },
   {
+    /* Lo del día a día de Talento Humano. Antes este grupo tenía catorce
+       opciones —la mitad de configuración— y el panel de administración
+       quedaba escondido entre ellas: «no lo encuentro». La configuración
+       pasó al grupo «Administración», de abajo. */
     id: "rrhh", texto: "Talento Humano", roles: ["rrhh", "admin"],
     opciones: [
-      // Todo lo que espera a Talento Humano, por sede y con quién lo revisa.
       { texto: "Pendientes por sede", href: "administracion.html#pendientes" },
       { texto: "Por autorizar", href: "dashboard.html#aprobaciones", contador: "pendientes" },
       { texto: "Anulaciones por resolver", href: "dashboard.html#anulaciones", contador: "anulaciones" },
       { texto: "Colaboradores", href: "colaboradores.html" },
-      // La bandeja del chat: el backend la servía desde el principio y
-      // ninguna pantalla la consumía, así que las consultas llegaban y
-      // nadie podía leerlas.
       { texto: "Mensajes", href: "mensajes.html" },
-      // Lo que el colaborador lee antes de enviar una solicitud. Estaba
-      // escrito en el HTML y lo decide Talento Humano, no el programa.
-      { texto: "Lineamientos", href: "administracion.html#lineamientos" },
-      // Lo que hay que revisar a mano tras la carga inicial, sin abrir
-      // un cliente de base de datos.
-      { texto: "Depuración", href: "administracion.html#depuracion" },
-      // Quién tiene gente a cargo. Nombrar era un cambio de rol y ya estaba;
-      // quitar no, y quitarlo a secas deja a los colaboradores pidiendo
-      // permiso a alguien que ya no puede aprobárselo.
-      { texto: "Jefaturas", href: "administracion.html#jefaturas" },
-      // Quiénes integran el departamento y a qué buzón llegan sus avisos.
-      { texto: "Talento Humano", href: "administracion.html#talento-humano" },
-      // Cómo entra por primera vez quien no tiene correo, qué se le pide, y
-      // quién firma por Talento Humano en cada sede.
-      { texto: "Ingreso y firmas", href: "administracion.html#ingreso-firmas" },
-      { texto: "Cambios de ficha", href: "administracion.html#cambios-ficha" },
-      { texto: "Días no laborables", href: "administracion.html#feriados" },
-      { texto: "Antigüedades", href: "administracion.html#antiguedades" },
-      // La bitácora es herramienta de Talento Humano, no solo del administrador:
-      // la trazabilidad de quién pidió, quién aprobó y cuándo es responsabilidad
-      // suya ante la LOPDP. El backend ya se la permitía; faltaba en el menú.
-      { texto: "Bitácora", href: "administracion.html#bitacora" },
+      { texto: "Documentos firmados", href: "administracion.html#papeles" },
     ],
   },
   {
     id: "informes", texto: "Informes", roles: ["jefe", "rrhh", "admin"],
     opciones: [
-      // Primero el tablero: es la pantalla desde la que se decide a cuál de
-      // los informes de abajo hay que entrar. Al revés —los informes
-      // primero— uno baja listas de trescientas filas para enterarse de algo
-      // que el tablero dice en una cifra.
-      { texto: "Indicadores", href: "indicadores.html", roles: ["rrhh", "admin"] },
+      // Primero el tablero: desde ahí se decide a cuál informe entrar.
+      { texto: "Tableros", href: "indicadores.html", roles: ["rrhh", "admin"] },
       { texto: "Solicitudes", href: "informes.html" },
       { texto: "Por departamento", href: "informes.html#departamentos" },
     ],
   },
   {
-    id: "admin", texto: "Administrador", roles: ["admin"],
+    /* Una sola puerta a la administración. Dentro, la pantalla tiene su
+       propio menú por temas (personas, sedes, documentos, configuración,
+       control); aquí van solo los accesos más usados. */
+    id: "admin", texto: "Administración", roles: ["rrhh", "admin"],
     opciones: [
-      // Lo primero del menú del administrador es lo que ven las 350
-      // personas al entrar. Antes eso solo se cambiaba editando el HTML.
-      { texto: "Pantalla principal", href: "pantalla-principal.html" },
+      { texto: "Panel de administración", href: "administracion.html#usuarios" },
+      { texto: "Sedes y regiones", href: "administracion.html#sedes" },
+      { texto: "Jefaturas", href: "administracion.html#jefaturas" },
       { texto: "Configuración", href: "administracion.html#configuracion" },
-      { texto: "Usuarios", href: "administracion.html#usuarios" },
-      { texto: "Tipos de solicitud", href: "administracion.html#tipos" },
-      // La bitácora no se repite aquí: ya está en Talento Humano, y el
-      // administrador ve ese grupo entero. Dos entradas al mismo sitio hacen
-      // dudar de si llevan a cosas distintas.
+      { texto: "Pantalla principal", href: "pantalla-principal.html", roles: ["admin"] },
+      { texto: "Bitácora", href: "administracion.html#bitacora" },
     ],
   },
 ];
@@ -133,6 +109,10 @@ const ICONOS_OPCION = {
   "Configuración":            'M10.3 3.3a1 1 0 0 1 1-.8h1.4a1 1 0 0 1 1 .8l.3 1.6 1.4.8 1.5-.6a1 1 0 0 1 1.2.4l.7 1.2a1 1 0 0 1-.2 1.3l-1.2 1v1.6l1.2 1a1 1 0 0 1 .2 1.3l-.7 1.2a1 1 0 0 1-1.2.4l-1.5-.6-1.4.8-.3 1.6a1 1 0 0 1-1 .8h-1.4a1 1 0 0 1-1-.8M14.5 12a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z',
   "Usuarios":                 'M17 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9.5 6.5a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0Z',
   "Tipos de solicitud":       'M4 7h16M4 12h10M4 17h7',
+  "Panel de administración":  'M4 5h6v6H4V5Zm10 0h6v6h-6V5ZM4 15h6v4H4v-4Zm10 0h6v4h-6v-4Z',
+  "Sedes y regiones":         'M12 21s-7-6.1-7-11.5a7 7 0 1 1 14 0C19 14.9 12 21 12 21Zm0-9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z',
+  "Documentos firmados":      'M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Zm7 0v5h5M9 15l2 2 4-4',
+  "Tableros":                 'M3 3v18h18M7 17v-5m5 5V8m5 9v-7',
 };
 
 const iconoOpcion = (texto) => `
@@ -290,9 +270,10 @@ export function montarNavegacion(contenedor, { activo = "panel", contadores = {}
   const pie = `
     <div class="mt-auto border-t border-slate-800 pt-3">
       <div class="flex items-center gap-2 px-3 py-2">
-        <span class="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-700 text-xs font-semibold">
+        <a href="mi-ficha.html" data-avatar title="Mi ficha y foto"
+           class="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full bg-slate-700 text-xs font-semibold">
           ${esc(iniciales)}
-        </span>
+        </a>
         <div class="min-w-0 flex-1">
           <p class="truncate text-sm font-medium text-white">${esc(perfil.nombre)}</p>
           <p class="truncate text-xs text-slate-400">${esc(ROL_TEXTO[perfil.rol] || perfil.rol)}</p>
@@ -391,11 +372,26 @@ export function montarNavegacion(contenedor, { activo = "panel", contadores = {}
 
   montarBuscadorDePersonas(contenedor);
   montarNotificaciones(contenedor);
+  ponerFoto(contenedor);
+  document.addEventListener("rrhh:foto", () => ponerFoto(contenedor));
   // El chat se monta desde aquí y no desde cada pantalla: antes solo lo
   // llamaba el panel, de modo que en el calendario, los informes o
   // administración la burbuja desaparecía sin explicación.
   import("./chat.js").then((m) => m.montarChat()).catch(() => {
     /* si el módulo falla, la pantalla sigue siendo usable */
+  });
+}
+
+/* La foto de perfil en el pie de la barra, si la persona subió una. Se pide
+   una vez por pantalla; sin foto quedan las iniciales. */
+async function ponerFoto(contenedor) {
+  const perfil = sesion.perfil;
+  const avatares = contenedor.querySelectorAll("[data-avatar]");
+  if (!avatares.length) return;
+  const iniciales = (perfil?.nombre || "?").split(" ").map((p) => p[0]).slice(0, 2).join("");
+  const url = perfil?.tiene_foto ? await api.foto() : null;
+  avatares.forEach((a) => {
+    a.innerHTML = url ? `<img src="${url}" alt="" class="h-full w-full object-cover">` : esc(iniciales);
   });
 }
 

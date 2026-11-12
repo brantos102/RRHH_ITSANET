@@ -162,6 +162,25 @@ async def resolver_cambio_ficha(cambio_id: int, aprobar: bool, por, motivo: str 
         if aprobar and cambio["campo"] in CAMPOS_INFORMATIVOS:
             pass        # atendido: lo que pedía se hace a mano (registrar al jefe)
         elif aprobar:
+            # Discapacidad: el porcentaje va con el «sí». Si está pendiente
+            # aparte, se aplica junto, para no chocar con la regla de la base
+            # (con discapacidad, porcentaje entre 1 y 100).
+            if cambio["campo"] == "tiene_discapacidad" and cambio["valor_nuevo"] == "1":
+                junto = await obtener_uno(
+                    """SELECT id, valor_nuevo FROM cambios_ficha
+                        WHERE user_id = %s AND campo = 'porcentaje_discapacidad'
+                          AND estado = 'pendiente' FOR UPDATE""", (cambio["user_id"],))
+                if junto:
+                    await ejecutar("UPDATE users SET porcentaje_discapacidad = %s WHERE id = %s",
+                                   (junto["valor_nuevo"], cambio["user_id"]))
+                    await ejecutar(
+                        """UPDATE cambios_ficha SET estado = 'aprobado', resuelto_por = %s,
+                                  resuelto_en = NOW(6) WHERE id = %s""", (por, junto["id"]))
+                tiene = await obtener_uno("SELECT porcentaje_discapacidad AS p FROM users WHERE id = %s",
+                                          (cambio["user_id"],))
+                if not (tiene or {}).get("p"):
+                    raise ReglaDeNegocio("Falta el porcentaje de discapacidad: regístrelo en la "
+                                         "ficha completa antes de aprobar.")
             # MySQL convierte el texto al tipo de la columna (fecha, id...)
             # al asignarlo; en PostgreSQL hacía falta un cast explícito.
             columna = await _columna_de_users(cambio["campo"])

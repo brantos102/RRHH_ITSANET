@@ -148,7 +148,26 @@ async def _papeles(_: dict) -> dict:
                         "emitidos": f["emitidos"]}}
 
 
+async def _cuota_discapacidad(ajustes: dict) -> dict:
+    try:
+        porcentaje = float(ajustes.get("porcentaje", 4))
+    except (TypeError, ValueError):
+        porcentaje = 4.0
+    f = await obtener_uno(
+        """SELECT COALESCE(SUM(u.tiene_discapacidad), 0) AS con_discapacidad,
+                  COALESCE(SUM(u.sustituto_discapacidad AND NOT u.tiene_discapacidad), 0) AS sustitutos,
+                  COUNT(*) AS de
+             FROM users u WHERE u.activo""")
+    requeridas = int(-(-f["de"] * porcentaje // 100)) if f["de"] >= 25 else 0   # hacia arriba
+    cuentan = int(f["con_discapacidad"]) + int(f["sustitutos"])
+    return {"cifra": cuentan,
+            "detalle": {"con_discapacidad": f["con_discapacidad"], "sustitutos": f["sustitutos"],
+                        "requeridas": requeridas, "faltan": max(requeridas - cuentan, 0),
+                        "porcentaje": porcentaje, "de": f["de"]}}
+
+
 CALCULOS: dict[str, Callable[[dict], Awaitable[dict]]] = {
+    "cuota_discapacidad": _cuota_discapacidad,
     "ausentes_hoy": _ausentes_hoy, "activos": _activos, "por_aprobar": _por_aprobar,
     "sin_jefe": _sin_jefe, "pasivo": _pasivo, "crecimiento": _crecimiento,
     "por_area": _por_area, "expedientes": _expedientes, "papeles": _papeles,
@@ -174,3 +193,142 @@ async def tablero_indicadores(claves: list[str] | None = None) -> list[dict[str,
         resultado.append({"clave": b["clave"], "datos": para_json(datos)})
     return resultado
 
+
+
+# ------------------------------------------------------------------ explorador
+"""El explorador: una MEDIDA agrupada por una DIMENSIÓN, con filtros.
+
+Es lo que en Power BI se arma arrastrando un campo a «valores» y otro a
+«ejes». Aquí las medidas y las dimensiones son una lista cerrada: el SQL se
+arma solo con piezas de estas tablas, nunca con texto que llegue del
+navegador. Y todo es agregado: no hay dimensión «persona».
+"""
+
+# (origen, valor, fecha del hecho o None, descripción)
+MEDIDAS: dict[str, dict[str, Any]] = {
+    "personas": {"titulo": "Personas activas", "desde": "users u", "donde": "u.activo",
+                 "valor": "COUNT(*)", "fecha": None},
+    "saldo_dias": {"titulo": "Días de vacaciones por gozar", "desde": "users u", "donde": "u.activo",
+                   "valor": "ROUND(SUM(u.dias_vacaciones), 1)", "fecha": None},
+    "saldo_promedio": {"titulo": "Saldo promedio (días)", "desde": "users u", "donde": "u.activo",
+                       "valor": "ROUND(AVG(u.dias_vacaciones), 1)", "fecha": None},
+    "dias_gozados": {"titulo": "Días de vacaciones gozados",
+                     "desde": "v_historial_vacaciones h JOIN users u ON u.id = h.user_id",
+                     "donde": "TRUE", "valor": "ROUND(SUM(h.dias), 1)", "fecha": "h.fecha_inicio"},
+    "solicitudes": {"titulo": "Solicitudes", "desde": "requests r JOIN users u ON u.id = r.user_id",
+                    "donde": "TRUE", "valor": "COUNT(*)", "fecha": "DATE(r.created_at)"},
+    "altas": {"titulo": "Ingresos (altas)", "desde": "users u", "donde": "u.fecha_ingreso IS NOT NULL",
+              "valor": "COUNT(*)", "fecha": "u.fecha_ingreso"},
+    "bajas": {"titulo": "Salidas (bajas)", "desde": "users u", "donde": "u.fecha_salida IS NOT NULL",
+              "valor": "COUNT(*)", "fecha": "u.fecha_salida"},
+}
+
+DIMENSIONES: dict[str, dict[str, Any]] = {
+    "total": {"titulo": "Total", "expr": "'Total'"},
+    "sede": {"titulo": "Sede", "expr": "COALESCE(g.sede, u.region, 'Quito')"},
+    "area": {"titulo": "Área", "expr": "COALESCE(NULLIF(TRIM(u.departamento), ''), '(sin área)')"},
+    "ciudad": {"titulo": "Ciudad", "expr": "COALESCE(NULLIF(TRIM(u.ciudad), ''), '(sin ciudad)')"},
+    "cargo": {"titulo": "Cargo", "expr": "COALESCE(NULLIF(TRIM(u.cargo), ''), '(sin cargo)')"},
+    "contrato": {"titulo": "Tipo de contrato", "expr": "COALESCE(u.tipo_contrato, '(sin registrar)')"},
+    "genero": {"titulo": "Género", "expr": "COALESCE(NULLIF(u.genero, ''), '(sin dato)')"},
+    "antiguedad": {"titulo": "Antigüedad", "orden_propio": True, "expr": """CASE
+        WHEN TIMESTAMPDIFF(YEAR, u.fecha_ingreso, CURRENT_DATE()) < 1 THEN '1. Menos de 1 año'
+        WHEN TIMESTAMPDIFF(YEAR, u.fecha_ingreso, CURRENT_DATE()) <= 5 THEN '2. 1 a 5 años'
+        WHEN TIMESTAMPDIFF(YEAR, u.fecha_ingreso, CURRENT_DATE()) <= 10 THEN '3. 6 a 10 años'
+        WHEN TIMESTAMPDIFF(YEAR, u.fecha_ingreso, CURRENT_DATE()) <= 20 THEN '4. 11 a 20 años'
+        ELSE '5. Más de 20 años' END"""},
+    "rol": {"titulo": "Rol en el sistema", "expr": "u.rol"},
+    "mes": {"titulo": "Mes", "orden_propio": True, "solo_con_fecha": True, "expr": None},
+    "estado": {"titulo": "Estado de la solicitud", "solo": "solicitudes", "expr": "r.estado"},
+    "tipo": {"titulo": "Vacaciones o permiso", "solo": "solicitudes",
+             "expr": "IF(r.tipo = 'vacacion', 'Vacaciones', 'Permiso')"},
+}
+
+LIMITE_CATEGORIAS = 25
+
+
+def catalogo_explorador() -> dict:
+    return {
+        "medidas": [{"clave": k, "titulo": v["titulo"], "con_periodo": v["fecha"] is not None}
+                    for k, v in MEDIDAS.items()],
+        "dimensiones": [{"clave": k, "titulo": v["titulo"],
+                         "solo_con_periodo": bool(v.get("solo_con_fecha")),
+                         "solo": v.get("solo")} for k, v in DIMENSIONES.items()],
+    }
+
+
+async def explorar(medida: str, dimension: str, filtros: dict) -> dict:
+    """[{etiqueta, valor}] de la medida por la dimensión, ya filtrado."""
+    import datetime as dt
+    from ..errores import ReglaDeNegocio
+
+    m = MEDIDAS.get(medida)
+    d = DIMENSIONES.get(dimension)
+    if m is None or d is None:
+        raise ReglaDeNegocio("Medida o dimensión desconocida.")
+    if d.get("solo") and d["solo"] != medida:
+        raise ReglaDeNegocio(f"«{d['titulo']}» solo se usa con «{MEDIDAS[d['solo']]['titulo']}».")
+    if d.get("solo_con_fecha") and m["fecha"] is None:
+        raise ReglaDeNegocio(f"«{m['titulo']}» es una foto de hoy: no se reparte por mes. "
+                             "Use Ingresos, Salidas, Solicitudes o Días gozados.")
+
+    condiciones, params = [m["donde"]], []
+    if filtros.get("sede"):
+        condiciones.append("COALESCE(u.region, 'sierra') = %s")
+        params.append(str(filtros["sede"])[:20])
+    if filtros.get("area"):
+        condiciones.append("u.departamento = %s")
+        params.append(str(filtros["area"])[:120])
+    desde = hasta = None
+    if m["fecha"] is not None:
+        hoy = dt.date.today()
+        try:
+            desde = dt.date.fromisoformat(filtros.get("desde") or "") 
+        except ValueError:
+            desde = (hoy.replace(day=1) - dt.timedelta(days=335)).replace(day=1)
+        try:
+            hasta = dt.date.fromisoformat(filtros.get("hasta") or "")
+        except ValueError:
+            hasta = hoy
+        if desde > hasta:
+            desde, hasta = hasta, desde
+        if (hasta - desde).days > 3700:
+            raise ReglaDeNegocio("El período puede abarcar hasta diez años.")
+        condiciones.append(f"{m['fecha']} BETWEEN %s AND %s")
+        params += [desde, hasta]
+        if medida == "solicitudes" and filtros.get("tipo") in ("vacacion", "permiso"):
+            condiciones.append("r.tipo = %s")
+            params.append(filtros["tipo"])
+
+    expr = d["expr"] if dimension != "mes" else f"DATE_FORMAT({m['fecha']}, '%%Y-%%m')"
+    orden = "etiqueta" if d.get("orden_propio") else "valor DESC"
+    filas = await obtener_todos(
+        f"""SELECT {expr} AS etiqueta, {m['valor']} AS valor
+              FROM {m['desde']}
+              LEFT JOIN regiones g ON g.codigo = COALESCE(u.region, 'sierra')
+             WHERE {' AND '.join(condiciones)}
+             GROUP BY etiqueta
+             ORDER BY {orden}""", tuple(params))
+    datos = [{"etiqueta": str(f["etiqueta"]).split(". ", 1)[-1] if dimension == "antiguedad"
+              else str(f["etiqueta"]), "valor": float(f["valor"] or 0)} for f in filas]
+    if dimension == "mes" and desde:
+        # Todos los meses del período, también los que no tuvieron nada: una
+        # línea que salta de marzo a julio esconde los ceros.
+        valores = {x["etiqueta"]: x["valor"] for x in datos}
+        datos, mes = [], desde.replace(day=1)
+        while mes <= hasta:
+            clave = mes.strftime("%Y-%m")
+            datos.append({"etiqueta": clave, "valor": valores.get(clave, 0.0)})
+            mes = (mes.replace(day=28) + dt.timedelta(days=4)).replace(day=1)
+    otros = None
+    if len(datos) > LIMITE_CATEGORIAS and dimension not in ("mes", "antiguedad"):
+        resto = datos[LIMITE_CATEGORIAS - 1:]
+        datos = datos[:LIMITE_CATEGORIAS - 1]
+        # Sumar promedios no tiene sentido: el resto de un promedio no se agrupa.
+        if medida != "saldo_promedio":
+            otros = {"etiqueta": f"Otros ({len(resto)})", "valor": round(sum(x["valor"] for x in resto), 1)}
+            datos.append(otros)
+    return {"medida": medida, "dimension": dimension, "titulo_medida": m["titulo"],
+            "titulo_dimension": d["titulo"], "datos": datos,
+            "periodo": {"desde": desde.isoformat(), "hasta": hasta.isoformat()} if desde else None,
+            "total": round(sum(x["valor"] for x in datos), 1) if medida != "saldo_promedio" else None}

@@ -21,10 +21,30 @@
 <main class="mx-auto max-w-3xl px-4 py-5 pb-24">
 
   <!-- ===== Quién es ===== -->
-  <section class="rounded-2xl bg-slate-900 p-5 text-white shadow-lg">
-    <p class="text-sm text-slate-300">Mi ficha personal</p>
-    <h1 id="ficha-nombre" class="mt-0.5 text-xl font-semibold">—</h1>
-    <p id="ficha-resumen" class="mt-1 text-sm text-slate-300">—</p>
+  <section class="flex items-center gap-4 rounded-2xl bg-slate-900 p-5 text-white shadow-lg">
+    <!-- Foto de perfil. Se guarda en el servidor, sin los datos ocultos que
+         trae la foto del teléfono (ubicación, modelo); la ven usted, su jefe
+         y Talento Humano. -->
+    <div class="relative shrink-0">
+      <div id="mf-foto" class="grid h-20 w-20 place-items-center overflow-hidden rounded-full bg-slate-700
+                               text-2xl font-semibold ring-2 ring-slate-600">?</div>
+      <label for="mf-foto-archivo" title="Cambiar foto"
+             class="absolute -bottom-1 -right-1 grid h-8 w-8 cursor-pointer place-items-center rounded-full
+                    bg-white text-slate-900 shadow ring-2 ring-slate-900 hover:bg-slate-100">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 8h3l2-3h6l2 3h3v11H4V8Zm8 9a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/>
+        </svg>
+        <span class="sr-only">Cambiar foto de perfil</span>
+      </label>
+      <input id="mf-foto-archivo" type="file" accept="image/jpeg,image/png,image/webp" class="hidden">
+    </div>
+    <div class="min-w-0">
+      <p class="text-sm text-slate-300">Mi ficha personal</p>
+      <h1 id="ficha-nombre" class="mt-0.5 text-xl font-semibold">—</h1>
+      <p id="ficha-resumen" class="mt-1 text-sm text-slate-300">—</p>
+      <button type="button" id="mf-foto-quitar"
+              class="mt-1 hidden text-xs text-slate-400 underline hover:text-white">Quitar foto</button>
+    </div>
   </section>
 
   <!-- ===== Lo que hay que confirmar ===== -->
@@ -128,6 +148,56 @@
         <button type="submit"
                 class="w-full rounded-xl bg-slate-900 px-4 py-2.5 font-medium text-white hover:bg-slate-800">
           Guardar
+        </button>
+      </div>
+    </form>
+  </section>
+
+  <!-- ===== Discapacidad =====
+       Dato sensible (LOPDP Art. 26). Se pide porque da derechos: permisos,
+       estabilidad reforzada y el cupo que la empresa debe cumplir (CT Art. 42
+       num. 33). Lo ven usted y Talento Humano; rige cuando Talento Humano lo
+       verifica con el carné o el certificado. -->
+  <section class="mt-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <h2 class="font-medium">Discapacidad</h2>
+    <p class="mt-1 text-sm text-slate-500">
+      Opcional. Es un dato sensible: solo lo ven usted y Talento Humano, y se usa para
+      reconocerle los permisos y protecciones de ley.
+    </p>
+    <form id="form-discapacidad" class="mt-3 grid gap-3 sm:grid-cols-2">
+      <label class="flex items-center gap-2 text-sm sm:col-span-2">
+        <input id="mf-disc-tiene" type="checkbox" class="h-4 w-4"> Tengo una discapacidad calificada
+      </label>
+      <div data-disc class="hidden">
+        <label for="mf-disc-porcentaje" class="block text-sm font-medium text-slate-700">Porcentaje</label>
+        <input id="mf-disc-porcentaje" type="number" min="1" max="100" inputmode="numeric"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+      </div>
+      <div data-disc class="hidden">
+        <label for="mf-disc-tipo" class="block text-sm font-medium text-slate-700">Tipo</label>
+        <select id="mf-disc-tipo"
+                class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+          <option value="">Prefiero no indicarlo</option>
+          <option value="fisica">Física</option><option value="intelectual">Intelectual</option>
+          <option value="auditiva">Auditiva</option><option value="visual">Visual</option>
+          <option value="psicosocial">Psicosocial</option><option value="multiple">Múltiple</option>
+        </select>
+      </div>
+      <div data-disc class="hidden sm:col-span-2">
+        <label for="mf-disc-carnet" class="block text-sm font-medium text-slate-700">
+          N.º de carné del CONADIS o del certificado del Ministerio de Salud</label>
+        <input id="mf-disc-carnet" type="text" maxlength="40"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+      </div>
+      <label class="flex items-start gap-2 text-sm sm:col-span-2">
+        <input id="mf-disc-sustituto" type="checkbox" class="mt-0.5 h-4 w-4">
+        <span>Soy persona <b>sustituta</b>: tengo a mi cargo a un familiar con discapacidad
+          (Ley Orgánica de Discapacidades, Art. 48).</span>
+      </label>
+      <p id="mf-disc-estado" class="text-xs text-slate-500 sm:col-span-2"></p>
+      <div class="sm:col-span-2">
+        <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2.5 font-medium text-white hover:bg-slate-800">
+          Enviar a Talento Humano
         </button>
       </div>
     </form>

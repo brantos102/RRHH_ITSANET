@@ -18,7 +18,7 @@
 
   <header class="mb-4 flex flex-wrap items-end justify-between gap-3">
     <div>
-      <h1 class="text-lg font-semibold">Indicadores</h1>
+      <h1 class="text-lg font-semibold">Tableros</h1>
       <p class="mt-0.5 text-sm text-slate-500">
         Se calculan al abrir la pantalla.
         <span id="calculado-en" class="text-slate-400"></span>
@@ -40,7 +40,71 @@
     <p class="rounded-2xl bg-white p-8 text-center text-sm text-slate-500 ring-1 ring-slate-200
               sm:col-span-2 lg:col-span-3">Calculando…</p>
   </div>
+
+  <!-- Gráficos que arma cada quien: una medida por una dimensión, con
+       filtros. Como en Power BI, pero con una lista cerrada de campos y solo
+       agregados (ningún nombre). Se pueden compartir con el equipo. -->
+  <section class="mt-8">
+    <div class="mb-3 flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h2 class="font-semibold">Mis gráficos</h2>
+        <p class="mt-0.5 text-sm text-slate-500">Arme los suyos: elija qué medir, cómo agruparlo y qué filtrar.
+          Los compartidos los ve todo Talento Humano.</p>
+      </div>
+      <button id="btn-nuevo-grafico" class="rounded-xl bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-800">
+        + Nuevo gráfico</button>
+    </div>
+    <div id="mis-graficos" class="grid gap-3 lg:grid-cols-2"></div>
+  </section>
 </main>
+
+<!-- ================= Diseñar un gráfico ================= -->
+<dialog id="modal-grafico" class="w-[min(100vw-1.5rem,60rem)] rounded-2xl p-0">
+  <form id="form-grafico" method="dialog" class="grid max-h-[90dvh] gap-0 overflow-y-auto md:grid-cols-[19rem_1fr]">
+    <div class="space-y-3 border-b border-slate-200 p-5 md:border-b-0 md:border-r">
+      <h2 id="grafico-titulo" class="font-semibold">Nuevo gráfico</h2>
+      <input type="hidden" id="g-id">
+      <label class="block"><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Nombre</span>
+        <input id="g-nombre" maxlength="120" required class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+      <label class="block"><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Qué medir</span>
+        <select id="g-medida" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></select></label>
+      <label class="block"><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Agrupado por</span>
+        <select id="g-dimension" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></select></label>
+      <label class="block"><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Tipo de gráfico</span>
+        <select id="g-grafico" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+          <option value="barras">Barras</option><option value="linea">Línea (por mes)</option>
+          <option value="tabla">Tabla</option><option value="cifra">Cifra grande</option></select></label>
+      <fieldset class="space-y-2 rounded-xl p-3 ring-1 ring-slate-200">
+        <legend class="px-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Filtros</legend>
+        <label class="block"><span class="text-xs text-slate-600">Sede</span>
+          <select id="g-sede" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"><option value="">Todas</option></select></label>
+        <label class="block"><span class="text-xs text-slate-600">Área</span>
+          <select id="g-area" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"><option value="">Todas</option></select></label>
+        <div id="g-periodo" class="grid grid-cols-2 gap-2">
+          <label class="block"><span class="text-xs text-slate-600">Desde</span>
+            <input id="g-desde" type="date" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+          <label class="block"><span class="text-xs text-slate-600">Hasta</span>
+            <input id="g-hasta" type="date" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        </div>
+        <label id="g-tipo-caja" class="block"><span class="text-xs text-slate-600">Vacaciones o permisos</span>
+          <select id="g-tipo" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"><option value="">Ambos</option>
+            <option value="vacacion">Vacaciones</option><option value="permiso">Permisos</option></select></label>
+      </fieldset>
+      <label class="flex items-center gap-2 text-sm"><input id="g-ancho" type="checkbox" class="h-4 w-4"> Ancho completo</label>
+      <label class="flex items-center gap-2 text-sm"><input id="g-compartida" type="checkbox" class="h-4 w-4"> Compartir con Talento Humano</label>
+    </div>
+    <div class="flex flex-col p-5">
+      <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Vista previa</p>
+      <p id="g-previa-titulo" class="mt-1 font-medium"></p>
+      <p id="g-previa-pie" class="text-xs text-slate-500"></p>
+      <div id="g-previa" class="mt-3 min-h-[12rem] flex-1"></div>
+      <div class="mt-4 flex justify-end gap-2">
+        <button type="button" data-cerrar="modal-grafico" class="rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium hover:bg-slate-200">Cancelar</button>
+        <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">Guardar en mi tablero</button>
+      </div>
+    </div>
+  </form>
+</dialog>
 
 <!-- ================= Configurar el tablero ================= -->
 <dialog id="modal-configurar" class="w-[min(100vw-1.5rem,46rem)] rounded-2xl p-0">
