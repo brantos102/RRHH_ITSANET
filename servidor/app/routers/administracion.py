@@ -496,6 +496,45 @@ async def crear_jefatura(datos: NuevaJefatura, request: Request, usuario: RRHH) 
     return fila["r"]
 
 
+class Equipo(BaseModel):
+    personas: list[uuid.UUID] = Field(..., min_length=1, max_length=500)
+
+
+@router.post("/admin/jefaturas/{jefe_id}/equipo")
+async def asignar_equipo(jefe_id: uuid.UUID, datos: Equipo, request: Request,
+                         usuario: RRHH) -> dict:
+    """Asigna de una vez a varias personas a una jefatura.
+
+    Uno por uno, desde la ficha de cada colaborador, eran 250 ediciones. Lo
+    asignado aquí rige para las solicitudes NUEVAS: las que ya están en
+    trámite siguen con el jefe que tenían. Al colaborador se le pedirá
+    confirmarlo en su próximo ingreso.
+    """
+    jefe = await obtener_uno("select nombre from v_jefaturas where id = %s", (str(jefe_id),))
+    if jefe is None:
+        raise HTTPException(status_code=422, detail={
+            "mensaje": "Esa persona no es una jefatura vigente. Nómbrela primero."})
+    ids = [str(p) for p in datos.personas if str(p) != str(jefe_id)]
+    if not ids:
+        raise HTTPException(status_code=422, detail={"mensaje": "Nadie puede ser su propio jefe."})
+    marcadores = ", ".join(["%s"] * len(ids))
+    try:
+        async with transaccion():
+            cambiadas = await ejecutar(
+                f"""update users set jefe_id = %s, jefe_confirmado_en = null
+                     where activo and id in ({marcadores})
+                       and (jefe_id is null or jefe_id <> %s)""",
+                (str(jefe_id), *ids, str(jefe_id)))
+    except Exception as exc:  # noqa: BLE001
+        raise traducir(exc) from exc
+    await registrar(request, "equipo_asignado", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="users", entidad_id=str(jefe_id),
+                    detalle={"jefe": jefe["nombre"], "personas": len(ids), "cambiadas": cambiadas})
+    return {"cambiadas": cambiadas,
+            "mensaje": f"{cambiadas} persona(s) pasan a reportar a {jefe['nombre']}."
+                       + (" Las demás ya le reportaban." if cambiadas < len(ids) else "")}
+
+
 @router.post("/admin/jefaturas/{user_id}/quitar")
 async def quitar_jefatura(user_id: uuid.UUID, datos: BajaJefatura,
                           request: Request, usuario: RRHH) -> dict:

@@ -1416,7 +1416,74 @@ function pintarJefaturas() {
 async function cargarJefaturasAdmin() {
   estado.jefaturas = await api.adminJefaturas();
   pintarJefaturas();
+  pintarJefesDelEquipo();
 }
+
+/* ---- asignar equipo en bloque ---- */
+const equipo = { gente: [], marcados: new Set() };
+
+function pintarJefesDelEquipo() {
+  const actual = $("eq-jefe").value;
+  $("eq-jefe").innerHTML = '<option value="">Elija la jefatura…</option>' + estado.jefaturas.map((j) =>
+    `<option value="${esc(j.id)}">${esc(j.nombre)}${j.departamento ? " · " + esc(j.departamento) : ""} (${j.a_cargo})</option>`).join("");
+  if (actual) $("eq-jefe").value = actual;
+  actualizarBotonEquipo();
+}
+
+function actualizarBotonEquipo() {
+  const n = equipo.marcados.size;
+  $("eq-asignar").disabled = !n || !$("eq-jefe").value;
+  $("eq-asignar").textContent = n ? `Asignar ${n} persona(s)` : "Asignar";
+  $("eq-cuantos").textContent = equipo.gente.length ? `${equipo.gente.length} mostrada(s)` : "";
+}
+
+function pintarEquipo() {
+  const jefe = $("eq-jefe").value;
+  const visibles = equipo.gente.filter((u) => String(u.id) !== jefe
+    && (!$("eq-sin-jefe").checked || !u.jefe_id));
+  $("eq-lista").innerHTML = visibles.map((u) => `
+    <li><label class="flex items-start gap-2 px-3 py-2 text-sm hover:bg-slate-50">
+      <input type="checkbox" data-eq="${esc(u.id)}" ${equipo.marcados.has(String(u.id)) ? "checked" : ""} class="mt-0.5 h-4 w-4">
+      <span class="min-w-0 flex-1"><b>${esc(u.nombre)}</b>
+        <span class="block text-xs text-slate-500">${esc([u.cargo, u.departamento].filter(Boolean).join(" · ") || "—")}
+          · jefe actual: ${u.jefe_nombre ? esc(u.jefe_nombre) : '<span class="text-rose-700">sin jefe</span>'}</span></span>
+    </label></li>`).join("");
+  $("eq-lista").querySelectorAll("[data-eq]").forEach((c) => c.addEventListener("change", () => {
+    c.checked ? equipo.marcados.add(c.dataset.eq) : equipo.marcados.delete(c.dataset.eq);
+    actualizarBotonEquipo();
+  }));
+  equipo.visibles = visibles;
+  actualizarBotonEquipo();
+}
+
+let temporizadorEquipo;
+async function buscarEquipo() {
+  try {
+    equipo.gente = await api.adminUsuarios($("eq-buscar").value.trim(), false);
+    pintarEquipo();
+  } catch (err) { avisar(err.message, true); }
+}
+$("eq-buscar").addEventListener("input", () => {
+  clearTimeout(temporizadorEquipo);
+  temporizadorEquipo = setTimeout(buscarEquipo, 300);
+});
+$("eq-sin-jefe").addEventListener("change", () => (equipo.gente.length ? pintarEquipo() : buscarEquipo()));
+$("eq-jefe").addEventListener("change", () => (equipo.gente.length ? pintarEquipo() : actualizarBotonEquipo()));
+$("eq-todos").addEventListener("click", () => {
+  (equipo.visibles || []).forEach((u) => equipo.marcados.add(String(u.id)));
+  pintarEquipo();
+});
+$("eq-ninguno").addEventListener("click", () => { equipo.marcados.clear(); pintarEquipo(); });
+$("eq-asignar").addEventListener("click", async () => {
+  const jefe = $("eq-jefe").selectedOptions[0]?.textContent || "";
+  if (!confirm(`¿Asignar ${equipo.marcados.size} persona(s) a ${jefe}?`)) return;
+  try {
+    avisar((await api.asignarEquipo($("eq-jefe").value, [...equipo.marcados])).mensaje);
+    equipo.marcados.clear();
+    await cargarJefaturasAdmin();
+    await buscarEquipo();
+  } catch (err) { avisar(err.message, true); }
+});
 
 $("jef-filtro").addEventListener("input", () => {
   if (estado.jefaturas.length) pintarJefaturas();

@@ -290,6 +290,8 @@ export const api = {
              { method: "POST", body: JSON.stringify(datos) }),
   salidas: () => peticion("/admin/salidas"),
   adminJefaturas: () => peticion("/admin/jefaturas"),
+  asignarEquipo: (jefeId, personas) =>
+    peticion(`/admin/jefaturas/${jefeId}/equipo`, { method: "POST", body: JSON.stringify({ personas }) }),
   talentoHumano: () => peticion("/admin/talento-humano"),
   integrarTalentoHumano: (persona_id, region) =>
     peticion("/admin/talento-humano",

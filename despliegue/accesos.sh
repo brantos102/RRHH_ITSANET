@@ -60,7 +60,7 @@ t "MySQL: cuentas que pueden entrar desde fuera del servidor"
      AND user NOT LIKE 'mysql.%';" 2>&1 | grep . || echo "  ninguna (correcto)"
 
 t "Permisos exactos de las cuentas del sistema"
-for cuenta in "'rrhh_app'@'localhost'" "'rrhh_lectura'@'localhost'" "'rrhh_lectura'@'127.0.0.1'"; do
+for cuenta in "'rrhh_app'@'localhost'" "'rrhh_lectura'@'localhost'" "'rrhh_lectura'@'127.0.0.1'" "'rrhh_edicion'@'localhost'" "'rrhh_edicion'@'127.0.0.1'"; do
   if "${SUDO[@]}" mysql -N -e "SHOW GRANTS FOR $cuenta" >/dev/null 2>&1; then
     echo "  $cuenta"
     "${SUDO[@]}" mysql -N -e "SHOW GRANTS FOR $cuenta" | sed 's/^/    /'

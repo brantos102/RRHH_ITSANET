@@ -205,3 +205,30 @@ async def test_ascender_a_una_jefatura_sigue_siendo_un_cambio_de_rol(
     r = await cliente.patch(f"/admin/usuarios/{jefe['id']}", headers=rrhh_auth,
                             json={"rol": "rrhh"})
     assert r.status_code == 200, r.text
+
+
+# ------------------------------------------------- asignar equipo en bloque
+async def test_asignar_equipo_de_una_vez(cliente, rrhh_auth, empleado, otra_jefatura):
+    jefe = await obtener_uno("select id from users where cedula = %s", (CEDULA_OTRA_JEFATURA,))
+    await ejecutar("update users set jefe_confirmado_en = now(6) where id = %s", (empleado["id"],))
+    r = await cliente.post(f"/admin/jefaturas/{jefe['id']}/equipo", headers=rrhh_auth,
+                           json={"personas": [empleado["id"]]})
+    assert r.status_code == 200, r.text
+    assert r.json()["cambiadas"] == 1
+    fila = await obtener_uno("select jefe_id, jefe_confirmado_en from users where id = %s",
+                             (empleado["id"],))
+    assert str(fila["jefe_id"]) == str(jefe["id"])
+    assert fila["jefe_confirmado_en"] is None, "el colaborador lo confirma en su próximo ingreso"
+
+
+async def test_solo_a_una_jefatura_vigente(cliente, rrhh_auth, empleado):
+    r = await cliente.post(f"/admin/jefaturas/{empleado['id']}/equipo", headers=rrhh_auth,
+                           json={"personas": [empleado["id"]]})
+    assert r.status_code == 422
+
+
+async def test_un_empleado_no_asigna_equipos(cliente, auth, empleado, otra_jefatura):
+    jefe = await obtener_uno("select id from users where cedula = %s", (CEDULA_OTRA_JEFATURA,))
+    r = await cliente.post(f"/admin/jefaturas/{jefe['id']}/equipo", headers=auth,
+                           json={"personas": [empleado["id"]]})
+    assert r.status_code == 403

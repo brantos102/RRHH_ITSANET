@@ -124,6 +124,8 @@ const ICONOS_OPCION = {
   "Depuración":               'M4 4h16v3l-6 6v6l-4-2v-4L4 7V4Z',
   "Jefaturas":                'M12 7a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm0 0v4m0 0H6a2 2 0 0 0-2 2v2m8-4h6a2 2 0 0 1 2 2v2M4 21h4v-4H4v4Zm12 0h4v-4h-4v4Z',
   "Talento Humano":           'M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Zm0 .5 9 6 9-6',
+  // Una pluma: quién firma, y cómo entra por primera vez la gente.
+  "Ingreso y firmas":         'M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4 11.5-11.5ZM14 6l3 3',
   "Lineamientos":             'M9 3h6a1 1 0 0 1 1 1v1h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2V4a1 1 0 0 1 1-1Zm-1 8h8m-8 4h5',
   "Configuración":            'M10.3 3.3a1 1 0 0 1 1-.8h1.4a1 1 0 0 1 1 .8l.3 1.6 1.4.8 1.5-.6a1 1 0 0 1 1.2.4l.7 1.2a1 1 0 0 1-.2 1.3l-1.2 1v1.6l1.2 1a1 1 0 0 1 .2 1.3l-.7 1.2a1 1 0 0 1-1.2.4l-1.5-.6-1.4.8-.3 1.6a1 1 0 0 1-1 .8h-1.4a1 1 0 0 1-1-.8M14.5 12a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z',
   "Usuarios":                 'M17 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9.5 6.5a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0Z',

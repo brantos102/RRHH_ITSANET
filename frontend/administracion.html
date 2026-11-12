@@ -190,8 +190,8 @@
     <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
       <h2 class="font-medium">Nombrar una jefatura</h2>
       <p class="mt-0.5 text-sm text-slate-600">
-        Busque a la persona y nómbrela. Después asígnele su gente desde la ficha
-        de cada colaborador, en Usuarios.
+        Busque a la persona y nómbrela. Después asígnele su gente aquí abajo, en
+        «Asignar equipo a una jefatura».
       </p>
       <div class="mt-3 flex flex-wrap items-end gap-3">
         <label class="min-w-0 flex-1">
@@ -207,6 +207,34 @@
                        hover:bg-slate-800 disabled:bg-slate-300">Nombrar jefatura</button>
       </div>
       <ul id="jef-candidatos" class="mt-2 space-y-1 empty:hidden"></ul>
+    </div>
+
+    <!-- Asignar equipo en bloque: elegir la jefatura, buscar a la gente
+         (por nombre, cédula, cargo o área) y asignarla de una vez. -->
+    <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <h2 class="font-medium">Asignar equipo a una jefatura</h2>
+      <p class="mt-0.5 text-sm text-slate-600">
+        Elija la jefatura, busque a las personas (por nombre, cédula, cargo o área),
+        márquelas y asígnelas de una vez. Rige para las solicitudes nuevas; cada
+        colaborador lo confirma en su próximo ingreso.
+      </p>
+      <div class="mt-3 grid gap-3 sm:grid-cols-2">
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Jefatura</span>
+          <select id="eq-jefe" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></select></label>
+        <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Buscar personas</span>
+          <input id="eq-buscar" type="search" autocomplete="off" placeholder="Ej.: Bodega, Operaciones, Pérez…"
+                 class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+      </div>
+      <div class="mt-2 flex flex-wrap items-center gap-3 text-sm">
+        <label class="flex items-center gap-2"><input id="eq-sin-jefe" type="checkbox" class="h-4 w-4"> Solo quienes no tienen jefe</label>
+        <button id="eq-todos" type="button" class="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium hover:bg-slate-200">Marcar todos los mostrados</button>
+        <button id="eq-ninguno" type="button" class="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium hover:bg-slate-200">Ninguno</button>
+        <span id="eq-cuantos" class="text-xs text-slate-500"></span>
+      </div>
+      <ul id="eq-lista" class="mt-2 max-h-80 divide-y divide-slate-100 overflow-y-auto rounded-xl ring-1 ring-slate-200 empty:hidden"></ul>
+      <button id="eq-asignar" type="button" disabled
+              class="mt-3 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:bg-slate-300">
+        Asignar</button>
     </div>
 
     <div class="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
