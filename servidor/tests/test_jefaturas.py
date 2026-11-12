@@ -232,3 +232,14 @@ async def test_un_empleado_no_asigna_equipos(cliente, auth, empleado, otra_jefat
     r = await cliente.post(f"/admin/jefaturas/{jefe['id']}/equipo", headers=auth,
                            json={"personas": [empleado["id"]]})
     assert r.status_code == 403
+
+
+async def test_asignar_equipo_con_su_area(cliente, rrhh_auth, empleado, otra_jefatura):
+    jefe = await obtener_uno("select id from users where cedula = %s", (CEDULA_OTRA_JEFATURA,))
+    r = await cliente.post(f"/admin/jefaturas/{jefe['id']}/equipo", headers=rrhh_auth,
+                           json={"personas": [empleado["id"]], "departamento": "  Bodega   Norte ",
+                                 "incluir_jefe": True})
+    assert r.status_code == 200, r.text
+    for quien in (empleado["id"], jefe["id"]):
+        fila = await obtener_uno("select departamento from users where id = %s", (str(quien),))
+        assert fila["departamento"] == "Bodega Norte"

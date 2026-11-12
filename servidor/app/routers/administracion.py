@@ -498,6 +498,10 @@ async def crear_jefatura(datos: NuevaJefatura, request: Request, usuario: RRHH) 
 
 class Equipo(BaseModel):
     personas: list[uuid.UUID] = Field(..., min_length=1, max_length=500)
+    # Opcional: deja a todas esas personas en esta área (y a la jefatura, si
+    # se pide). Vacío: el área de cada una no se toca.
+    departamento: str | None = Field(None, max_length=80)
+    incluir_jefe: bool = False
 
 
 @router.post("/admin/jefaturas/{jefe_id}/equipo")
@@ -525,14 +529,23 @@ async def asignar_equipo(jefe_id: uuid.UUID, datos: Equipo, request: Request,
                      where activo and id in ({marcadores})
                        and (jefe_id is null or jefe_id <> %s)""",
                 (str(jefe_id), *ids, str(jefe_id)))
+            area = " ".join((datos.departamento or "").split())
+            if area:
+                destino = ids + ([str(jefe_id)] if datos.incluir_jefe else [])
+                await ejecutar(
+                    f"""update users set departamento = %s
+                         where activo and id in ({", ".join(["%s"] * len(destino))})""",
+                    (area, *destino))
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
     await registrar(request, "equipo_asignado", user_id=str(usuario["id"]),
                     cedula=usuario["cedula"], entidad="users", entidad_id=str(jefe_id),
-                    detalle={"jefe": jefe["nombre"], "personas": len(ids), "cambiadas": cambiadas})
+                    detalle={"jefe": jefe["nombre"], "personas": len(ids), "cambiadas": cambiadas,
+                             "area": area or None, "area_a_la_jefatura": datos.incluir_jefe})
     return {"cambiadas": cambiadas,
             "mensaje": f"{cambiadas} persona(s) pasan a reportar a {jefe['nombre']}."
-                       + (" Las demás ya le reportaban." if cambiadas < len(ids) else "")}
+                       + (" Las demás ya le reportaban." if cambiadas < len(ids) else "")
+                       + (f" Área: {area}." if area else "")}
 
 
 @router.post("/admin/jefaturas/{user_id}/quitar")

@@ -185,6 +185,7 @@ document.addEventListener("click", async (e) => {
 
   const editar = e.target.closest("[data-editar]");
   if (editar) {
+    cargarCatalogo();
     const u = estado.usuarios.find((x) => x.id === editar.dataset.editar);
     if (!u) return;
     $("form-usuario").dataset.id = u.id;
@@ -1413,7 +1414,23 @@ function pintarJefaturas() {
     b.addEventListener("click", () => abrirBajaJefatura(b.dataset.quitarJefatura)));
 }
 
+/* Las áreas y cargos que ya existen, como sugerencias: «Operaciones» y
+   «operaciones » serían dos áreas distintas para los informes. */
+async function cargarCatalogo() {
+  // En `estado` y no en un `let` propio: la pestaña puede cargarse antes de
+  // que el módulo llegue a esta línea, y un `let` todavía no existiría.
+  if (estado.catalogoCargado) return;
+  try {
+    const c = await api.catalogoCargos();
+    $("lista-areas").innerHTML = c.areas.map((a) => `<option value="${esc(a)}">`).join("");
+    $("lista-cargos").innerHTML = [...new Set(c.cargos.map((x) => x.cargo))]
+      .map((x) => `<option value="${esc(x)}">`).join("");
+    estado.catalogoCargado = true;
+  } catch { /* sin sugerencias se escribe igual */ }
+}
+
 async function cargarJefaturasAdmin() {
+  cargarCatalogo();
   estado.jefaturas = await api.adminJefaturas();
   pintarJefaturas();
   pintarJefesDelEquipo();
@@ -1476,9 +1493,12 @@ $("eq-todos").addEventListener("click", () => {
 $("eq-ninguno").addEventListener("click", () => { equipo.marcados.clear(); pintarEquipo(); });
 $("eq-asignar").addEventListener("click", async () => {
   const jefe = $("eq-jefe").selectedOptions[0]?.textContent || "";
-  if (!confirm(`¿Asignar ${equipo.marcados.size} persona(s) a ${jefe}?`)) return;
+  const area = $("eq-area").value.trim();
+  if (!confirm(`¿Asignar ${equipo.marcados.size} persona(s) a ${jefe}?` +
+               (area ? `\nY dejarlas en el área «${area}».` : ""))) return;
   try {
-    avisar((await api.asignarEquipo($("eq-jefe").value, [...equipo.marcados])).mensaje);
+    avisar((await api.asignarEquipo($("eq-jefe").value, [...equipo.marcados],
+                                    area || null, $("eq-area-jefe").checked)).mensaje);
     equipo.marcados.clear();
     await cargarJefaturasAdmin();
     await buscarEquipo();
