@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0f172a">
+<meta name="theme-color" content="#06122B">
 <title>Administración del sistema</title>
 <link rel="icon" type="image/png" href="img/icono.png">
 <link rel="stylesheet" href="vendor/tailwind.css">
@@ -45,6 +45,8 @@
       <button data-seccion="jefaturas" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Jefaturas</button>
       <button data-seccion="cambios-ficha" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Cambios de ficha</button>
       <button data-seccion="talento-humano" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Talento Humano</button>
+      <button data-seccion="catalogo" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Cargos y áreas</button>
+      <button data-seccion="masivo" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Actualización masiva</button>
       <button data-seccion="sedes" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Sedes y regiones</button>
       <p class="mt-3 hidden px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 first:mt-0 lg:block">Solicitudes y documentos</p>
       <button data-seccion="papeles" class="shrink-0 rounded-lg px-3 py-1.5 text-left text-sm font-medium">Documentos firmados</button>
@@ -139,6 +141,97 @@
         <p class="mt-0.5 text-xs text-slate-500">Últimos 30 días.</p>
         <ul id="asis-temas" class="mt-2 divide-y divide-slate-100 text-sm"></ul>
       </div>
+    </div>
+  </section>
+
+  <!-- ===== Cargos y áreas =====
+       El catálogo oficial del que eligen los colaboradores al entrar. Renombrar
+       o unificar cambia también las fichas que lo tienen. -->
+  <section data-panel="catalogo" class="hidden space-y-4">
+    <div id="cat-fuera" class="hidden rounded-2xl bg-amber-50 p-4 ring-1 ring-amber-300">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <p class="text-sm text-amber-900"><b>En fichas pero no en el catálogo:</b> <span id="cat-fuera-lista"></span></p>
+        <button type="button" id="cat-incorporar" class="rounded-lg bg-amber-900 px-3 py-1.5 text-xs font-medium text-white">Agregarlos al catálogo</button>
+      </div>
+    </div>
+    <div class="grid gap-4 xl:grid-cols-[22rem_1fr]">
+      <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+        <h2 class="font-medium">Áreas</h2>
+        <form id="form-area" class="mt-3 flex gap-2">
+          <input id="area-nombre" maxlength="120" required placeholder="Nueva área" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900 mt-0">
+          <button class="shrink-0 rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white">Agregar</button>
+        </form>
+        <ul id="cat-areas" class="mt-3 divide-y divide-slate-100 rounded-xl ring-1 ring-slate-200"></ul>
+      </div>
+      <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+        <div class="flex flex-wrap items-end justify-between gap-2">
+          <h2 class="font-medium">Cargos</h2>
+          <label class="text-xs text-slate-500">Ver área
+            <select id="cat-filtro-area" class="mt-0.5 block rounded-lg border-0 bg-slate-50 px-2 py-1.5 text-sm text-slate-900 ring-1 ring-slate-300"><option value="">Todas</option></select></label>
+        </div>
+        <form id="form-cargo" class="mt-3 grid gap-2 sm:grid-cols-[1fr_14rem_auto]">
+          <input id="cargo-nombre" maxlength="120" required placeholder="Nuevo cargo" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900 mt-0">
+          <select id="cargo-area" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900 mt-0"><option value="">Sin área (general)</option></select>
+          <button class="rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white">Agregar</button>
+        </form>
+        <div class="mt-3 overflow-x-auto"><table class="w-full text-left text-sm">
+          <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <tr><th class="px-3 py-2">Cargo</th><th class="px-3 py-2">Área</th><th class="px-3 py-2 text-right">Personas</th><th></th></tr></thead>
+          <tbody id="cat-cargos" class="divide-y divide-slate-100"></tbody>
+        </table></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Actualización masiva =====
+       Cambiar cargo, área, jefe, ciudad, contrato… de muchas personas a la
+       vez, con un Excel, sin tocar la base: primero se ve qué cambiaría. -->
+  <section data-panel="masivo" class="hidden space-y-4">
+    <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <h2 class="font-medium">Actualización masiva por Excel</h2>
+      <ol class="mt-2 list-decimal space-y-1 pl-5 text-sm text-slate-600">
+        <li>Descargue la plantilla con los datos actuales (de todos, de un área o de una sede).</li>
+        <li>Corrija en Excel las columnas en azul. <b>Una celda vacía no cambia nada.</b></li>
+        <li>Súbala: verá persona por persona qué cambiaría, y los errores. Nada cambia todavía.</li>
+        <li>Si está bien, aplíquela con un motivo. Queda con folio y en la bitácora.</li>
+      </ol>
+      <div class="mt-4 flex flex-wrap items-end gap-2">
+        <label class="text-xs text-slate-500">Área
+          <select id="mas-area" class="mt-0.5 block rounded-lg border-0 bg-slate-50 px-2 py-2 text-sm text-slate-900 ring-1 ring-slate-300"><option value="">Todas</option></select></label>
+        <label class="text-xs text-slate-500">Sede
+          <select id="mas-sede" data-sedes class="mt-0.5 block rounded-lg border-0 bg-slate-50 px-2 py-2 text-sm text-slate-900 ring-1 ring-slate-300"></select></label>
+        <button type="button" id="mas-plantilla" class="rounded-xl bg-itsa-azul px-4 py-2 text-sm font-medium text-white hover:bg-itsa-azul-hover">⬇ Descargar plantilla</button>
+        <label class="cursor-pointer rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">⬆ Subir archivo corregido
+          <input id="mas-archivo" type="file" accept=".xlsx,.csv" class="hidden"></label>
+      </div>
+    </div>
+    <div id="mas-revision" class="hidden space-y-3 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h2 class="font-medium">Revisión <span id="mas-folio" class="font-mono text-sm text-slate-500"></span></h2>
+        <p id="mas-resumen" class="text-sm text-slate-600"></p>
+      </div>
+      <ul id="mas-errores" class="space-y-1 text-sm"></ul>
+      <div class="max-h-96 overflow-auto rounded-xl ring-1 ring-slate-200"><table class="w-full text-left text-sm">
+        <thead class="sticky top-0 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+          <tr><th class="px-3 py-2">Fila</th><th class="px-3 py-2">Persona</th><th class="px-3 py-2">Dato</th>
+              <th class="px-3 py-2">Antes</th><th class="px-3 py-2">Después</th></tr></thead>
+        <tbody id="mas-cambios" class="divide-y divide-slate-100"></tbody>
+      </table></div>
+      <form id="form-masivo" class="flex flex-wrap items-end gap-2">
+        <label class="min-w-[16rem] flex-1"><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Motivo (obligatorio)</span>
+          <input id="mas-motivo" maxlength="300" minlength="10" required placeholder="Reorganización de áreas de noviembre" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        <button type="button" id="mas-descartar" class="rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium hover:bg-slate-200">Descartar</button>
+        <button class="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">Aplicar cambios</button>
+      </form>
+    </div>
+    <div class="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+      <h2 class="border-b border-slate-200 px-5 py-3 font-medium">Cargas realizadas</h2>
+      <div class="overflow-x-auto"><table class="w-full text-left text-sm">
+        <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+          <tr><th class="px-3 py-2">Folio</th><th class="px-3 py-2">Archivo</th><th class="px-3 py-2">Estado</th>
+              <th class="px-3 py-2 text-right">Cambios</th><th class="px-3 py-2">Subió / aplicó</th><th class="px-3 py-2">Motivo</th></tr></thead>
+        <tbody id="mas-historial" class="divide-y divide-slate-100"></tbody>
+      </table></div>
     </div>
   </section>
 

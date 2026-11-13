@@ -4,7 +4,7 @@
   "description": "Control de acceso: validación de códigos QR y registro de visitas",
   "start_url": "garita.html",
   "display": "standalone",
-  "background_color": "#0f172a",
+  "background_color": "#06122B",
   "theme_color": "#1c58d7",
   "orientation": "any",
   "icons": [

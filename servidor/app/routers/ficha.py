@@ -89,6 +89,37 @@ class CambiosLibres(BaseModel):
     direccion: str | None = Field(None, max_length=200)
     tipo_sangre: str | None = Field(None, max_length=3)
     # La foto ya no es una dirección que se escribe: se sube a /mi-ficha/foto.
+    # El domicilio por partes, como se escribe en Ecuador.
+    domicilio_provincia: str | None = Field(None, max_length=60)
+    domicilio_canton: str | None = Field(None, max_length=80)
+    domicilio_parroquia: str | None = Field(None, max_length=80)
+    domicilio_calle: str | None = Field(None, max_length=120)
+    domicilio_numero: str | None = Field(None, max_length=20)
+    domicilio_interseccion: str | None = Field(None, max_length=120)
+    domicilio_referencia: str | None = Field(None, max_length=200)
+
+
+DOMICILIO = ("domicilio_calle", "domicilio_numero", "domicilio_interseccion", "domicilio_parroquia",
+             "domicilio_canton", "domicilio_provincia", "domicilio_referencia")
+
+
+def direccion_de(d: dict) -> str | None:
+    """«Av. Amazonas N34-12 y Naciones Unidas, Iñaquito, Quito, Pichincha (frente al parque)»."""
+    calle = " ".join(x for x in (d.get("domicilio_calle"), d.get("domicilio_numero")) if x)
+    if calle and d.get("domicilio_interseccion"):
+        calle += f" y {d['domicilio_interseccion']}"
+    partes = [x for x in (calle, d.get("domicilio_parroquia"), d.get("domicilio_canton"),
+                          d.get("domicilio_provincia")) if x]
+    texto = ", ".join(partes)
+    if d.get("domicilio_referencia"):
+        texto += f" ({d['domicilio_referencia']})"
+    return texto[:200] or None
+
+
+class Telefono(BaseModel):
+    numero: str = Field(..., min_length=7, max_length=20)
+    tipo: Literal["celular", "fijo", "trabajo", "otro"] = "celular"
+    etiqueta: str | None = Field(None, max_length=60)
 
 
 class SolicitudCambio(BaseModel):
@@ -130,6 +161,8 @@ async def mi_ficha(usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
                   u.centro_costo, u.dias_vacaciones, u.tiene_discapacidad,
                   u.porcentaje_discapacidad, u.carnet_conadis, u.tipo_discapacidad,
                   u.sustituto_discapacidad, u.tipo_contrato, u.contrato_fin,
+                  u.domicilio_provincia, u.domicilio_canton, u.domicilio_parroquia, u.domicilio_calle,
+                  u.domicilio_numero, u.domicilio_interseccion, u.domicilio_referencia,
                   coalesce(u.region, 'sierra') as region,
                   r.nombre as region_nombre, r.sede as region_sede,
                   j.nombre as jefe_nombre, u.jefe_id,
@@ -160,7 +193,9 @@ async def mi_ficha(usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
             where c.user_id = %s order by c.created_at desc limit 20""",
         (usuario["id"],),
     )
+    telefonos = await _telefonos(usuario["id"])
     return {
+        "telefonos": telefonos,
         "persona": {**persona,
                     "dias_vacaciones": float(persona["dias_vacaciones"] or 0),
                     "jefe_id": str(persona["jefe_id"]) if persona["jefe_id"] else None},
@@ -185,6 +220,13 @@ async def corregir_ficha(
 
     try:
         await reglas_ficha.actualizar_ficha_libre(usuario["id"], cambios)
+        if any(k in cambios for k in DOMICILIO):
+            # La dirección de una línea (la que usan documentos e informes)
+            # se arma con las partes del domicilio.
+            d = await obtener_uno(f"select {', '.join(DOMICILIO)} from users where id = %s",
+                                  (usuario["id"],))
+            await ejecutar("update users set direccion = %s where id = %s",
+                           (direccion_de(d), usuario["id"]))
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
@@ -476,18 +518,13 @@ def _digitos(v: str | None) -> str:
 async def catalogo_cargos(usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
     """Los cargos y áreas que existen en la empresa, para sugerirlos al
     escribir. No son datos personales: no dice quién ocupa cada uno."""
-    cargos = await obtener_todos(
-        """select trim(cargo) as cargo, trim(coalesce(departamento, '')) as area, count(*) as n
-             from users where activo and nullif(trim(coalesce(cargo, '')), '') is not null
-            group by trim(cargo), trim(coalesce(departamento, ''))
-            order by n desc, cargo""")
-    areas = await obtener_todos(
-        """select trim(departamento) as area, count(*) as n from users
-            where activo and nullif(trim(coalesce(departamento, '')), '') is not null
-            group by trim(departamento) order by area""")
+    # El catálogo oficial (Administración › Cargos y áreas), no lo que haya
+    # escrito en cada ficha.
+    from ..reglas import catalogo as reglas_catalogo
+    elegir = await reglas_catalogo.para_elegir()
     ciudades = await obtener_todos("select ciudad, region from ciudades_region order by ciudad")
-    return {"cargos": [{"cargo": c["cargo"], "area": c["area"] or None} for c in cargos],
-            "areas": [a["area"] for a in areas],
+    return {"cargos": [{"id": c["id"], "cargo": c["nombre"], "area": c["area"]} for c in elegir["cargos"]],
+            "areas": [a["nombre"] for a in elegir["areas"]],
             "ciudades": [{"ciudad": c["ciudad"], "region": c["region"]} for c in ciudades]}
 
 
@@ -544,7 +581,12 @@ async def guardar_ficha_inicial(
                 and len((datos.jefe_nombre_propuesto or "").split()) < 2:
             errores.append("quién es su jefe inmediato (elíjalo o escriba nombres y apellidos)")
     if "cargo" in falta:
-        if datos.cargo_correcto is None:
+        sin_cargo = not ((await obtener_uno("select nullif(trim(coalesce(cargo, '')), '') as c "
+                                            "from users where id = %s", (uid,))) or {}).get("c")
+        if sin_cargo and not (datos.cargo_propuesto or "").strip():
+            # No hay nada que confirmar: se elige del catálogo.
+            errores.append("su cargo (elíjalo de la lista)")
+        elif datos.cargo_correcto is None:
             errores.append("si su cargo es correcto")
         elif datos.cargo_correcto is False and not ((datos.cargo_propuesto or "").strip()
                                                     or (datos.departamento_propuesto or "").strip()):
@@ -616,7 +658,8 @@ async def guardar_ficha_inicial(
                 pidio = False
                 if cargo and cargo != (actual["cargo"] or ""):
                     await reglas_ficha.solicitar_cambio_ficha(
-                        uid, "cargo", cargo, "Corrección declarada por el colaborador al ingresar")
+                        uid, "cargo", cargo, "Cargo declarado por el colaborador al ingresar",
+                        permitir_bloqueado=True)
                     pedidos.append(("Cargo que indica", cargo))
                     pidio = True
                 if area and area != (actual["departamento"] or ""):
@@ -782,3 +825,75 @@ async def quitar_contacto_de(user_id: str, contacto_id: str, request: Request, u
     await registrar(request, "contacto_emergencia_quitado", user_id=str(usuario["id"]),
                     cedula=usuario["cedula"], entidad="users", entidad_id=user_id)
     return {"mensaje": "Contacto quitado.", "contactos": await _contactos(user_id)}
+
+
+# ------------------------------------------------------ teléfonos adicionales
+MAX_TELEFONOS = 5
+
+
+async def _telefonos(user_id) -> list[dict]:
+    filas = await obtener_todos(
+        "select id, numero, tipo, etiqueta from telefonos_adicionales where user_id = %s order by id",
+        (str(user_id),))
+    return [{**f, "id": int(f["id"])} for f in filas]
+
+
+async def _agregar_telefono(user_id, datos: Telefono) -> None:
+    numero = _digitos(datos.numero)
+    if len(numero) < 7:
+        raise HTTPException(status_code=422, detail={"mensaje": "El número debe tener al menos 7 dígitos."})
+    actuales = await _telefonos(user_id)
+    if len(actuales) >= MAX_TELEFONOS:
+        raise HTTPException(status_code=422, detail={
+            "mensaje": f"Puede registrar hasta {MAX_TELEFONOS} teléfonos adicionales."})
+    if any(t["numero"] == numero for t in actuales):
+        raise HTTPException(status_code=409, detail={"mensaje": "Ese número ya está registrado."})
+    await ejecutar("insert into telefonos_adicionales (user_id, numero, tipo, etiqueta) values (%s, %s, %s, %s)",
+                   (str(user_id), numero, datos.tipo, (datos.etiqueta or "").strip() or None))
+
+
+@router.get("/mi-ficha/telefonos")
+async def mis_telefonos(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[dict]:
+    return await _telefonos(usuario["id"])
+
+
+@router.post("/mi-ficha/telefonos", status_code=status.HTTP_201_CREATED)
+async def agregar_mi_telefono(datos: Telefono, request: Request,
+                              usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
+    await _agregar_telefono(usuario["id"], datos)
+    await registrar(request, "telefono_agregado", user_id=str(usuario["id"]), cedula=usuario["cedula"])
+    return {"mensaje": "Teléfono agregado."}
+
+
+@router.delete("/mi-ficha/telefonos/{telefono_id}")
+async def quitar_mi_telefono(telefono_id: int, request: Request,
+                             usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
+    n = await ejecutar("delete from telefonos_adicionales where id = %s and user_id = %s",
+                       (telefono_id, str(usuario["id"])))
+    if not n:
+        raise HTTPException(status_code=404, detail={"mensaje": "Ese teléfono no existe."})
+    await registrar(request, "telefono_quitado", user_id=str(usuario["id"]), cedula=usuario["cedula"])
+    return {"mensaje": "Teléfono quitado."}
+
+
+@router.get("/admin/usuarios/{user_id}/telefonos")
+async def telefonos_de(user_id: str, usuario: RRHH) -> list[dict]:
+    return await _telefonos(user_id)
+
+
+@router.post("/admin/usuarios/{user_id}/telefonos", status_code=status.HTTP_201_CREATED)
+async def agregar_telefono_de(user_id: str, datos: Telefono, request: Request, usuario: RRHH) -> dict:
+    await _agregar_telefono(user_id, datos)
+    await registrar(request, "telefono_agregado", user_id=str(usuario["id"]), cedula=usuario["cedula"],
+                    entidad="users", entidad_id=user_id)
+    return {"mensaje": "Teléfono agregado."}
+
+
+@router.delete("/admin/usuarios/{user_id}/telefonos/{telefono_id}")
+async def quitar_telefono_de(user_id: str, telefono_id: int, request: Request, usuario: RRHH) -> dict:
+    n = await ejecutar("delete from telefonos_adicionales where id = %s and user_id = %s", (telefono_id, user_id))
+    if not n:
+        raise HTTPException(status_code=404, detail={"mensaje": "Ese teléfono no existe."})
+    await registrar(request, "telefono_quitado", user_id=str(usuario["id"]), cedula=usuario["cedula"],
+                    entidad="users", entidad_id=user_id)
+    return {"mensaje": "Teléfono quitado."}

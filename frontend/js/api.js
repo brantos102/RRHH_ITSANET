@@ -467,6 +467,42 @@ export const api = {
     peticion(`/auth/admin/usuarios/${userId}/cerrar-sesiones`, { method: "POST" }),
   catalogoCargos: () => peticion("/catalogos/cargos"),
   misContactos: () => peticion("/mi-ficha/contactos"),
+  misTelefonos: () => peticion("/mi-ficha/telefonos"),
+  agregarMiTelefono: (d) => peticion("/mi-ficha/telefonos", { method: "POST", body: JSON.stringify(d) }),
+  quitarMiTelefono: (id) => peticion(`/mi-ficha/telefonos/${id}`, { method: "DELETE" }),
+  telefonosDe: (uid) => peticion(`/admin/usuarios/${uid}/telefonos`),
+  agregarTelefonoDe: (uid, d) =>
+    peticion(`/admin/usuarios/${uid}/telefonos`, { method: "POST", body: JSON.stringify(d) }),
+  quitarTelefonoDe: (uid, id) => peticion(`/admin/usuarios/${uid}/telefonos/${id}`, { method: "DELETE" }),
+  catalogoAdmin: () => peticion("/admin/catalogo"),
+  crearArea: (nombre) => peticion("/admin/catalogo/areas", { method: "POST", body: JSON.stringify({ nombre }) }),
+  cambiarArea: (id, d) => peticion(`/admin/catalogo/areas/${id}`, { method: "PATCH", body: JSON.stringify(d) }),
+  unificarArea: (id, destino_id) =>
+    peticion(`/admin/catalogo/areas/${id}/unificar`, { method: "POST", body: JSON.stringify({ destino_id }) }),
+  crearCargo: (d) => peticion("/admin/catalogo/cargos", { method: "POST", body: JSON.stringify(d) }),
+  cambiarCargo: (id, d) => peticion(`/admin/catalogo/cargos/${id}`, { method: "PATCH", body: JSON.stringify(d) }),
+  unificarCargo: (id, destino_id) =>
+    peticion(`/admin/catalogo/cargos/${id}/unificar`, { method: "POST", body: JSON.stringify({ destino_id }) }),
+  incorporarAlCatalogo: () => peticion("/admin/catalogo/incorporar", { method: "POST" }),
+  async plantillaMasiva(q = {}) {
+    const p = new URLSearchParams(Object.entries(q).filter(([, v]) => v));
+    const r = await fetch(`${API}/admin/masivo/plantilla.xlsx${p.toString() ? `?${p}` : ""}`, {
+      headers: { Authorization: `Bearer ${sesion.token}` } });
+    if (!r.ok) throw new ErrorApi("No se pudo preparar la plantilla.", r.status);
+    const url = URL.createObjectURL(await r.blob());
+    const a = Object.assign(document.createElement("a"), { href: url, download: "actualizacion-masiva.xlsx" });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  },
+  revisarMasivo: (archivo) => {
+    const fd = new FormData();
+    fd.append("archivo", archivo);
+    return peticion("/admin/masivo/revisar", { method: "POST", body: fd });
+  },
+  aplicarMasivo: (folio, motivo) =>
+    peticion(`/admin/masivo/${encodeURIComponent(folio)}/aplicar`, { method: "POST", body: JSON.stringify({ motivo }) }),
+  descartarMasivo: (folio) => peticion(`/admin/masivo/${encodeURIComponent(folio)}/descartar`, { method: "POST" }),
+  historialMasivo: () => peticion("/admin/masivo"),
   guardarMiContacto: (id, d) => id
     ? peticion(`/mi-ficha/contactos/${id}`, { method: "PATCH", body: JSON.stringify(d) })
     : peticion("/mi-ficha/contactos", { method: "POST", body: JSON.stringify(d) }),

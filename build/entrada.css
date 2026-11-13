@@ -1,3 +1,22 @@
+/* Tipografía oficial de ITSANET, servida desde el propio servidor (sin
+   depender de internet). Licencia SIL OFL 1.1: vendor/fuentes/LICENCIA-OFL.txt */
+@font-face {
+  font-family: 'Schibsted Grotesk Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 900;
+  src: url(fuentes/schibsted-grotesk-latin-wght-normal.woff2) format('woff2-variations'),
+       url(fuentes/schibsted-grotesk-latin-wght-normal.woff2) format('woff2');
+}
+@font-face {
+  font-family: 'Schibsted Grotesk Variable';
+  font-style: italic;
+  font-display: swap;
+  font-weight: 400 900;
+  src: url(fuentes/schibsted-grotesk-latin-wght-italic.woff2) format('woff2-variations'),
+       url(fuentes/schibsted-grotesk-latin-wght-italic.woff2) format('woff2');
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -35,8 +54,8 @@
     transform: translateX(-50%) translateY(0.25rem);
     padding: 0.5rem 0.625rem;
     border-radius: 0.625rem;
-    background: #0f172a;
-    color: #f8fafc;
+    background: #06122B;
+    color: #F7F7F7;
     font-size: 0.75rem;
     font-weight: 400;
     line-height: 1.35;

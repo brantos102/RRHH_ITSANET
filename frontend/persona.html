@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0f172a">
+<meta name="theme-color" content="#06122B">
 <title>Expediente</title>
 <link rel="icon" type="image/png" href="img/icono.png">
 <link rel="manifest" href="manifest.json">
@@ -116,6 +116,12 @@
           <button class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">Guardar cambios</button>
         </div>
       </form>
+      <div class="mt-5 grid gap-4 lg:grid-cols-2">
+        <div><h3 class="text-sm font-medium">Domicilio</h3>
+          <p id="fi-domicilio" class="mt-1 text-sm text-slate-700">—</p></div>
+        <div><h3 class="text-sm font-medium">Teléfonos adicionales</h3>
+          <ul id="fi-telefonos" class="mt-1 space-y-0.5 text-sm text-slate-700"></ul></div>
+      </div>
       <h3 class="mt-5 text-sm font-medium">Contactos de emergencia</h3>
       <div id="fi-contactos" class="mt-2"></div>
       <datalist id="fi-ciudades"></datalist><datalist id="fi-cargos"></datalist><datalist id="fi-areas"></datalist>

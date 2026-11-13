@@ -892,14 +892,21 @@ async def completar_ficha(
     avisos: list[str] = []
 
     if datos.cargo_correcto is False and (datos.cargo_propuesto or "").strip():
-        try:
-            await ficha.solicitar_cambio_ficha(
-                alta["user_id"], "cargo", datos.cargo_propuesto.strip(),
-                "Corrección declarada al completar la ficha")
-            pedidos.append(("Cargo que indica", datos.cargo_propuesto.strip()))
-        except Exception:  # noqa: BLE001
-            avisos.append("No se pudo registrar la corrección del cargo. "
-                          "Puede volver a pedirla desde su ficha.")
+        # El cargo se declara solo si no consta; si ya consta, lo administra
+        # Talento Humano y la persona se lo dice por el chat.
+        consta = await obtener_uno(
+            "SELECT NULLIF(TRIM(COALESCE(cargo, '')), '') AS c FROM users WHERE id = %s", (alta["user_id"],))
+        if consta and consta["c"]:
+            avisos.append("Su cargo lo administra Talento Humano. Si no corresponde, "
+                          "escríbales por el chat del sistema.")
+        else:
+            try:
+                await ficha.solicitar_cambio_ficha(
+                    alta["user_id"], "cargo", datos.cargo_propuesto.strip(),
+                    "Cargo declarado al completar la ficha", permitir_bloqueado=True)
+                pedidos.append(("Cargo que indica", datos.cargo_propuesto.strip()))
+            except Exception:  # noqa: BLE001
+                avisos.append("No se pudo registrar su cargo. Talento Humano lo completará.")
 
     if datos.jefe_correcto is False and datos.jefe_propuesto_id:
         jefe = await obtener_uno(

@@ -25,11 +25,11 @@ def _plantilla_otp(nombre: str, codigo: str, minutos: int, app: str) -> tuple[st
   <table role="presentation" style="max-width:480px;margin:0 auto;background:#fff;border-radius:12px;padding:32px">
     <tr><td>
       <p style="margin:0 0 4px;color:#64748b;font-size:13px">{app}</p>
-      <h1 style="margin:0 0 20px;font-size:20px;color:#0f172a">Su código de acceso</h1>
+      <h1 style="margin:0 0 20px;font-size:20px;color:#06122B">Su código de acceso</h1>
       <p style="margin:0 0 16px;color:#334155;font-size:15px">Hola {nombre}:</p>
       <p style="margin:0 0 8px;color:#334155;font-size:15px">Use este código para ingresar al sistema:</p>
       <p style="margin:0 0 20px;font-size:34px;font-weight:700;letter-spacing:10px;
-                color:#0f172a;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+                color:#06122B;background:#F7F7F7;border:1px solid #D2DEF7;border-radius:10px;
                 padding:16px;text-align:center">{codigo}</p>
       <p style="margin:0 0 16px;color:#64748b;font-size:13px">
         Vence en {minutos} minutos y solo puede usarse una vez.</p>

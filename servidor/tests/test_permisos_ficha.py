@@ -73,35 +73,28 @@ async def test_no_se_piden_ni_por_revision(cliente, auth_empleado, campo):
     assert "Talento Humano" in r.text or "no se modifica" in r.text, r.text
 
 
-async def test_pedir_el_cargo_no_lo_cambia_hasta_que_lo_confirmen(
+async def test_el_cargo_no_se_cambia_ni_se_pide_desde_la_ficha(
     cliente, auth_empleado, empleado
 ):
-    """Señalar no es decidir.
+    """Desde la 0016 el cargo y el área los administra Talento Humano.
 
-    El colaborador puede decir «mi cargo no es este», y debe poder: diez
-    personas de la planilla llegaron sin jefe y varios cargos vinieron mal
-    del Excel. Lo que no puede es que su palabra rija sola.
+    El colaborador los declara solo la primera vez, si no constaban; después
+    no puede cambiarlos ni pedirlo desde su ficha (lo dice por el chat). Lo
+    que no puede pasar nunca es que su palabra rija sola.
     """
     antes = await obtener_uno(
         "select cargo from users where id = %s", (empleado["id"],))
 
-    r = await cliente.post("/mi-ficha/cambios", headers=auth_empleado,
-                           json={"campo": "cargo", "valor": "Gerente General",
-                                 "motivo": "Intento de ascenderse solo"})
-    assert r.status_code == 201, r.text
+    for campo in ("cargo", "departamento"):
+        r = await cliente.post("/mi-ficha/cambios", headers=auth_empleado,
+                               json={"campo": campo, "valor": "Gerente General",
+                                     "motivo": "Intento de ascenderse solo"})
+        assert r.status_code == 422, r.text
+        assert "Talento Humano" in r.json()["detail"]["mensaje"]
 
     despues = await obtener_uno(
         "select cargo from users where id = %s", (empleado["id"],))
-    assert despues["cargo"] == antes["cargo"], (
-        "el cargo cambió sin que Talento Humano lo confirmara"
-    )
-
-    pendiente = await obtener_uno(
-        """select estado from cambios_ficha
-            where user_id = %s and campo = 'cargo'
-            order by created_at desc limit 1""",
-        (empleado["id"],))
-    assert pendiente["estado"] == "pendiente"
+    assert despues["cargo"] == antes["cargo"]
 
 
 async def test_nadie_se_pone_a_si_mismo_de_jefe(cliente, auth_empleado, empleado):
@@ -206,13 +199,12 @@ async def test_el_catalogo_declara_bloqueados_los_que_debe(cliente, auth_emplead
     filas = await obtener_todos(
         "select campo from campos_ficha where nivel = 'bloqueado'")
     bloqueados = {f["campo"] for f in filas}
-    for campo in ("fecha_ingreso", "cedula", "dias_vacaciones", "departamento"):
+    for campo in ("fecha_ingreso", "cedula", "dias_vacaciones", "departamento", "cargo"):
         assert campo in bloqueados, f"{campo} debe estar bloqueado para el empleado"
 
     # Y los que sí se señalan, con confirmación de por medio.
     niveles = {f["campo"]: f["nivel"] for f in await obtener_todos(
         "select campo, nivel from campos_ficha")}
-    assert niveles["cargo"] == "revisado"
     assert niveles["jefe_id"] == "revisado"
     assert niveles["email"] == "confirmado", (
         "el correo no lo aprueba nadie: lo confirma la dirección misma"

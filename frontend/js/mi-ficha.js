@@ -159,12 +159,12 @@ function pintarConfirmacion() {
     [p.cargo, p.departamento].filter(Boolean).join(" · ") || "Sin cargo registrado";
   $("mf-jefe").textContent = p.jefe_nombre || "Sin jefe registrado";
 
-  // Solo se pregunta a quien no ha respondido: al resto le sobra el recuadro.
-  const falta = !p.cargo_confirmado_en || !p.jefe_confirmado_en;
+  // Solo se pregunta a quien no ha confirmado su jefe. El cargo y el área
+  // los administra Talento Humano: no se confirman ni se piden aquí.
+  const falta = !p.jefe_confirmado_en;
   $("caja-confirmar").classList.toggle("hidden", !falta);
   if (!falta) return;
 
-  if (!p.cargo) marcarIncorrecto("mf-cargo-ok");
   if (!p.jefe_nombre) marcarIncorrecto("mf-jefe-ok");
   cargarJefaturas();
 }
@@ -177,7 +177,8 @@ function pintar() {
 
   $("mf-telefono").value = p.telefono || "";
   $("mf-telefono-alt").value = p.telefono_alternativo || "";
-  $("mf-direccion").value = p.direccion || "";
+  DOMICILIO.forEach(([id, campo]) => { $(id).value = p[campo] || ""; });
+  pintarTelefonos(estado.ficha.telefonos || []);
   $("mf-sangre").value = p.tipo_sangre || "";
 
   $("mf-correo-actual").textContent = p.email;
@@ -203,6 +204,45 @@ async function cargar() {
     avisar(err.message, true);
   }
 }
+
+/* ---------------------------------------------- domicilio y teléfonos */
+const DOMICILIO = [
+  ["mf-dom-provincia", "domicilio_provincia"], ["mf-dom-canton", "domicilio_canton"],
+  ["mf-dom-parroquia", "domicilio_parroquia"], ["mf-dom-calle", "domicilio_calle"],
+  ["mf-dom-numero", "domicilio_numero"], ["mf-dom-interseccion", "domicilio_interseccion"],
+  ["mf-dom-referencia", "domicilio_referencia"],
+];
+const TIPO_TEL = { celular: "Celular", fijo: "Fijo", trabajo: "Trabajo", otro: "Otro" };
+
+function pintarTelefonos(lista) {
+  $("mf-telefonos").innerHTML = lista.length ? lista.map((t) => `
+    <li class="flex items-center gap-3 px-3 py-2 text-sm">
+      <span class="font-mono">${esc(t.numero)}</span>
+      <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs">${esc(TIPO_TEL[t.tipo] || t.tipo)}</span>
+      <span class="min-w-0 flex-1 truncate text-slate-500">${esc(t.etiqueta || "")}</span>
+      <button type="button" data-quitar-tel="${t.id}" class="rounded-lg px-2 py-1 text-xs text-rose-700 hover:bg-rose-50">Quitar</button>
+    </li>`).join("") : '<li class="px-3 py-2.5 text-sm text-slate-500">Sin teléfonos adicionales.</li>';
+  $("form-telefono").classList.toggle("hidden", lista.length >= 5);
+}
+
+$("mf-tel-numero").addEventListener("input", (e) => { e.target.value = e.target.value.replace(/\D/g, "").slice(0, 13); });
+$("form-telefono").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    avisar((await api.agregarMiTelefono({ numero: $("mf-tel-numero").value,
+      tipo: $("mf-tel-tipo").value, etiqueta: $("mf-tel-etiqueta").value.trim() || null })).mensaje);
+    $("form-telefono").reset();
+    pintarTelefonos(await api.misTelefonos());
+  } catch (err) { avisar(err.message, true); }
+});
+$("mf-telefonos").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-quitar-tel]");
+  if (!b || !confirm("¿Quitar este teléfono?")) return;
+  try {
+    avisar((await api.quitarMiTelefono(b.dataset.quitarTel)).mensaje);
+    pintarTelefonos(await api.misTelefonos());
+  } catch (err) { avisar(err.message, true); }
+});
 
 /* ------------------------------------------------------- discapacidad */
 function pintarDiscapacidad() {
@@ -303,7 +343,7 @@ function marcarIncorrecto(grupo) {
   if (opcion) { opcion.checked = true; opcion.dispatchEvent(new Event("change", { bubbles: true })); }
 }
 
-[["mf-cargo-ok", "mf-cargo-nuevo"], ["mf-jefe-ok", "mf-jefe-nuevo"]].forEach(([grupo, campo]) =>
+[["mf-jefe-ok", "mf-jefe-nuevo"]].forEach(([grupo, campo]) =>
   document.querySelectorAll(`input[name="${grupo}"]`).forEach((opcion) =>
     opcion.addEventListener("change", () =>
       $(campo).classList.toggle("hidden", elegido(grupo) === "si"))));
@@ -323,19 +363,15 @@ async function cargarJefaturas() {
 }
 
 $("btn-confirmar-datos").addEventListener("click", async () => {
-  const cargoOk = elegido("mf-cargo-ok") === "si";
   const jefeOk = elegido("mf-jefe-ok") === "si";
-  if (!cargoOk && !$("mf-cargo-nuevo").value.trim()) {
-    return avisar("Escriba cuál es su cargo.", true);
-  }
   if (!jefeOk && !$("mf-jefe-nuevo").value) {
     return avisar("Elija quién es su jefe inmediato.", true);
   }
   try {
     const r = await api.confirmarCargoYJefe({
-      cargo_correcto: cargoOk,
+      cargo_correcto: true,
       jefe_correcto: jefeOk,
-      cargo_propuesto: cargoOk ? null : $("mf-cargo-nuevo").value.trim(),
+      cargo_propuesto: null,
       jefe_propuesto_id: jefeOk ? null : $("mf-jefe-nuevo").value,
     });
     avisar(r.mensaje);
@@ -358,7 +394,7 @@ $("form-contacto").addEventListener("submit", async (e) => {
     await api.corregirFicha({
       telefono: $("mf-telefono").value.trim() || null,
       telefono_alternativo: $("mf-telefono-alt").value.trim() || null,
-      direccion: $("mf-direccion").value.trim() || null,
+      ...Object.fromEntries(DOMICILIO.map(([id, campo]) => [campo, $(id).value.trim() || null])),
       tipo_sangre: $("mf-sangre").value || null,
     });
     avisar("Sus datos quedaron actualizados.");

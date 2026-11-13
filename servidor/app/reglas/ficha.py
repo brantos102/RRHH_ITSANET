@@ -199,6 +199,12 @@ async def resolver_cambio_ficha(cambio_id: int, aprobar: bool, por, motivo: str 
             if cambio["campo"] == "ciudad":
                 from .personal import mover_pendientes_de_sede
                 await mover_pendientes_de_sede(cambio["user_id"])
+            if cambio["campo"] in ("cargo", "departamento"):
+                # Aprobado por Talento Humano: entra al catálogo oficial.
+                from .catalogo import asegurar
+                ficha = await obtener_uno("SELECT cargo, departamento FROM users WHERE id = %s",
+                                          (cambio["user_id"],))
+                await asegurar(ficha["cargo"], ficha["departamento"])
         elif len(_limpio(motivo)) < 5:
             raise ReglaDeNegocio("Indique por qué se rechaza: la persona debe saber qué corregir")
         await ejecutar(

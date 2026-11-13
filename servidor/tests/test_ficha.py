@@ -38,9 +38,10 @@ async def test_la_ficha_dice_que_se_puede_tocar_y_que_no(cliente, auth):
     assert niveles["email"] == "confirmado"
     assert niveles["cedula"] == "bloqueado"
     assert niveles["fecha_ingreso"] == "bloqueado"
-    # El cargo y el jefe sí se pueden corregir, con confirmación: la planilla
-    # los trajo mal en varios casos y antes no había forma de señalarlo.
-    assert niveles["cargo"] == "revisado"
+    # El jefe se puede señalar, con confirmación. El cargo y el área, desde
+    # la 0016, los administra Talento Humano: se declaran solo al entrar por
+    # primera vez si no constaban.
+    assert niveles["cargo"] == "bloqueado" and niveles["departamento"] == "bloqueado"
     assert niveles["jefe_id"] == "revisado"
 
 
@@ -174,9 +175,9 @@ async def test_un_pedido_desde_mi_ficha_avisa_a_talento_humano(cliente, auth, em
 
     monkeypatch.setattr(notificaciones, "avisar_correccion_de_ficha", falso)
     r = await cliente.post("/mi-ficha/cambios", headers=auth,
-                           json={"campo": "cargo", "valor": "Analista de inventarios"})
+                           json={"campo": "estado_civil", "valor": "casado"})
     assert r.status_code == 201, r.text
-    assert correos == [[("Cargo", "Analista de inventarios")]]
+    assert correos == [[("Estado civil", "casado")]]
     avisos = await _todos("select user_id, accion_url from notifications "
                           "where entidad = 'cambios_ficha' and entidad_id = %s", (empleado["id"],))
     assert avisos and all(a["accion_url"].startswith("administracion.html?atender=persona:") for a in avisos)

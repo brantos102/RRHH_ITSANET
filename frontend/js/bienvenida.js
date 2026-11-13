@@ -1,9 +1,10 @@
 /* Ficha inicial: lo que se pide antes de usar el sistema.
 
    Solo se muestran las secciones que faltan. Lo que la persona no puede
-   cambiar sola —su fecha de ingreso, su jefe, su cargo— no se cambia aquí:
-   si dice que no es correcto, va como pedido a Talento Humano y mientras
-   tanto rige lo registrado. */
+   cambiar sola —su fecha de ingreso, su jefe— no se cambia aquí: si dice que
+   no es correcto, va como pedido a Talento Humano y mientras tanto rige lo
+   registrado. El cargo y el área se piden solo si no constan, se eligen del
+   catálogo oficial y los confirma Talento Humano. */
 import { api, sesion, esc, fecha, ErrorApi } from "./api.js";
 
 const $ = (id) => document.getElementById(id);
@@ -41,7 +42,7 @@ function error(texto) {
   if (texto) $("b-error").scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
-[["ingreso-ok", "b-ingreso-otra"], ["jefe-ok", "b-jefe-otro"], ["cargo-ok", "b-cargo-otro"]]
+[["ingreso-ok", "b-ingreso-otra"], ["jefe-ok", "b-jefe-otro"]]
   .forEach(([grupo, caja]) => document.querySelectorAll(`input[name="${grupo}"]`).forEach((r) =>
     r.addEventListener("change", () => $(caja).classList.toggle("hidden", elegido(grupo) !== "no"))));
 ["b-telefono", "b-emer-telefono"].forEach((id) => $(id).addEventListener("input", soloDigitos));
@@ -77,29 +78,43 @@ $("b-jefe-buscar").addEventListener("input", (e) => {
 $("b-jefe-buscar").addEventListener("blur", () =>
   setTimeout(() => sugerir("b-jefe-sugerencias", [], null), 150));
 
-/* ---- cargo y área: sugerencias de los que existen en la empresa ---- */
+/* ---- área y cargo: del catálogo oficial ---- */
+const OTRO = "__otro";
 function areaElegida() {
-  return $("b-area").value === "__otra" ? $("b-area-otra").value.trim() : $("b-area").value;
+  return $("b-area").value === OTRO ? $("b-area-otra").value.trim() : $("b-area").value;
+}
+function cargoElegido() {
+  return $("b-cargo").value === OTRO ? $("b-cargo-otro-texto").value.trim() : $("b-cargo").value;
+}
+/* Los cargos del área elegida (y los generales, sin área). */
+function pintarCargos(preferido = "") {
+  const area = $("b-area").value;
+  const sel = $("b-cargo");
+  if (!area) {
+    sel.innerHTML = '<option value="">Primero elija el área…</option>';
+    sel.disabled = true;
+    return;
+  }
+  const lista = area === OTRO ? [] : catalogo.cargos.filter((c) => !c.area || normal(c.area) === normal(area));
+  const nombres = [...new Set(lista.map((c) => c.cargo))].sort((a, b) => a.localeCompare(b, "es"));
+  sel.innerHTML = '<option value="">Elija su cargo…</option>'
+    + nombres.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("")
+    + `<option value="${OTRO}">Mi cargo no está en la lista…</option>`;
+  sel.disabled = false;
+  if (preferido && nombres.some((n) => normal(n) === normal(preferido))) {
+    sel.value = nombres.find((n) => normal(n) === normal(preferido));
+  } else if (preferido) {
+    sel.value = OTRO;
+    $("b-cargo-otro-texto").value = preferido;
+  }
+  $("b-cargo-otro-texto").classList.toggle("hidden", sel.value !== OTRO);
 }
 $("b-area").addEventListener("change", () => {
-  $("b-area-otra").classList.toggle("hidden", $("b-area").value !== "__otra");
+  $("b-area-otra").classList.toggle("hidden", $("b-area").value !== OTRO);
+  pintarCargos();
 });
-$("b-cargo-nuevo").addEventListener("input", (e) => {
-  const q = e.target.value;
-  const area = areaElegida() || persona.departamento || "";
-  const vistos = new Set();
-  const hallados = catalogo.cargos
-    .filter((c) => normal(q).length >= 1 && coincide(c.cargo, q))
-    // Primero los del área elegida.
-    .sort((a, b) => (normal(b.area) === normal(area)) - (normal(a.area) === normal(area)))
-    .filter((c) => !vistos.has(normal(c.cargo)) && vistos.add(normal(c.cargo)))
-    .slice(0, 8);
-  sugerir("b-cargo-sugerencias", hallados.map((c) => ({
-    c, html: `${esc(c.cargo)}${c.area ? `<span class="block text-xs text-slate-500">${esc(c.area)}</span>` : ""}` })),
-    ({ c }) => { $("b-cargo-nuevo").value = c.cargo; sugerir("b-cargo-sugerencias", [], null); });
-});
-$("b-cargo-nuevo").addEventListener("blur", () =>
-  setTimeout(() => sugerir("b-cargo-sugerencias", [], null), 150));
+$("b-cargo").addEventListener("change", () =>
+  $("b-cargo-otro-texto").classList.toggle("hidden", $("b-cargo").value !== OTRO));
 
 async function cargar() {
   const d = await api.fichaInicial();
@@ -113,20 +128,27 @@ async function cargar() {
   $("b-ingreso-actual").textContent = p.fecha_ingreso ? fecha(p.fecha_ingreso) : "Sin fecha registrada";
   $("b-jefe-actual").textContent = p.jefe_nombre
     ? [p.jefe_nombre, p.jefe_cargo].filter(Boolean).join(" · ") : "Sin jefe registrado";
-  $("b-cargo-actual").textContent =
-    [p.cargo, p.departamento].filter(Boolean).join(" · ") || "Sin cargo registrado";
+  if (p.cargo || p.departamento) {
+    $("b-cargo-actual").textContent = `Consta: ${[p.cargo, p.departamento].filter(Boolean).join(" · ")}. `
+      + "Complete lo que falta; Talento Humano lo confirma.";
+  }
   persona = p;
   jefaturas = d.jefaturas || [];
   if (pendientes.includes("cargo")) {
-    try { catalogo = await api.catalogoCargos(); } catch { /* sin sugerencias, igual se escribe */ }
+    try { catalogo = await api.catalogoCargos(); } catch { /* sin catálogo, se escribe */ }
     $("b-area").insertAdjacentHTML("beforeend",
       catalogo.areas.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join("")
-      + '<option value="__otra">Otra (escribirla)…</option>');
+      + `<option value="${OTRO}">Mi área no está en la lista…</option>`);
+    if (p.departamento) {
+      const igual = catalogo.areas.find((a) => normal(a) === normal(p.departamento));
+      $("b-area").value = igual || OTRO;
+      if (!igual) { $("b-area-otra").value = p.departamento; $("b-area-otra").classList.remove("hidden"); }
+    }
+    pintarCargos(p.cargo || "");
   }
 
-  // Sin jefe o sin cargo no hay nada que confirmar: se pregunta cuál es.
+  // Sin jefe no hay nada que confirmar: se pregunta cuál es.
   if (!p.jefe_nombre) document.querySelector('input[name="jefe-ok"][value="no"]').click();
-  if (!p.cargo) document.querySelector('input[name="cargo-ok"][value="no"]').click();
 
   document.querySelectorAll("[data-seccion]").forEach((s) =>
     s.classList.toggle("hidden", !pendientes.includes(s.dataset.seccion)));
@@ -164,15 +186,12 @@ $("form-bienvenida").addEventListener("submit", async (e) => {
     }
   }
   if (pide("cargo")) {
-    const ok = elegido("cargo-ok");
-    if (!ok) return error("Indique si su cargo es correcto.");
-    datos.cargo_correcto = ok === "si";
-    if (ok === "no") {
-      const cargo = $("b-cargo-nuevo").value.trim(), area = areaElegida();
-      if (!cargo && !area) return error("Escriba su cargo o elija su área.");
-      datos.cargo_propuesto = cargo || null;
-      datos.departamento_propuesto = area || null;
-    }
+    const cargo = cargoElegido(), area = areaElegida();
+    if (!area) return error("Elija su área (o escríbala si no está en la lista).");
+    if (!cargo) return error("Elija su cargo (o escríbalo si no está en la lista).");
+    datos.cargo_correcto = false;
+    datos.cargo_propuesto = cargo;
+    datos.departamento_propuesto = area;
   }
   if (pide("telefono")) {
     if ($("b-telefono").value.length < 7) return error("Escriba su teléfono personal.");

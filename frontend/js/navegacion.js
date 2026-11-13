@@ -53,6 +53,8 @@ const MODULOS = [
     id: "admin", texto: "Administración", roles: ["rrhh", "admin"],
     opciones: [
       { texto: "Panel de administración", href: "administracion.html#usuarios" },
+      { texto: "Cargos y áreas", href: "administracion.html#catalogo" },
+      { texto: "Actualización masiva", href: "administracion.html#masivo" },
       { texto: "Sedes y regiones", href: "administracion.html#sedes" },
       { texto: "Jefaturas", href: "administracion.html#jefaturas" },
       { texto: "Configuración", href: "administracion.html#configuracion" },
@@ -115,6 +117,8 @@ const ICONOS_OPCION = {
   "Sedes y regiones":         'M12 21s-7-6.1-7-11.5a7 7 0 1 1 14 0C19 14.9 12 21 12 21Zm0-9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z',
   "Documentos firmados":      'M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Zm7 0v5h5M9 15l2 2 4-4',
   "Tableros":                 'M3 3v18h18M7 17v-5m5 5V8m5 9v-7',
+  "Cargos y áreas":           'M4 7h16M4 12h16M4 17h10M18 15v6m-3-3h6',
+  "Actualización masiva":     'M4 4h16v6H4V4Zm0 10h16v6H4v-6Zm4-7h.01M8 17h.01',
   "Exportar datos":           'M12 3v12m0 0-4-4m4 4 4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2',
   "Actualizaciones":          'M4 4v6h6M20 20v-6h-6M5.5 15a7 7 0 0 0 12.4 2.5M18.5 9A7 7 0 0 0 6.1 6.5',
 };

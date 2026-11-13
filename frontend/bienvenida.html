@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0f172a">
+<meta name="theme-color" content="#06122B">
 <title>Complete su ficha</title>
 <link rel="icon" type="image/png" href="img/icono.png">
 <link rel="manifest" href="manifest.json">
@@ -85,29 +85,28 @@
       </div>
     </section>
 
+    <!-- Cargo y área: solo se piden si no constan. Se eligen del catálogo
+         oficial que administra Talento Humano; si no está, se escribe y
+         Talento Humano lo valida. De ahí en adelante los administra Talento
+         Humano. -->
     <section data-seccion="cargo" class="hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-      <h2 class="font-medium">Su cargo</h2>
-      <p id="b-cargo-actual" class="mt-2 font-semibold">—</p>
-      <div class="mt-3 space-y-2 text-sm">
-        <label class="flex items-center gap-2"><input type="radio" name="cargo-ok" value="si" class="h-4 w-4"> Es correcto</label>
-        <label class="flex items-center gap-2"><input type="radio" name="cargo-ok" value="no" class="h-4 w-4"> No es correcto</label>
-      </div>
-      <div id="b-cargo-otro" class="mt-3 hidden space-y-3">
+      <h2 class="font-medium">Su área y su cargo</h2>
+      <p id="b-cargo-actual" class="mt-0.5 text-sm text-slate-600">Elíjalos de la lista. Talento Humano los confirma.</p>
+      <div class="mt-3 space-y-3">
         <div>
           <label for="b-area" class="text-sm font-medium text-slate-700">Área donde trabaja</label>
-          <select id="b-area" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
-            <option value="">La misma que consta</option>
-          </select>
-          <input id="b-area-otra" maxlength="120" placeholder="Escriba el área"
-                 class="mt-2 hidden w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+          <select id="b-area" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-itsa-azul"><option value="">Elija su área…</option></select>
+          <input id="b-area-otra" maxlength="120" placeholder="Escriba el nombre de su área"
+                 class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-itsa-azul mt-2 hidden">
         </div>
         <div>
-          <label for="b-cargo-nuevo" class="text-sm font-medium text-slate-700">Su cargo</label>
-          <input id="b-cargo-nuevo" autocomplete="off" maxlength="120" placeholder="Escriba su cargo"
-                 class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
-          <ul id="b-cargo-sugerencias" class="mt-1 hidden max-h-56 overflow-y-auto rounded-xl bg-white ring-1 ring-slate-200"></ul>
+          <label for="b-cargo" class="text-sm font-medium text-slate-700">Su cargo</label>
+          <select id="b-cargo" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-itsa-azul" disabled><option value="">Primero elija el área…</option></select>
+          <input id="b-cargo-otro-texto" maxlength="120" placeholder="Escriba su cargo"
+                 class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-itsa-azul mt-2 hidden">
           <p class="mt-1.5 text-xs text-slate-500">
-            Le sugerimos los cargos que ya existen en su área. Talento Humano lo revisa antes de que rija.</p>
+            Si su cargo o su área no están en la lista, elija «No está en la lista» y escríbalo.
+            Talento Humano lo revisa antes de que rija.</p>
         </div>
       </div>
     </section>

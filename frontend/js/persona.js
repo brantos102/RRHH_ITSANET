@@ -234,6 +234,17 @@ async function pintarFicha(p, f) {
     fichaOriginal[campo] = !!f[campo];
   }
 
+  const dom = [[f.domicilio_calle, f.domicilio_numero].filter(Boolean).join(" ")
+                + (f.domicilio_interseccion ? ` y ${f.domicilio_interseccion}` : ""),
+               f.domicilio_parroquia, f.domicilio_canton, f.domicilio_provincia].filter(Boolean).join(", ");
+  $("fi-domicilio").textContent = (dom || f.direccion || "Sin registrar")
+    + (f.domicilio_referencia ? ` (${f.domicilio_referencia})` : "");
+  const TIPO_TEL = { celular: "Celular", fijo: "Fijo", trabajo: "Trabajo", otro: "Otro" };
+  $("fi-telefonos").innerHTML = (f.telefonos || []).map((t) =>
+    `<li><span class="font-mono">${esc(t.numero)}</span> · ${esc(TIPO_TEL[t.tipo] || t.tipo)}${
+      t.etiqueta ? ` · <span class="text-slate-500">${esc(t.etiqueta)}</span>` : ""}</li>`).join("")
+    || '<li class="text-slate-500">Ninguno.</li>';
+
   montarContactos($("fi-contactos"), {
     listar: async () => f.contactos,
     guardar: (cid, d) => api.guardarContactoDe(ID, cid, d),

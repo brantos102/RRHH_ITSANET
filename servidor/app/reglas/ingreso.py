@@ -55,7 +55,11 @@ async def pendientes(user_id) -> list[str]:
         """SELECT u.fecha_nacimiento IS NULL AS sin_nacimiento,
                   u.fecha_ingreso_confirmada_en IS NULL AS ingreso_sin_confirmar,
                   u.jefe_confirmado_en IS NULL AS jefe_sin_confirmar,
-                  u.cargo_confirmado_en IS NULL AS cargo_sin_confirmar,
+                  -- El cargo y el área se piden solo si no constan: de ahí en
+                  -- adelante los administra Talento Humano.
+                  (NULLIF(TRIM(COALESCE(u.cargo, '')), '') IS NULL
+                   OR (NULLIF(TRIM(COALESCE(u.departamento, '')), '') IS NULL
+                       AND u.cargo_confirmado_en IS NULL)) AS cargo_sin_confirmar,
                   NULLIF(TRIM(COALESCE(u.telefono, '')), '') IS NULL AS sin_telefono,
                   NOT EXISTS (SELECT 1 FROM emergency_contacts c
                                WHERE c.user_id = u.id AND c.es_principal) AS sin_emergencia,

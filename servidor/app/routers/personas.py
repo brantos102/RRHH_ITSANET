@@ -135,7 +135,9 @@ async def expediente(user_id: str, usuario: MANDO) -> dict:
                       r.sede, u.jefe_id, u.email, u.ficha_completa, u.correo_pendiente,
                       u.tipo_contrato, u.contrato_fin, u.tipo_sangre, u.tiene_discapacidad,
                       u.porcentaje_discapacidad, u.carnet_conadis, u.tipo_discapacidad,
-                      u.sustituto_discapacidad
+                      u.sustituto_discapacidad, u.domicilio_provincia, u.domicilio_canton,
+                      u.domicilio_parroquia, u.domicilio_calle, u.domicilio_numero,
+                      u.domicilio_interseccion, u.domicilio_referencia
                  from users u left join regiones r on r.codigo = coalesce(u.region, 'sierra')
                 where u.id = %s""", (user_id,))
         ficha = {**ficha, "jefe_id": str(ficha["jefe_id"]) if ficha["jefe_id"] else None,
@@ -143,6 +145,9 @@ async def expediente(user_id: str, usuario: MANDO) -> dict:
                  "correo_pendiente": bool(ficha["correo_pendiente"]),
                  "tiene_discapacidad": bool(ficha["tiene_discapacidad"]),
                  "sustituto_discapacidad": bool(ficha["sustituto_discapacidad"])}
+        ficha["telefonos"] = [{**t, "id": int(t["id"])} for t in await obtener_todos(
+            "select id, numero, tipo, etiqueta from telefonos_adicionales where user_id = %s order by id",
+            (user_id,))]
         ficha["contactos"] = [{**c, "id": str(c["id"]), "es_principal": bool(c["es_principal"])}
                               for c in await obtener_todos(
             """select id, nombre, parentesco, telefono, telefono_alternativo, es_principal

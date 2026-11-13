@@ -31,14 +31,15 @@ def nueva_persona(db, cedula=CEDULA_OK, **extra) -> str:
 
 
 # ---------------------------------------------------------- que esté todo
-def test_estan_las_46_tablas(db):
+def test_estan_las_50_tablas(db):
     """38 del sistema original, firmantes_rrhh (0009), sesiones (0010) y
     atenciones, asistente_respuestas y asistente_consultas (0011),
-    tablero_vistas (0014), impresiones_papel y exportaciones (0015)."""
+    tablero_vistas (0014), impresiones_papel y exportaciones (0015), areas,
+    cargos, cargas_masivas y telefonos_adicionales (0016)."""
     db.execute("""SELECT COUNT(*) AS n FROM information_schema.tables
                    WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'
                      AND table_name NOT IN ('schema_migraciones', 'secuencias')""")
-    assert db.fetchone()["n"] == 46
+    assert db.fetchone()["n"] == 50
 
 
 def test_ninguna_foranea_apunta_fuera_de_la_base(db):

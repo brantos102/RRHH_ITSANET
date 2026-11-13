@@ -22,6 +22,7 @@ from ..reglas import administracion as reglas_admin
 from ..reglas import periodos
 from ..reglas import personal as reglas_personal
 from ..reglas import sedes as reglas_sedes
+from ..reglas import catalogo as reglas_catalogo
 from ..reglas.saldo import saldo_desglosado
 
 router = APIRouter(tags=["Administración"])
@@ -236,6 +237,7 @@ async def crear_usuario(datos: NuevoUsuario, request: Request, usuario: RRHH) ->
     except Exception as exc:  # noqa: BLE001
         raise await _choque_de_ficha(exc, email=str(datos.email), cedula=datos.cedula) from exc
 
+    await reglas_catalogo.asegurar(datos.cargo, datos.departamento)
     await registrar(request, "usuario_creado", user_id=str(usuario["id"]), cedula=usuario["cedula"],
                     entidad="users", entidad_id=str(creado["id"]),
                     detalle={"cedula": datos.cedula, "rol": datos.rol})
@@ -319,6 +321,10 @@ async def editar_usuario(user_id: uuid.UUID, cambios: CambioUsuario,
 
     if actualizado is None:
         raise HTTPException(status_code=404, detail={"mensaje": "No se encontró a esa persona."})
+    if "cargo" in campos or "departamento" in campos:
+        # Lo que decide Talento Humano entra al catálogo oficial.
+        ficha = await obtener_uno("select cargo, departamento from users where id = %s", (str(user_id),))
+        await reglas_catalogo.asegurar(ficha["cargo"], ficha["departamento"])
 
     traslado = ""
     if antes and actualizado["region"] != antes["region"]:
@@ -605,6 +611,7 @@ async def asignar_equipo(jefe_id: uuid.UUID, datos: Equipo, request: Request,
                     f"""update users set departamento = %s
                          where activo and id in ({", ".join(["%s"] * len(destino))})""",
                     (area, *destino))
+                await reglas_catalogo.asegurar(None, area)
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
     await registrar(request, "equipo_asignado", user_id=str(usuario["id"]),

@@ -167,14 +167,16 @@ async def test_completa_la_ficha_y_pide_revisar_su_fecha_de_ingreso(
         "fecha_nacimiento": "1995-10-16",
         "fecha_ingreso_correcta": False, "fecha_ingreso_propuesta": "2020-11-15",
         "fecha_ingreso_motivo": "Entré por un proveedor antes de pasar a nómina",
-        "jefe_correcto": True, "cargo_correcto": True,
+        # Sin cargo registrado: lo elige del catálogo (0016) y lo confirma Talento Humano.
+        "jefe_correcto": True, "cargo_correcto": False,
+        "cargo_propuesto": "Auxiliar de bodega", "departamento_propuesto": "Bodega",
         "telefono": "099 111 2223",
         "emergencia_nombre": "Contacto Prueba", "emergencia_parentesco": "madre",
         "emergencia_telefono": "0991112224",
     })
     assert r.status_code == 200, r.text
     assert r.json()["pendientes"] == []
-    assert r.json()["en_revision"] == ["Fecha de ingreso que indica"]
+    assert r.json()["en_revision"] == ["Fecha de ingreso que indica", "Cargo que indica", "Área que indica"]
 
     u = await obtener_uno("""select fecha_nacimiento, fecha_ingreso, telefono, ficha_completa,
                                     fecha_ingreso_confirmada_en from users where cedula = %s""", (CED,))
@@ -182,8 +184,11 @@ async def test_completa_la_ficha_y_pide_revisar_su_fecha_de_ingreso(
     assert str(u["fecha_ingreso"]) == "2021-02-01", "la fecha de ingreso no cambia sola"
     assert u["telefono"] == "0991112223" and u["ficha_completa"]
     pedido = await obtener_todos("select campo, valor_nuevo, estado from cambios_ficha "
-                                 "where user_id = %s", (sin_correo["id"],))
-    assert pedido == [{"campo": "fecha_ingreso", "valor_nuevo": "2020-11-15", "estado": "pendiente"}]
+                                 "where user_id = %s order by campo", (sin_correo["id"],))
+    assert pedido == [
+        {"campo": "cargo", "valor_nuevo": "Auxiliar de bodega", "estado": "pendiente"},
+        {"campo": "departamento", "valor_nuevo": "Bodega", "estado": "pendiente"},
+        {"campo": "fecha_ingreso", "valor_nuevo": "2020-11-15", "estado": "pendiente"}]
 
     # La siguiente vez que entra ya no se le pide nada.
     perfil = (await cliente.get("/auth/me", headers=auth)).json()
@@ -250,4 +255,5 @@ async def test_el_catalogo_sugiere_cargos_y_areas_sin_datos_personales(cliente, 
     r = await cliente.get("/catalogos/cargos", headers=auth)
     assert r.status_code == 200
     assert set(r.json()) == {"cargos", "areas", "ciudades"}
-    assert all(set(c) == {"cargo", "area"} for c in r.json()["cargos"])
+    # Del catálogo oficial (0016): id, nombre del cargo y su área. Nada de personas.
+    assert all(set(c) == {"id", "cargo", "area"} for c in r.json()["cargos"])

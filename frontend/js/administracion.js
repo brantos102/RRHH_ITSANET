@@ -35,7 +35,7 @@ const CARGADORES = {
   jefaturas: cargarJefaturasAdmin, "talento-humano": cargarTalentoHumano,
   depuracion: cargarDepuracion, "ingreso-firmas": cargarIngresoFirmas,
   pendientes: cargarPendientes, asistente: cargarAsistente, sedes: cargarSedes,
-  actualizaciones: cargarActualizaciones,
+  actualizaciones: cargarActualizaciones, catalogo: cargarCatalogoOficial, masivo: cargarMasivo,
 };
 
 // Lo que es solo del administrador no se le ofrece a Talento Humano.
@@ -2331,6 +2331,210 @@ async function atenderFirma(item) {
     } catch (err) { avisar(err.message, true); }
   }, 300);
 })();
+
+/* ------------------------------------------------------------ cargos y áreas */
+const cat = { areas: [], cargos: [] };
+
+async function cargarCatalogoOficial() {
+  const d = await api.catalogoAdmin();
+  Object.assign(cat, d);
+  const opciones = d.areas.map((a) => `<option value="${a.id}">${esc(a.nombre)}</option>`).join("");
+  const filtro = $("cat-filtro-area").value;
+  $("cat-filtro-area").innerHTML = '<option value="">Todas</option><option value="-">Sin área</option>' + opciones;
+  $("cat-filtro-area").value = filtro;
+  const area = $("cargo-area").value;
+  $("cargo-area").innerHTML = '<option value="">Sin área (general)</option>' + opciones;
+  $("cargo-area").value = area;
+  $("cat-areas").innerHTML = d.areas.map((a) => `
+    <li class="px-3 py-2.5 text-sm ${a.activo ? "" : "opacity-60"}">
+      <div class="flex items-baseline justify-between gap-3">
+        <b class="min-w-0 break-words">${esc(a.nombre)}</b>
+        <span class="shrink-0 text-xs text-slate-500">${a.personas} persona(s) · ${a.cargos} cargo(s)${a.activo ? "" : " · desactivada"}</span>
+      </div>
+      <div class="-ml-2 mt-1 flex flex-wrap gap-1">
+        <button type="button" data-area-renombrar="${a.id}" class="rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100">Renombrar</button>
+        <button type="button" data-area-unificar="${a.id}" class="rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100">Unificar</button>
+        <button type="button" data-area-activo="${a.id}" data-valor="${a.activo ? 0 : 1}" class="rounded-lg px-2 py-1 text-xs ${a.activo ? "text-rose-700 hover:bg-rose-50" : "text-emerald-700 hover:bg-emerald-50"}">${a.activo ? "Desactivar" : "Activar"}</button>
+      </div>
+    </li>`).join("") || '<li class="px-3 py-3 text-sm text-slate-500">Sin áreas.</li>';
+  pintarCargosCatalogo();
+  $("cat-fuera").classList.toggle("hidden", !d.fuera_de_catalogo.length);
+  $("cat-fuera-lista").textContent = d.fuera_de_catalogo
+    .map((f) => `${f.tipo === "area" ? "área" : "cargo"} «${f.nombre}» (${f.personas})`).join(", ");
+}
+
+function pintarCargosCatalogo() {
+  const f = $("cat-filtro-area").value;
+  const lista = cat.cargos.filter((c) => !f || (f === "-" ? !c.area_id : String(c.area_id) === f));
+  $("cat-cargos").innerHTML = lista.map((c) => `
+    <tr class="${c.activo ? "" : "opacity-60"}">
+      <td class="px-3 py-2 font-medium">${esc(c.nombre)}${c.activo ? "" : ' <span class="text-xs text-slate-500">(desactivado)</span>'}</td>
+      <td class="px-3 py-2 text-slate-600">${esc(c.area || "—")}</td>
+      <td class="px-3 py-2 text-right tabular-nums">${c.personas}</td>
+      <td class="whitespace-nowrap px-3 py-2 text-right">
+        <button type="button" data-cargo-editar="${c.id}" class="rounded-lg px-2 py-1 text-xs hover:bg-slate-100">Editar</button>
+        <button type="button" data-cargo-unificar="${c.id}" class="rounded-lg px-2 py-1 text-xs hover:bg-slate-100">Unificar</button>
+        <button type="button" data-cargo-activo="${c.id}" data-valor="${c.activo ? 0 : 1}" class="rounded-lg px-2 py-1 text-xs ${c.activo ? "text-rose-700 hover:bg-rose-50" : "text-emerald-700 hover:bg-emerald-50"}">${c.activo ? "Desactivar" : "Activar"}</button>
+      </td>
+    </tr>`).join("") || '<tr><td colspan="4" class="px-3 py-4 text-center text-slate-500">Sin cargos.</td></tr>';
+}
+
+/* Para unificar: un diálogo con la lista de destinos posibles. */
+function elegirDestino(titulo, opciones) {
+  return new Promise((resolver) => {
+    const d = document.createElement("dialog");
+    d.className = "w-[min(100vw-1.5rem,26rem)] rounded-2xl p-0";
+    d.innerHTML = `<form method="dialog" class="space-y-3 p-5">
+      <h3 class="font-medium">${esc(titulo)}</h3>
+      <p class="text-sm text-slate-600">Todas las personas pasan al destino y el origen desaparece del catálogo.</p>
+      <select class="w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300">
+        ${opciones.map(([v, t]) => `<option value="${v}">${esc(t)}</option>`).join("")}</select>
+      <div class="flex justify-end gap-2"><button value="no" class="rounded-xl bg-slate-100 px-4 py-2 text-sm">Cancelar</button>
+        <button value="si" class="rounded-xl bg-slate-900 px-4 py-2 text-sm text-white">Unificar</button></div></form>`;
+    document.body.appendChild(d);
+    d.addEventListener("close", () => { const v = d.returnValue === "si" ? d.querySelector("select").value : null; d.remove(); resolver(v); });
+    d.showModal();
+  });
+}
+
+$("cat-filtro-area")?.addEventListener("change", pintarCargosCatalogo);
+$("form-area")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try { avisar((await api.crearArea($("area-nombre").value.trim())).mensaje); $("form-area").reset(); await cargarCatalogoOficial(); }
+  catch (err) { avisar(err.message, true); }
+});
+$("form-cargo")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    avisar((await api.crearCargo({ nombre: $("cargo-nombre").value.trim(),
+      area_id: $("cargo-area").value ? Number($("cargo-area").value) : null })).mensaje);
+    $("cargo-nombre").value = "";
+    await cargarCatalogoOficial();
+  } catch (err) { avisar(err.message, true); }
+});
+$("cat-incorporar")?.addEventListener("click", async () => {
+  try { avisar((await api.incorporarAlCatalogo()).mensaje); await cargarCatalogoOficial(); }
+  catch (err) { avisar(err.message, true); }
+});
+document.querySelector('[data-panel="catalogo"]')?.addEventListener("click", async (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  try {
+    if (b.dataset.areaRenombrar) {
+      const a = cat.areas.find((x) => String(x.id) === b.dataset.areaRenombrar);
+      const nombre = prompt(`Nuevo nombre para «${a.nombre}». Cambia también en las ${a.personas} ficha(s).`, a.nombre);
+      if (!nombre || nombre.trim() === a.nombre) return;
+      avisar((await api.cambiarArea(a.id, { nombre: nombre.trim() })).mensaje);
+    } else if (b.dataset.areaUnificar) {
+      const a = cat.areas.find((x) => String(x.id) === b.dataset.areaUnificar);
+      const destino = await elegirDestino(`Unificar «${a.nombre}» con…`,
+        cat.areas.filter((x) => x.id !== a.id).map((x) => [x.id, x.nombre]));
+      if (!destino) return;
+      avisar((await api.unificarArea(a.id, Number(destino))).mensaje);
+    } else if (b.dataset.areaActivo) {
+      avisar((await api.cambiarArea(b.dataset.areaActivo, { activo: b.dataset.valor === "1" })).mensaje);
+    } else if (b.dataset.cargoEditar) {
+      const c = cat.cargos.find((x) => String(x.id) === b.dataset.cargoEditar);
+      const nombre = prompt(`Nombre del cargo (cambia en las ${c.personas} ficha(s)):`, c.nombre);
+      if (!nombre) return;
+      const opciones = [["", "Sin área (general)"], ...cat.areas.map((x) => [x.id, x.nombre])];
+      const area = await elegirDestino("¿En qué área queda?", opciones);
+      if (area === null) return;
+      avisar((await api.cambiarCargo(c.id, { nombre: nombre.trim(), area_id: area ? Number(area) : null,
+                                             mover_area: String(area) !== String(c.area_id ?? "") })).mensaje);
+    } else if (b.dataset.cargoUnificar) {
+      const c = cat.cargos.find((x) => String(x.id) === b.dataset.cargoUnificar);
+      const destino = await elegirDestino(`Unificar «${c.nombre}» con…`,
+        cat.cargos.filter((x) => x.id !== c.id).map((x) => [x.id, `${x.nombre}${x.area ? ` · ${x.area}` : ""}`]));
+      if (!destino) return;
+      avisar((await api.unificarCargo(c.id, Number(destino))).mensaje);
+    } else if (b.dataset.cargoActivo) {
+      avisar((await api.cambiarCargo(b.dataset.cargoActivo, { activo: b.dataset.valor === "1" })).mensaje);
+    } else return;
+    await cargarCatalogoOficial();
+  } catch (err) { avisar(err.message, true); }
+});
+
+/* ------------------------------------------------------- actualización masiva */
+let cargaActual = null;
+async function cargarMasivo() {
+  if (!cat.areas.length) Object.assign(cat, await api.catalogoAdmin());
+  const area = $("mas-area").value;
+  $("mas-area").innerHTML = '<option value="">Todas</option>'
+    + cat.areas.map((a) => `<option>${esc(a.nombre)}</option>`).join("");
+  $("mas-area").value = area;
+  await llenarSedes($("mas-sede"));
+  if (![...$("mas-sede").options].some((o) => o.value === "")) {
+    $("mas-sede").insertAdjacentHTML("afterbegin", '<option value="">Todas</option>');
+    $("mas-sede").value = "";
+  }
+  const h = await api.historialMasivo();
+  const ESTADO = { revisada: "Revisada, sin aplicar", aplicada: "Aplicada", descartada: "Descartada" };
+  $("mas-historial").innerHTML = h.map((c) => `
+    <tr><td class="px-3 py-2 font-mono text-xs">${esc(c.folio)}</td>
+      <td class="px-3 py-2 text-slate-600">${esc(c.archivo)}</td>
+      <td class="px-3 py-2">${esc(ESTADO[c.estado] || c.estado)}</td>
+      <td class="px-3 py-2 text-right tabular-nums">${c.cambios ?? 0}</td>
+      <td class="px-3 py-2 text-xs">${esc(c.subido_por || "—")} · ${fechaHora(c.subido_en)}${c.aplicado_por
+        ? `<br>aplicó ${esc(c.aplicado_por)} · ${fechaHora(c.aplicado_en)}` : ""}</td>
+      <td class="px-3 py-2 text-slate-600">${esc(c.motivo || "")}</td></tr>`).join("")
+    || '<tr><td colspan="6" class="px-3 py-4 text-center text-slate-500">Sin cargas todavía.</td></tr>';
+}
+
+function valorLegible(v) {
+  if (v === null || v === undefined || v === "") return "—";
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v.split("-").reverse().join("/") : v;
+}
+
+$("mas-plantilla")?.addEventListener("click", () =>
+  api.plantillaMasiva({ area: $("mas-area").value, sede: $("mas-sede").value }).catch((err) => avisar(err.message, true)));
+$("mas-archivo")?.addEventListener("change", async (e) => {
+  const archivo = e.target.files[0];
+  e.target.value = "";
+  if (!archivo) return;
+  try {
+    const r = await api.revisarMasivo(archivo);
+    cargaActual = r.folio;
+    $("mas-revision").classList.remove("hidden");
+    $("mas-folio").textContent = r.folio;
+    $("mas-resumen").textContent = `${r.filas} fila(s) · ${r.cambios.length} cambio(s) en ${r.personas} persona(s)`
+      + (r.errores.length ? ` · ${r.errores.length} con error (no se aplican)` : "");
+    $("mas-errores").innerHTML = [
+      ...r.errores.map((x) => `<li class="rounded-lg bg-rose-50 px-3 py-1.5 text-rose-800">Fila ${x.fila}${x.cedula ? ` · ${esc(x.cedula)}` : ""}: ${esc(x.mensaje)}</li>`),
+      ...r.avisos.map((x) => `<li class="rounded-lg bg-amber-50 px-3 py-1.5 text-amber-900">Fila ${x.fila} · ${esc(x.cedula)}: ${esc(x.mensaje)}</li>`),
+    ].join("");
+    $("mas-cambios").innerHTML = r.cambios.map((c) => `
+      <tr><td class="px-3 py-1.5 text-xs text-slate-500">${c.fila}</td>
+        <td class="px-3 py-1.5">${esc(c.nombre)} <span class="text-xs text-slate-500">${esc(c.cedula)}</span></td>
+        <td class="px-3 py-1.5">${esc(c.etiqueta)}</td>
+        <td class="px-3 py-1.5 text-slate-500 line-through">${esc(valorLegible(c.antes))}</td>
+        <td class="px-3 py-1.5 font-medium text-emerald-800">${esc(valorLegible(c.despues))}</td></tr>`).join("")
+      || '<tr><td colspan="5" class="px-3 py-4 text-center text-slate-500">El archivo no cambia nada respecto de lo registrado.</td></tr>';
+    $("mas-revision").scrollIntoView({ block: "start", behavior: "smooth" });
+    await cargarMasivo();
+  } catch (err) { avisar(err.message, true); }
+});
+$("form-masivo")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!cargaActual) return;
+  if (!confirm("¿Aplicar los cambios? Quedan registrados con su folio y su motivo.")) return;
+  try {
+    avisar((await api.aplicarMasivo(cargaActual, $("mas-motivo").value.trim())).mensaje);
+    cargaActual = null;
+    $("mas-revision").classList.add("hidden");
+    $("form-masivo").reset();
+    await cargarMasivo();
+  } catch (err) { avisar(err.message, true); }
+});
+$("mas-descartar")?.addEventListener("click", async () => {
+  if (!cargaActual) return;
+  try {
+    avisar((await api.descartarMasivo(cargaActual)).mensaje);
+    cargaActual = null;
+    $("mas-revision").classList.add("hidden");
+    await cargarMasivo();
+  } catch (err) { avisar(err.message, true); }
+});
 
 /* ---------------------------------------------------------- actualizaciones */
 /* Markdown mínimo y seguro: se escapa todo primero y después se dan formato

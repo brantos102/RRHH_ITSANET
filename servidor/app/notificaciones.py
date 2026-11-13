@@ -55,7 +55,7 @@ def _marco(titulo: str, cuerpo: str, accion: tuple[str, str] | None = None) -> s
     settings = get_settings()
     boton = (
         f"""<tr><td style="padding-top:8px">
-              <a href="{accion[1]}" style="display:inline-block;background:#0f172a;color:#fff;
+              <a href="{accion[1]}" style="display:inline-block;background:#06122B;color:#fff;
                  text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:600">
                  {accion[0]}</a>
             </td></tr>"""
@@ -63,7 +63,7 @@ def _marco(titulo: str, cuerpo: str, accion: tuple[str, str] | None = None) -> s
     )
     return f"""<!doctype html>
 <html lang="es"><body style="margin:0;padding:24px;background:#eef1f4;
-      font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#0f172a">
+      font-family:'Schibsted Grotesk',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#06122B">
   <table role="presentation" style="max-width:560px;margin:0 auto;background:#fff;
          border-radius:14px;padding:32px;border:1px solid #dde3ea">
     <tr><td>

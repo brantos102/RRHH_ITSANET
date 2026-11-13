@@ -213,7 +213,11 @@ async def test_la_prueba_de_identidad_muestra_que_hay_que_confirmar(cliente, sin
     assert "jefe" in cuerpo
 
 
-async def test_el_alta_registra_la_correccion_del_cargo(cliente, sin_correo, jefe):
+async def test_el_alta_no_cambia_un_cargo_que_ya_consta(cliente, sin_correo, jefe):
+    """Desde la 0016 el cargo lo administra Talento Humano: al entrar por
+    primera vez se declara solo si no constaba. Este colaborador ya es
+    «Bodeguero», así que su pedido de cargo no se registra (se le avisa), y
+    el del jefe sí."""
     identidad = await cliente.post("/auth/probar-identidad",
                                    json={"cedula": CED_SIN_CORREO_C,
                                          "fecha_nacimiento": NACIMIENTO,
@@ -233,7 +237,8 @@ async def test_el_alta_registra_la_correccion_del_cargo(cliente, sin_correo, jef
         "jefe_propuesto_id": jefe["id"],
     })
     assert r.status_code == 200, r.text
-    assert r.json()["en_revision"] == ["Cargo que indica", "Jefe que indica"]
+    assert r.json()["en_revision"] == ["Jefe que indica"]
+    assert any("Talento Humano" in a for a in r.json().get("avisos", []))
 
     # El correo y el teléfono sí quedaron: no necesitan que nadie los apruebe.
     fila = await obtener_uno(
@@ -247,7 +252,7 @@ async def test_el_alta_registra_la_correccion_del_cargo(cliente, sin_correo, jef
     pendientes = await obtener_todos(
         """select campo from cambios_ficha
             where user_id = %s and estado = 'pendiente'""", (sin_correo["id"],))
-    assert {f["campo"] for f in pendientes} == {"cargo", "jefe_id"}
+    assert {f["campo"] for f in pendientes} == {"jefe_id"}
 
 
 async def test_el_alta_deja_constancia_de_lo_confirmado(cliente, sin_correo):
