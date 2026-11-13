@@ -494,6 +494,20 @@ export const api = {
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   },
+  async plantillaAltas() {
+    const r = await fetch(`${API}/admin/masivo/plantilla-altas.xlsx`, {
+      headers: { Authorization: `Bearer ${sesion.token}` } });
+    if (!r.ok) throw new ErrorApi("No se pudo preparar la plantilla.", r.status);
+    const url = URL.createObjectURL(await r.blob());
+    const a = Object.assign(document.createElement("a"), { href: url, download: "personas-nuevas.xlsx" });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  },
+  revisarAltas: (archivo) => {
+    const fd = new FormData();
+    fd.append("archivo", archivo);
+    return peticion("/admin/masivo/revisar-altas", { method: "POST", body: fd });
+  },
   revisarMasivo: (archivo) => {
     const fd = new FormData();
     fd.append("archivo", archivo);

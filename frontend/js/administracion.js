@@ -2472,7 +2472,7 @@ async function cargarMasivo() {
   const ESTADO = { revisada: "Revisada, sin aplicar", aplicada: "Aplicada", descartada: "Descartada" };
   $("mas-historial").innerHTML = h.map((c) => `
     <tr><td class="px-3 py-2 font-mono text-xs">${esc(c.folio)}</td>
-      <td class="px-3 py-2 text-slate-600">${esc(c.archivo)}</td>
+      <td class="px-3 py-2 text-slate-600"><span class="mr-1 rounded-full px-2 py-0.5 text-xs ${c.tipo === "altas" ? "bg-sky-50 text-sky-800" : "bg-slate-100 text-slate-700"}">${c.tipo === "altas" ? "Altas" : "Actualización"}</span>${esc(c.archivo)}</td>
       <td class="px-3 py-2">${esc(ESTADO[c.estado] || c.estado)}</td>
       <td class="px-3 py-2 text-right tabular-nums">${c.cambios ?? 0}</td>
       <td class="px-3 py-2 text-xs">${esc(c.subido_por || "—")} · ${fechaHora(c.subido_en)}${c.aplicado_por
@@ -2488,21 +2488,45 @@ function valorLegible(v) {
 
 $("mas-plantilla")?.addEventListener("click", () =>
   api.plantillaMasiva({ area: $("mas-area").value, sede: $("mas-sede").value }).catch((err) => avisar(err.message, true)));
-$("mas-archivo")?.addEventListener("change", async (e) => {
-  const archivo = e.target.files[0];
-  e.target.value = "";
-  if (!archivo) return;
-  try {
-    const r = await api.revisarMasivo(archivo);
-    cargaActual = r.folio;
-    $("mas-revision").classList.remove("hidden");
-    $("mas-folio").textContent = r.folio;
+const CAB = (cols) => `<tr>${cols.map((c) => `<th class="px-3 py-2">${c}</th>`).join("")}</tr>`;
+function listaAvisos(r) {
+  $("mas-errores").innerHTML = [
+    ...r.errores.map((x) => `<li class="rounded-lg bg-rose-50 px-3 py-1.5 text-rose-800">Fila ${x.fila}${x.cedula ? ` · ${esc(x.cedula)}` : ""}${x.nombre ? ` · ${esc(x.nombre)}` : ""}: ${esc(x.mensaje)}</li>`),
+    ...r.avisos.map((x) => `<li class="rounded-lg bg-amber-50 px-3 py-1.5 text-amber-900">Fila ${x.fila} · ${esc(x.cedula)}${x.nombre ? ` · ${esc(x.nombre)}` : ""}: ${esc(x.mensaje)}</li>`),
+  ].join("");
+}
+function mostrarRevision(r) {
+  cargaActual = r.folio;
+  $("mas-revision").classList.remove("hidden");
+  $("mas-folio").textContent = r.folio;
+  listaAvisos(r);
+  const altas = r.tipo === "altas";
+  $("mas-aplicar").textContent = altas ? "Registrar personas" : "Aplicar cambios";
+  $("mas-motivo").placeholder = altas ? "Completar la nómina vigente de noviembre" : "Reorganización de áreas de noviembre";
+  $("mas-fuera").classList.toggle("hidden", !altas || !r.no_en_archivo.total);
+  if (altas) {
+    $("mas-resumen").textContent = `${r.filas} fila(s) · ${r.altas.length} persona(s) nueva(s) · `
+      + `${r.ya_registradas} ya registrada(s)` + (r.errores.length ? ` · ${r.errores.length} con error (no se registran)` : "");
+    $("mas-fuera").querySelector("summary").textContent =
+      `${r.no_en_archivo.total} de ${r.activos} persona(s) activas están en el sistema y no en su archivo`;
+    $("mas-fuera-lista").innerHTML = r.no_en_archivo.personas.map((p) =>
+      `<li class="truncate">${esc(p.nombre)} <span class="text-xs text-slate-500">${esc(p.cedula)}${p.departamento ? ` · ${esc(p.departamento)}` : ""}</span></li>`).join("")
+      + (r.no_en_archivo.total > r.no_en_archivo.personas.length ? `<li class="text-slate-500">y ${r.no_en_archivo.total - r.no_en_archivo.personas.length} más…</li>` : "");
+    $("mas-cabecera").innerHTML = CAB(["Fila", "Persona", "Ingreso", "Días", "Cargo · área", "Jefe", "Ciudad", "Correo"]);
+    $("mas-cambios").innerHTML = r.altas.map((a) => `
+      <tr><td class="px-3 py-1.5 text-xs text-slate-500">${a.fila}</td>
+        <td class="px-3 py-1.5">${esc(a.nombre)} <span class="text-xs text-slate-500">${esc(a.cedula)}</span></td>
+        <td class="px-3 py-1.5 tabular-nums">${esc(valorLegible(a.fecha_ingreso))}</td>
+        <td class="px-3 py-1.5 tabular-nums">${esc(a.saldo_resultante)}${a.saldo == null ? ' <span class="text-xs text-amber-700">(calculado)</span>' : ""}</td>
+        <td class="px-3 py-1.5">${esc([a.cargo, a.departamento].filter(Boolean).join(" · ") || "—")}</td>
+        <td class="px-3 py-1.5 text-xs">${esc(a.jefe_cedula || "—")}</td>
+        <td class="px-3 py-1.5">${esc(a.ciudad || "QUITO")}</td>
+        <td class="px-3 py-1.5 text-xs">${esc(a.email || "sin correo")}</td></tr>`).join("")
+      || '<tr><td colspan="8" class="px-3 py-4 text-center text-slate-500">No hay personas nuevas en el archivo: todas ya están registradas o tienen errores.</td></tr>';
+  } else {
     $("mas-resumen").textContent = `${r.filas} fila(s) · ${r.cambios.length} cambio(s) en ${r.personas} persona(s)`
       + (r.errores.length ? ` · ${r.errores.length} con error (no se aplican)` : "");
-    $("mas-errores").innerHTML = [
-      ...r.errores.map((x) => `<li class="rounded-lg bg-rose-50 px-3 py-1.5 text-rose-800">Fila ${x.fila}${x.cedula ? ` · ${esc(x.cedula)}` : ""}: ${esc(x.mensaje)}</li>`),
-      ...r.avisos.map((x) => `<li class="rounded-lg bg-amber-50 px-3 py-1.5 text-amber-900">Fila ${x.fila} · ${esc(x.cedula)}: ${esc(x.mensaje)}</li>`),
-    ].join("");
+    $("mas-cabecera").innerHTML = CAB(["Fila", "Persona", "Dato", "Antes", "Después"]);
     $("mas-cambios").innerHTML = r.cambios.map((c) => `
       <tr><td class="px-3 py-1.5 text-xs text-slate-500">${c.fila}</td>
         <td class="px-3 py-1.5">${esc(c.nombre)} <span class="text-xs text-slate-500">${esc(c.cedula)}</span></td>
@@ -2510,14 +2534,41 @@ $("mas-archivo")?.addEventListener("change", async (e) => {
         <td class="px-3 py-1.5 text-slate-500 line-through">${esc(valorLegible(c.antes))}</td>
         <td class="px-3 py-1.5 font-medium text-emerald-800">${esc(valorLegible(c.despues))}</td></tr>`).join("")
       || '<tr><td colspan="5" class="px-3 py-4 text-center text-slate-500">El archivo no cambia nada respecto de lo registrado.</td></tr>';
-    $("mas-revision").scrollIntoView({ block: "start", behavior: "smooth" });
-    await cargarMasivo();
-  } catch (err) { avisar(err.message, true); }
+  }
+  $("mas-revision").scrollIntoView({ block: "start", behavior: "smooth" });
+}
+function subirCarga(revisar) {
+  return async (e) => {
+    const archivo = e.target.files[0];
+    e.target.value = "";
+    if (!archivo) return;
+    try {
+      avisar("Revisando el archivo…");
+      mostrarRevision(await revisar(archivo));
+      await cargarMasivo();
+    } catch (err) { avisar(err.message, true); }
+  };
+}
+$("mas-archivo")?.addEventListener("change", subirCarga(api.revisarMasivo));
+$("mas-archivo-altas")?.addEventListener("change", subirCarga(api.revisarAltas));
+$("mas-plantilla-altas")?.addEventListener("click", () => api.plantillaAltas().catch((err) => avisar(err.message, true)));
+$("mas-modo")?.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-modo]");
+  if (!b) return;
+  for (const x of $("mas-modo").querySelectorAll("[data-modo]")) {
+    const activo = x === b;
+    x.classList.toggle("bg-white", activo); x.classList.toggle("shadow-sm", activo);
+    x.classList.toggle("font-medium", activo); x.classList.toggle("text-slate-600", !activo);
+  }
+  $("mas-caja-altas").classList.toggle("hidden", b.dataset.modo !== "altas");
+  $("mas-caja-actualizar").classList.toggle("hidden", b.dataset.modo === "altas");
 });
 $("form-masivo")?.addEventListener("submit", async (e) => {
   e.preventDefault();
   if (!cargaActual) return;
-  if (!confirm("¿Aplicar los cambios? Quedan registrados con su folio y su motivo.")) return;
+  if (!confirm($("mas-aplicar").textContent === "Registrar personas"
+    ? "¿Registrar a estas personas? Quedan con su saldo, su folio y su motivo."
+    : "¿Aplicar los cambios? Quedan registrados con su folio y su motivo.")) return;
   try {
     avisar((await api.aplicarMasivo(cargaActual, $("mas-motivo").value.trim())).mensaje);
     cargaActual = null;

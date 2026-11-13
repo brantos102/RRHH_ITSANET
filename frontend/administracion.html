@@ -187,7 +187,29 @@
        Cambiar cargo, área, jefe, ciudad, contrato… de muchas personas a la
        vez, con un Excel, sin tocar la base: primero se ve qué cambiaría. -->
   <section data-panel="masivo" class="hidden space-y-4">
-    <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <div id="mas-modo" class="inline-flex flex-wrap gap-1 rounded-xl bg-slate-200/60 p-1 text-sm" role="tablist">
+      <button type="button" data-modo="actualizar" class="rounded-lg bg-white px-3 py-1.5 font-medium shadow-sm">Actualizar personas registradas</button>
+      <button type="button" data-modo="altas" class="rounded-lg px-3 py-1.5 text-slate-600 hover:text-slate-900">Registrar personas nuevas</button>
+    </div>
+    <div id="mas-caja-altas" class="hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <h2 class="font-medium">Registrar personas nuevas por Excel</h2>
+      <p class="mt-0.5 text-sm text-slate-600">Para completar el sistema con quienes faltan. Puede pegar la
+        <b>nómina completa</b>: quien ya está registrado se reconoce por la cédula y no se toca.</p>
+      <ol class="mt-2 list-decimal space-y-1 pl-5 text-sm text-slate-600">
+        <li>Descargue la plantilla de personas nuevas.</li>
+        <li>Llene cédula, apellidos y nombres y fecha de ingreso (obligatorias). Lo demás es opcional,
+          pero conviene el <b>saldo conciliado</b>: sin él, se calcula como si no hubiera gozado vacaciones.</li>
+        <li>Súbala: verá quién se registraría, quién ya estaba, los errores y quién está en el sistema pero
+          no en su archivo. Nada cambia todavía.</li>
+        <li>Si está bien, regístrelas con un motivo. Queda con folio y en la bitácora.</li>
+      </ol>
+      <div class="mt-4 flex flex-wrap items-end gap-2">
+        <button type="button" id="mas-plantilla-altas" class="rounded-xl bg-itsa-azul px-4 py-2 text-sm font-medium text-white hover:bg-itsa-azul-hover">⬇ Descargar plantilla de personas nuevas</button>
+        <label class="cursor-pointer rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">⬆ Subir archivo
+          <input id="mas-archivo-altas" type="file" accept=".xlsx,.csv" class="hidden"></label>
+      </div>
+    </div>
+    <div id="mas-caja-actualizar" class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
       <h2 class="font-medium">Actualización masiva por Excel</h2>
       <ol class="mt-2 list-decimal space-y-1 pl-5 text-sm text-slate-600">
         <li>Descargue la plantilla con los datos actuales (de todos, de un área o de una sede).</li>
@@ -210,18 +232,23 @@
         <h2 class="font-medium">Revisión <span id="mas-folio" class="font-mono text-sm text-slate-500"></span></h2>
         <p id="mas-resumen" class="text-sm text-slate-600"></p>
       </div>
-      <ul id="mas-errores" class="space-y-1 text-sm"></ul>
+      <ul id="mas-errores" class="max-h-72 space-y-1 overflow-auto text-sm"></ul>
+      <details id="mas-fuera" class="hidden rounded-xl bg-slate-50 px-4 py-3 text-sm ring-1 ring-slate-200">
+        <summary class="cursor-pointer font-medium"></summary>
+        <p class="mt-2 text-slate-600">Si su archivo es la nómina completa, revise a estas personas: pueden haber
+          salido de la empresa. Este registro no las da de baja; eso se hace en Administración › Usuarios, con la
+          causa de salida.</p>
+        <ul id="mas-fuera-lista" class="mt-2 grid gap-x-4 gap-y-0.5 sm:grid-cols-2 lg:grid-cols-3"></ul>
+      </details>
       <div class="max-h-96 overflow-auto rounded-xl ring-1 ring-slate-200"><table class="w-full text-left text-sm">
-        <thead class="sticky top-0 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-          <tr><th class="px-3 py-2">Fila</th><th class="px-3 py-2">Persona</th><th class="px-3 py-2">Dato</th>
-              <th class="px-3 py-2">Antes</th><th class="px-3 py-2">Después</th></tr></thead>
+        <thead id="mas-cabecera" class="sticky top-0 bg-slate-50 text-xs uppercase tracking-wide text-slate-500"></thead>
         <tbody id="mas-cambios" class="divide-y divide-slate-100"></tbody>
       </table></div>
       <form id="form-masivo" class="flex flex-wrap items-end gap-2">
         <label class="min-w-[16rem] flex-1"><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Motivo (obligatorio)</span>
           <input id="mas-motivo" maxlength="300" minlength="10" required placeholder="Reorganización de áreas de noviembre" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
         <button type="button" id="mas-descartar" class="rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium hover:bg-slate-200">Descartar</button>
-        <button class="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">Aplicar cambios</button>
+        <button id="mas-aplicar" class="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">Aplicar cambios</button>
       </form>
     </div>
     <div class="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
@@ -229,7 +256,7 @@
       <div class="overflow-x-auto"><table class="w-full text-left text-sm">
         <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
           <tr><th class="px-3 py-2">Folio</th><th class="px-3 py-2">Archivo</th><th class="px-3 py-2">Estado</th>
-              <th class="px-3 py-2 text-right">Cambios</th><th class="px-3 py-2">Subió / aplicó</th><th class="px-3 py-2">Motivo</th></tr></thead>
+              <th class="px-3 py-2 text-right">Cambios / altas</th><th class="px-3 py-2">Subió / aplicó</th><th class="px-3 py-2">Motivo</th></tr></thead>
         <tbody id="mas-historial" class="divide-y divide-slate-100"></tbody>
       </table></div>
     </div>

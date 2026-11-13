@@ -177,8 +177,9 @@ async def plantilla(area: str | None, sede: str | None) -> bytes:
 
 
 # ----------------------------------------------------------------- revisar
-def _leer(nombre: str, contenido: bytes) -> list[dict[str, Any]]:
-    """Filas del archivo como {campo: valor}. Acepta .xlsx y .csv (; o ,)."""
+def _leer_crudas(nombre: str, contenido: bytes, hojas: tuple[str, ...] = ("Personas",)) -> list[list]:
+    """Las filas tal cual. Acepta .xlsx (la primera hoja de `hojas` que
+    exista, o la primera del libro) y .csv (; o ,)."""
     if nombre.lower().endswith(".csv"):
         texto = contenido.decode("utf-8-sig", errors="replace")
         separador = ";" if texto.count(";") >= texto.count(",") else ","
@@ -189,10 +190,16 @@ def _leer(nombre: str, contenido: bytes) -> list[dict[str, Any]]:
             libro = load_workbook(io.BytesIO(contenido), data_only=True, read_only=True)
         except Exception as exc:  # noqa: BLE001
             raise ReglaDeNegocio("No se pudo leer el archivo. Use la plantilla en Excel (.xlsx).") from exc
-        hoja = libro["Personas"] if "Personas" in libro.sheetnames else libro.worksheets[0]
+        hoja = next((libro[h] for h in hojas if h in libro.sheetnames), libro.worksheets[0])
         crudas = [list(f) for f in hoja.iter_rows(values_only=True)]
     if not crudas:
         raise ReglaDeNegocio("El archivo está vacío.")
+    return crudas
+
+
+def _leer(nombre: str, contenido: bytes) -> list[dict[str, Any]]:
+    """Filas del archivo como {campo: valor}."""
+    crudas = _leer_crudas(nombre, contenido)
     columnas = [ENCABEZADOS.get(_plano(c)) for c in crudas[0]]
     if "cedula" not in columnas:
         raise ReglaDeNegocio("No se encontró la columna «Cédula». Use la plantilla descargada.")
@@ -304,7 +311,8 @@ async def aplicar(folio: str, motivo: str, por: str) -> dict[str, int]:
     from .personal import mover_pendientes_de_sede
     if len((motivo or "").strip()) < 10:
         raise ReglaDeNegocio("Indique el motivo (mínimo 10 caracteres).")
-    carga = await obtener_uno("SELECT id, estado, cambios FROM cargas_masivas WHERE folio = %s", (folio,))
+    carga = await obtener_uno(
+        "SELECT id, estado, cambios FROM cargas_masivas WHERE folio = %s AND tipo = 'actualizacion'", (folio,))
     if carga is None:
         raise ReglaDeNegocio("Esa carga no existe.")
     if carga["estado"] != "revisada":

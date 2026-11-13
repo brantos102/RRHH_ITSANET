@@ -267,9 +267,10 @@ def _garita() -> dict:
 
 def _mis_datos() -> dict:
     return _r("Sus datos se actualizan en «Mi ficha»:", detalles=[
-        "Teléfono, dirección y contacto de emergencia los cambia usted directamente.",
+        "Teléfonos, domicilio y contactos de emergencia los cambia usted directamente.",
         "El correo se cambia ahí y rige al abrir el enlace que llega a la dirección nueva.",
-        "Cargo, área, jefe y fechas los revisa Talento Humano antes de que rijan.",
+        "Su jefe y sus fechas los revisa Talento Humano antes de que rijan.",
+        "Su cargo y su área los administra Talento Humano: si no corresponden, escríbales por aquí.",
     ], acciones=[{"texto": "Ir a Mi ficha", "url": "mi-ficha.html"}])
 
 

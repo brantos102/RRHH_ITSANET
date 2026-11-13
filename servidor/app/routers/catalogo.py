@@ -17,7 +17,7 @@ from ..audit import registrar
 from ..db import obtener_todos
 from ..deps import exigir_rol
 from ..errores import traducir
-from ..reglas import catalogo, masivo
+from ..reglas import altas, catalogo, masivo
 
 router = APIRouter(tags=["Catálogo y actualización masiva"])
 RRHH = Annotated[dict, Depends(exigir_rol("rrhh", "admin"))]
@@ -132,6 +132,41 @@ async def plantilla(request: Request, usuario: RRHH, area: str | None = None, se
                              "Cache-Control": "no-store"})
 
 
+@router.get("/admin/masivo/plantilla-altas.xlsx", response_class=Response)
+async def plantilla_altas(request: Request, usuario: RRHH) -> Response:
+    contenido = await altas.plantilla()
+    await registrar(request, "plantilla_altas_descargada", user_id=str(usuario["id"]), cedula=usuario["cedula"])
+    return Response(contenido, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": 'attachment; filename="personas-nuevas.xlsx"',
+                             "Cache-Control": "no-store"})
+
+
+async def _archivo(archivo: UploadFile) -> tuple[str, bytes]:
+    contenido = await archivo.read()
+    if not contenido:
+        raise HTTPException(status_code=422, detail={"mensaje": "El archivo está vacío."})
+    if len(contenido) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail={"mensaje": "El archivo debe pesar menos de 5 MB."})
+    nombre = archivo.filename or "archivo.xlsx"
+    if not nombre.lower().endswith((".xlsx", ".csv")):
+        raise HTTPException(status_code=422, detail={"mensaje": "Suba la plantilla en Excel (.xlsx) o CSV."})
+    return nombre, contenido
+
+
+@router.post("/admin/masivo/revisar-altas")
+async def revisar_altas(request: Request, usuario: RRHH, archivo: UploadFile = File(...)) -> dict:
+    nombre, contenido = await _archivo(archivo)
+    try:
+        r = await altas.revisar(nombre, contenido, str(usuario["id"]))
+    except Exception as exc:  # noqa: BLE001
+        raise traducir(exc) from exc
+    await registrar(request, "altas_masivas_revisadas", user_id=str(usuario["id"]), cedula=usuario["cedula"],
+                    entidad="cargas_masivas", entidad_id=r["folio"],
+                    detalle={"filas": r["filas"], "altas": len(r["altas"]), "errores": len(r["errores"]),
+                             "ya_registradas": r["ya_registradas"]})
+    return r
+
+
 @router.post("/admin/masivo/revisar")
 async def revisar(request: Request, usuario: RRHH, archivo: UploadFile = File(...)) -> dict:
     contenido = await archivo.read()
@@ -154,6 +189,18 @@ async def revisar(request: Request, usuario: RRHH, archivo: UploadFile = File(..
 
 @router.post("/admin/masivo/{folio}/aplicar")
 async def aplicar(folio: str, datos: Aplicar, request: Request, usuario: RRHH) -> dict:
+    from ..db import obtener_uno
+    carga = await obtener_uno("SELECT tipo FROM cargas_masivas WHERE folio = %s", (folio,))
+    if carga and carga["tipo"] == "altas":
+        try:
+            r = await altas.aplicar(folio, datos.motivo, str(usuario["id"]))
+        except Exception as exc:  # noqa: BLE001
+            raise traducir(exc) from exc
+        await registrar(request, "altas_masivas_aplicadas", user_id=str(usuario["id"]), cedula=usuario["cedula"],
+                        entidad="cargas_masivas", entidad_id=folio, detalle={**r, "motivo": datos.motivo})
+        return {**r, "mensaje": f"Carga {folio} aplicada: {r['personas']} persona(s) registrada(s)."
+                + (f" {r['sin_correo']} sin correo: regístreselo en Usuarios para que puedan entrar."
+                   if r["sin_correo"] else "")}
     try:
         r = await masivo.aplicar(folio, datos.motivo, str(usuario["id"]))
     except Exception as exc:  # noqa: BLE001
@@ -176,7 +223,7 @@ async def descartar(folio: str, usuario: RRHH) -> dict:
 @router.get("/admin/masivo")
 async def historial(usuario: RRHH) -> list[dict]:
     filas = await obtener_todos(
-        """SELECT c.folio, c.archivo, c.filas, c.estado, c.motivo, c.subido_en, c.aplicado_en, c.sha256,
+        """SELECT c.folio, c.tipo, c.archivo, c.filas, c.estado, c.motivo, c.subido_en, c.aplicado_en, c.sha256,
                   JSON_LENGTH(c.cambios) AS cambios, s.nombre AS subido_por, a.nombre AS aplicado_por
              FROM cargas_masivas c LEFT JOIN users s ON s.id = c.subido_por
              LEFT JOIN users a ON a.id = c.aplicado_por

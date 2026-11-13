@@ -1,0 +1,841 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manual de usuario · Permisos y Vacaciones ITSANET</title>
+<meta name="description" content="Cómo usar el Sistema Integrado de Permisos, Vacaciones y Control de Garita de ITSANET: colaboradores, jefaturas, Talento Humano, garita y administración.">
+<meta name="theme-color" content="#06122B">
+<link rel="icon" href="img/logo.png">
+<style>
+  @font-face { font-family: "Schibsted Grotesk"; font-style: normal; font-weight: 400 900; font-display: swap;
+    src: url("fuentes/schibsted-grotesk-latin-wght-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Schibsted Grotesk"; font-style: italic; font-weight: 400 900; font-display: swap;
+    src: url("fuentes/schibsted-grotesk-latin-wght-italic.woff2") format("woff2"); }
+  :root {
+    --azul: #1C58D7; --azul-hover: #1747B0; --oscuro: #06122B; --celeste: #D2DEF7; --celeste-suave: #EEF3FC;
+    --negro: #0C0C0C; --gris-fondo: #F7F7F7; --gris-linea: #E6E6E6; --gris-borde: #C2C2C2;
+    --gris-texto: #707171; --texto: #333434; --blanco: #FFFFFF;
+    --ambar: #FFF7E6; --ambar-borde: #F2C46D; --ambar-texto: #6B4A00;
+    --verde: #EAF7EF; --verde-borde: #7CC79A; --verde-texto: #14532D;
+    --rojo: #FDECEC; --rojo-borde: #F0A3A3; --rojo-texto: #7F1D1D;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 84px; }
+  body { margin: 0; background: var(--gris-fondo); color: var(--texto);
+    font: 16px/1.65 "Schibsted Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+  a { color: var(--azul); text-underline-offset: 2px; }
+  a:hover { color: var(--azul-hover); }
+  h1, h2, h3, h4 { color: var(--oscuro); line-height: 1.25; letter-spacing: -0.01em; }
+  h2 { font-size: 1.75rem; margin: 0 0 .25rem; }
+  h3 { font-size: 1.2rem; margin: 2.2rem 0 .5rem; }
+  h4 { font-size: 1rem; margin: 1.4rem 0 .3rem; }
+  p { margin: .5rem 0 .9rem; }
+  code, kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .9em;
+    background: var(--celeste-suave); color: var(--oscuro); padding: .05rem .35rem; border-radius: 6px; }
+  kbd { border: 1px solid var(--gris-borde); background: var(--blanco); }
+
+  /* Barra superior */
+  .barra { position: sticky; top: 0; z-index: 20; background: var(--oscuro); color: #fff;
+    display: flex; align-items: center; gap: 1rem; padding: .7rem 1.25rem; }
+  .barra img { height: 30px; display: block; }
+  .barra .titulo { font-weight: 600; font-size: .95rem; opacity: .9; border-left: 1px solid rgba(255,255,255,.25); padding-left: 1rem; }
+  .barra .espacio { flex: 1; }
+  .barra button { display: none; background: rgba(255,255,255,.1); color: #fff; border: 0; border-radius: 10px;
+    padding: .45rem .8rem; font: inherit; font-size: .9rem; cursor: pointer; }
+
+  /* Portada */
+  .portada { background: linear-gradient(135deg, var(--oscuro) 0%, #0F2C68 60%, var(--azul) 140%); color: #fff;
+    padding: 3.2rem 1.25rem 3.6rem; }
+  .portada .marco { max-width: 1180px; margin: 0 auto; }
+  .portada h1 { color: #fff; font-size: clamp(2rem, 4.5vw, 3rem); margin: .2rem 0 .6rem; }
+  .portada p { color: var(--celeste); max-width: 46rem; font-size: 1.08rem; }
+  .portada .etiqueta { display: inline-block; background: rgba(210,222,247,.15); color: var(--celeste); border-radius: 999px;
+    padding: .2rem .8rem; font-size: .82rem; letter-spacing: .04em; text-transform: uppercase; }
+  .perfiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .75rem; margin-top: 1.8rem; }
+  .perfiles a { display: block; background: rgba(255,255,255,.08); border: 1px solid rgba(210,222,247,.25); border-radius: 16px;
+    padding: .9rem 1rem; color: #fff; text-decoration: none; transition: background .15s; }
+  .perfiles a:hover { background: rgba(255,255,255,.16); color: #fff; }
+  .perfiles b { display: block; font-size: 1.02rem; }
+  .perfiles span { font-size: .86rem; color: var(--celeste); }
+
+  /* Diseño con índice */
+  .contenedor { max-width: 1180px; margin: 0 auto; padding: 2rem 1.25rem 4rem; display: grid;
+    grid-template-columns: 250px minmax(0, 1fr); gap: 2.2rem; align-items: start; }
+  nav.indice { position: sticky; top: 76px; max-height: calc(100vh - 96px); overflow: auto; font-size: .92rem;
+    background: var(--blanco); border: 1px solid var(--gris-linea); border-radius: 16px; padding: 1rem .6rem 1rem 1rem; }
+  nav.indice p { margin: .9rem 0 .25rem; font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--gris-texto); }
+  nav.indice p:first-child { margin-top: 0; }
+  nav.indice a { display: block; padding: .22rem .55rem; border-radius: 8px; color: var(--texto); text-decoration: none; }
+  nav.indice a:hover { background: var(--gris-fondo); }
+  nav.indice a.activo { background: var(--celeste); color: var(--oscuro); font-weight: 600; }
+  main section.capitulo { background: var(--blanco); border: 1px solid var(--gris-linea); border-radius: 20px;
+    padding: 2rem clamp(1.1rem, 3vw, 2.4rem); margin-bottom: 1.6rem; }
+  .bajada { color: var(--gris-texto); margin-top: 0; }
+  .chip { display: inline-block; font-size: .78rem; font-weight: 600; border-radius: 999px; padding: .12rem .65rem;
+    background: var(--celeste); color: var(--oscuro); margin-bottom: .6rem; }
+
+  ol.pasos { counter-reset: paso; list-style: none; padding: 0; margin: 1rem 0; }
+  ol.pasos > li { counter-increment: paso; position: relative; padding: .1rem 0 .9rem 2.6rem; }
+  ol.pasos > li::before { content: counter(paso); position: absolute; left: 0; top: 0; width: 1.8rem; height: 1.8rem;
+    border-radius: 999px; background: var(--azul); color: #fff; font-weight: 700; font-size: .9rem;
+    display: grid; place-items: center; }
+  ul { padding-left: 1.25rem; }
+  li { margin: .25rem 0; }
+
+  .nota { border-radius: 14px; padding: .85rem 1.05rem; margin: 1rem 0; border: 1px solid; font-size: .96rem; }
+  .nota b:first-child { display: block; margin-bottom: .15rem; }
+  .nota.info { background: var(--celeste-suave); border-color: var(--celeste); color: var(--oscuro); }
+  .nota.ojo { background: var(--ambar); border-color: var(--ambar-borde); color: var(--ambar-texto); }
+  .nota.bien { background: var(--verde); border-color: var(--verde-borde); color: var(--verde-texto); }
+  .nota.alto { background: var(--rojo); border-color: var(--rojo-borde); color: var(--rojo-texto); }
+
+  figure { margin: 1.2rem 0 1.6rem; }
+  figure img { display: block; width: 100%; height: auto; border-radius: 14px; border: 1px solid var(--gris-linea);
+    box-shadow: 0 8px 28px rgba(6,18,43,.08); cursor: zoom-in; background: var(--gris-fondo); }
+  figure.movil { max-width: 340px; }
+  figcaption { font-size: .86rem; color: var(--gris-texto); margin-top: .5rem; }
+  .dos { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0 1.4rem; font-size: .94rem; }
+  th, td { text-align: left; padding: .55rem .7rem; border-bottom: 1px solid var(--gris-linea); vertical-align: top; }
+  th { background: var(--gris-fondo); color: var(--oscuro); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
+  .tabla { overflow-x: auto; }
+  .estado { display: inline-block; border-radius: 999px; padding: .05rem .55rem; font-size: .82rem; font-weight: 600; white-space: nowrap; }
+  .e-jefe { background: #FFF1D6; color: #7A4B00; } .e-th { background: var(--celeste); color: var(--oscuro); }
+  .e-ok { background: #DDF3E6; color: #14532D; } .e-no { background: #FBE0E0; color: #7F1D1D; } .e-gris { background: var(--gris-linea); color: var(--texto); }
+
+  details.faq { border: 1px solid var(--gris-linea); border-radius: 12px; padding: .7rem 1rem; margin: .55rem 0; background: var(--blanco); }
+  details.faq summary { cursor: pointer; font-weight: 600; color: var(--oscuro); }
+  details.faq[open] summary { margin-bottom: .4rem; }
+
+  footer { background: var(--oscuro); color: var(--celeste); padding: 2rem 1.25rem; font-size: .9rem; }
+  footer .marco { max-width: 1180px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 1rem 2rem; align-items: center; }
+  footer img { height: 26px; }
+
+  dialog#zoom { border: 0; padding: 0; background: transparent; max-width: 96vw; max-height: 94vh; }
+  dialog#zoom::backdrop { background: rgba(6,18,43,.82); }
+  dialog#zoom img { display: block; max-width: 96vw; max-height: 90vh; border-radius: 12px; }
+  dialog#zoom p { color: #fff; text-align: center; margin: .5rem 0 0; font-size: .9rem; }
+
+  @media (max-width: 900px) {
+    .contenedor { grid-template-columns: minmax(0, 1fr); padding: 1.2rem 1rem 3rem; }
+    nav.indice { position: fixed; inset: 60px 0 0 0; max-height: none; z-index: 15; border-radius: 0; display: none; }
+    nav.indice.abierto { display: block; }
+    .barra button { display: inline-block; }
+    .barra .titulo { display: none; }
+    .dos { grid-template-columns: 1fr; }
+    main section.capitulo { border-radius: 16px; }
+  }
+  @media print {
+    .barra, nav.indice, .perfiles, dialog { display: none !important; }
+    .contenedor { display: block; padding: 0; }
+    .portada { background: none; color: var(--oscuro); padding: 0 0 1rem; }
+    .portada h1, .portada p { color: var(--oscuro); }
+    main section.capitulo { border: 0; padding: 0; page-break-before: always; }
+    figure img { box-shadow: none; max-height: 110mm; object-fit: contain; }
+    a { color: var(--oscuro); text-decoration: none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="barra">
+  <img src="img/logo-oscuro.png" alt="itsanet" width="111" height="30">
+  <span class="titulo">Manual de usuario · Permisos y Vacaciones</span>
+  <span class="espacio"></span>
+  <button type="button" id="abrir-indice" aria-expanded="false" aria-controls="indice">Índice</button>
+</header>
+
+<div class="portada">
+  <div class="marco">
+    <span class="etiqueta">Manual de usuario · versión del 13 de noviembre de 2026</span>
+    <h1>Permisos, vacaciones y garita, paso a paso</h1>
+    <p>Todo lo que necesita para usar el sistema de Talento Humano de ITSANET: pedir sus vacaciones y permisos,
+      autorizar las de su equipo, atender los trámites de su sede y controlar la garita. Elija su perfil para ir
+      directo a lo suyo.</p>
+    <div class="perfiles">
+      <a href="#colaborador"><b>Colaborador</b><span>Saldo, vacaciones, permisos, mi ficha</span></a>
+      <a href="#jefe"><b>Jefe inmediato</b><span>Autorizar, calendario y períodos del equipo</span></a>
+      <a href="#talento-humano"><b>Talento Humano</b><span>Pendientes, documentos, informes, cargas</span></a>
+      <a href="#garita"><b>Garita</b><span>Validar salidas, visitas y personal temporal</span></a>
+      <a href="#administracion"><b>Administración</b><span>Usuarios, sedes, reglas y configuración</span></a>
+    </div>
+  </div>
+</div>
+
+<div class="contenedor">
+  <nav class="indice" id="indice" aria-label="Índice">
+    <p>Para todos</p>
+    <a href="#empezar">Antes de empezar</a>
+    <a href="#ingresar">Entrar al sistema</a>
+    <a href="#primer-ingreso">La primera vez</a>
+    <p>Colaborador</p>
+    <a href="#colaborador">Mi panel</a>
+    <a href="#vacaciones">Pedir vacaciones</a>
+    <a href="#permisos">Pedir un permiso</a>
+    <a href="#seguimiento">Seguir y cancelar</a>
+    <a href="#qr">Código de salida (QR)</a>
+    <a href="#firmar">Documentos para firmar</a>
+    <a href="#mi-ficha">Mi ficha</a>
+    <a href="#asistente">Asistente y chat</a>
+    <p>Jefe inmediato</p>
+    <a href="#jefe">Autorizar solicitudes</a>
+    <a href="#calendario">Calendario y períodos</a>
+    <p>Talento Humano</p>
+    <a href="#talento-humano">Pendientes por sede</a>
+    <a href="#th-autorizar">Autorizar y anulaciones</a>
+    <a href="#th-documentos">Documentos firmados</a>
+    <a href="#th-colaboradores">Colaboradores y fichas</a>
+    <a href="#th-informes">Tableros e informes</a>
+    <a href="#th-exportar">Exportar datos</a>
+    <a href="#th-catalogo">Cargos y áreas</a>
+    <a href="#th-masivo">Actualización masiva</a>
+    <a href="#th-altas">Registrar personas nuevas</a>
+    <p>Garita</p>
+    <a href="#garita">Validar salidas y visitas</a>
+    <a href="#temporal">Personal temporal</a>
+    <p>Administración</p>
+    <a href="#administracion">Panel de administración</a>
+    <p>Referencia</p>
+    <a href="#como-se-cuentan">Cómo se cuentan los días</a>
+    <a href="#estados">Estados de una solicitud</a>
+    <a href="#preguntas">Preguntas frecuentes</a>
+    <a href="#privacidad">Sus datos y su privacidad</a>
+  </nav>
+
+  <main>
+
+  <!-- ================================================================ TODOS -->
+  <section class="capitulo" id="empezar">
+    <span class="chip">Para todos</span>
+    <h2>Antes de empezar</h2>
+    <p class="bajada">Qué es el sistema, qué necesita y qué puede hacer cada quien.</p>
+    <p>El <b>Sistema Integrado de Permisos, Vacaciones y Control de Garita</b> reemplaza los formularios en papel y
+      las hojas de cálculo con las que se llevaban las vacaciones. Cada solicitud queda registrada con un número,
+      pasa por su jefe inmediato y por Talento Humano, y usted ve en todo momento en qué va y cuántos días le quedan.</p>
+    <h3>Qué necesita</h3>
+    <ul>
+      <li><b>Su cédula</b> y <b>un correo registrado</b> en Talento Humano. No hay contraseñas: cada vez que entra, le
+        llega un código al correo.</li>
+      <li>Un celular o una computadora con navegador (Chrome, Edge, Firefox o Safari). No se instala nada.</li>
+      <li>Estar conectado a la red de la empresa o tener la dirección del sistema que le dé Talento Humano.</li>
+    </ul>
+    <h3>Qué puede hacer cada perfil</h3>
+    <div class="tabla"><table>
+      <thead><tr><th>Perfil</th><th>Lo principal</th></tr></thead>
+      <tbody>
+        <tr><td><b>Colaborador</b></td><td>Ver su saldo y de dónde sale, pedir vacaciones y permisos, seguir sus solicitudes, mostrar su código de salida, mantener al día sus datos de contacto.</td></tr>
+        <tr><td><b>Jefe inmediato</b></td><td>Todo lo anterior, más autorizar o rechazar las solicitudes de su equipo, elegir quién cubre el puesto y ver el calendario y los saldos de su gente.</td></tr>
+        <tr><td><b>Talento Humano</b></td><td>Atender los pendientes de su sede, dar la autorización final, imprimir y archivar los documentos firmados, mantener las fichas, informes y exportaciones, cargos y áreas y cargas masivas.</td></tr>
+        <tr><td><b>Garita</b></td><td>Validar el código de salida y el regreso, registrar visitas y la jornada del personal temporal.</td></tr>
+        <tr><td><b>Administrador</b></td><td>Todo lo de Talento Humano, más la configuración del sistema: usuarios, sedes, tipos de permiso, feriados, parámetros y actualizaciones.</td></tr>
+      </tbody>
+    </table></div>
+    <p>El menú de la izquierda (en el celular, el botón ☰ arriba) muestra solo lo que corresponde a su perfil.</p>
+  </section>
+
+  <section class="capitulo" id="ingresar">
+    <span class="chip">Para todos</span>
+    <h2>Entrar al sistema</h2>
+    <p class="bajada">Con su cédula y un código que le llega al correo. Sin contraseñas que olvidar.</p>
+    <ol class="pasos">
+      <li>Abra la dirección del sistema y escriba su <b>cédula de identidad</b> (10 dígitos). Pulse
+        <b>«Enviar código a mi correo»</b>.</li>
+      <li>Revise su correo: le llega un <b>código de 6 dígitos</b>. La pantalla le muestra a qué correo se envió
+        (con parte de la dirección oculta).</li>
+      <li>Escriba el código y pulse <b>«Ingresar»</b>. El código vale <b>10 minutos</b> y una sola vez.</li>
+    </ol>
+    <div class="dos">
+      <figure><img src="img/u01_ingreso.webp" alt="Pantalla de ingreso con el campo de cédula" loading="lazy">
+        <figcaption>1. Escriba su cédula.</figcaption></figure>
+      <figure><img src="img/u02_codigo.webp" alt="Pantalla para escribir el código de acceso" loading="lazy">
+        <figcaption>2. Escriba el código que le llegó al correo.</figcaption></figure>
+    </div>
+    <div class="nota info"><b>¿No le llegó el código?</b>Revise la carpeta de spam o «Promociones». Puede pedir
+      otro desde la misma pantalla cuando termine la cuenta regresiva. Si su correo no está registrado o está mal,
+      el sistema no puede enviárselo: pida a Talento Humano que lo corrija.</div>
+    <h3>Una sesión a la vez</h3>
+    <p>Por seguridad, su cuenta queda abierta en <b>un solo dispositivo</b>. Si entra desde otro, la sesión anterior
+      se cierra y le llega un correo avisándole. Si no fue usted, avise de inmediato a Talento Humano.</p>
+    <div class="nota ojo"><b>Nunca comparta su código.</b>Talento Humano nunca se lo va a pedir, ni por teléfono ni
+      por WhatsApp. Quien tiene su código entra como usted.</div>
+  </section>
+
+  <section class="capitulo" id="primer-ingreso">
+    <span class="chip">Para todos</span>
+    <h2>La primera vez que entra</h2>
+    <p class="bajada">Si a su ficha le falta algún dato, el sistema se lo pide una sola vez.</p>
+    <p>La primera vez puede aparecer la pantalla <b>«Bienvenido»</b> con lo que falte en su ficha. Lo que pide
+      depende de lo que Talento Humano tenga registrado. Por ejemplo:</p>
+    <ul>
+      <li><b>Su área y su cargo</b>, si no constan: los elige de la lista oficial. Si el suyo no aparece, elija
+        «No está en la lista…» y escríbalo; Talento Humano lo revisa antes de que rija.</li>
+      <li>Su fecha de nacimiento, su teléfono, su jefe inmediato o su fecha de ingreso, para confirmarlos.</li>
+      <li>Un contacto de emergencia.</li>
+    </ul>
+    <figure style="max-width:420px"><img src="img/u10_bienvenida.webp" alt="Pantalla de bienvenida pidiendo área y cargo" loading="lazy">
+      <figcaption>Al entrar por primera vez sin cargo registrado, se elige de la lista oficial.</figcaption></figure>
+    <div class="nota info"><b>Después de este primer paso, su cargo y su área los administra Talento Humano.</b>
+      Si cambian o no corresponden, escríbales por el chat del sistema.</div>
+  </section>
+
+  <!-- ========================================================== COLABORADOR -->
+  <section class="capitulo" id="colaborador">
+    <span class="chip">Colaborador</span>
+    <h2>Mi panel</h2>
+    <p class="bajada">Su saldo, sus solicitudes y sus documentos, en una sola pantalla.</p>
+    <figure><img src="img/u03_panel.webp" alt="Mi panel del colaborador con días disponibles, antigüedad y botones para solicitar" loading="lazy">
+      <figcaption>Mi panel: días disponibles, antigüedad, fines de semana y los botones para solicitar.</figcaption></figure>
+    <ul>
+      <li><b>Días disponibles:</b> su saldo de vacaciones. Abra <b>«¿De dónde salen estos días?»</b> para ver el
+        detalle por año de servicio: cuánto le corresponde cada año y cuánto ha gozado.</li>
+      <li><b>Antigüedad:</b> los años cumplidos desde su fecha de ingreso. Desde el sexto año se suma un día de
+        vacaciones por cada año adicional (Código del Trabajo, Art. 69).</li>
+      <li><b>Fines de semana:</b> cuántos fines de semana completos le faltan dentro de sus vacaciones del período
+        (ver <a href="#como-se-cuentan">cómo se cuentan los días</a>).</li>
+      <li><b>Solicitar vacaciones</b> y <b>Solicitar permiso</b>: los dos botones para empezar un trámite.</li>
+      <li><b>Ausencias del equipo:</b> quién de su equipo estará fuera y cuándo, para coordinar.</li>
+      <li><b>Documentos para firmar</b>, <b>Mis solicitudes</b> y su <b>historial de vacaciones</b>, más abajo.</li>
+    </ul>
+    <figure class="movil"><img src="img/u09_panel_movil.webp" alt="Mi panel en el celular" loading="lazy">
+      <figcaption>En el celular se ve igual, en una columna. El menú está en el botón ☰.</figcaption></figure>
+  </section>
+
+  <section class="capitulo" id="vacaciones">
+    <span class="chip">Colaborador</span>
+    <h2>Pedir vacaciones</h2>
+    <p class="bajada">Elija las fechas: el sistema le dice cuántos días descuenta y cuánto le queda antes de enviar.</p>
+    <ol class="pasos">
+      <li>En <b>Mi panel</b>, pulse <b>«Solicitar vacaciones»</b>.</li>
+      <li>Elija la fecha <b>desde</b> y la fecha <b>hasta</b>. Debajo verá los <b>días a descontar</b>, con cuánto
+        le quedaría y cuántos fines de semana incluye.</li>
+      <li>Escriba una <b>descripción</b> breve (por ejemplo, «Vacaciones con la familia»).</li>
+      <li>Pulse <b>«Enviar solicitud»</b>. Recibirá un correo con el número de su solicitud.</li>
+    </ol>
+    <figure><img src="img/u04_vacaciones.webp" alt="Formulario para solicitar vacaciones con fechas y días a descontar" loading="lazy">
+      <figcaption>El formulario calcula los días antes de enviar. «Antes de enviar, tenga presente» resume las reglas.</figcaption></figure>
+    <h3>Reglas que conviene saber</h3>
+    <ul>
+      <li><b>Anticipación:</b> las vacaciones se piden con al menos <b>10 días</b> de anticipación, para que su
+        jefe pueda organizar quién cubre el puesto.</li>
+      <li><b>Bloques:</b> se recomienda tomarlas en bloques de <b>15 días</b>; el mínimo es de <b>7</b>. Para un
+        bloque más corto, el formulario le pide explicar el motivo, y lo autoriza quien corresponda.</li>
+      <li><b>Días calendario:</b> se cuentan todos los días entre la fecha de inicio y la de fin, incluidos sábados,
+        domingos y feriados.</li>
+      <li><b>Dos fines de semana por período:</b> dentro de las vacaciones de cada período deben caer al menos dos
+        fines de semana completos. Si sus fechas dejan uno fuera, el sistema se lo dice y le propone las fechas
+        corregidas.</li>
+      <li><b>Sin cruces:</b> no puede pedir días que ya están en otra solicitud suya pendiente o aprobada.</li>
+    </ul>
+    <div class="nota info"><b>Los valores de anticipación y bloques los define Talento Humano.</b>
+      Los de este manual son los vigentes al escribirlo; el formulario siempre muestra los actuales.</div>
+  </section>
+
+  <section class="capitulo" id="permisos">
+    <span class="chip">Colaborador</span>
+    <h2>Pedir un permiso</h2>
+    <p class="bajada">Cita médica, calamidad doméstica, trámites y más. Algunos piden un respaldo.</p>
+    <ol class="pasos">
+      <li>En <b>Mi panel</b>, pulse <b>«Solicitar permiso»</b>.</li>
+      <li>Elija <b>de qué se trata</b> (por ejemplo, «Cita médica» o «Calamidad doméstica»).</li>
+      <li>Indique las fechas y, si es por horas, la hora de inicio y de fin.</li>
+      <li>Escriba la descripción: <b>motivo, lugar, hora y cuánto tiempo estará ausente</b>. Su jefe y Talento
+        Humano deciden con lo que usted escriba y adjunte.</li>
+      <li>Si el tipo de permiso lo exige, <b>adjunte el respaldo</b> (certificado, cita o citación): foto o PDF.</li>
+      <li>Pulse <b>«Enviar solicitud»</b>.</li>
+    </ol>
+    <figure><img src="img/u05_permiso.webp" alt="Formulario para solicitar un permiso con los tipos de permiso" loading="lazy">
+      <figcaption>Los tipos de permiso y sus requisitos (respaldo, horas máximas, si es remunerado) los configura Talento Humano.</figcaption></figure>
+    <p>Los permisos se pueden pedir el mismo día: una cita o una calamidad no avisan con anticipación. Se cuentan
+      en <b>días hábiles</b>.</p>
+    <div class="nota ojo"><b>Sin el respaldo que pide el tipo de permiso, la solicitud no se puede registrar.</b>
+      Si todavía no lo tiene, pregúntele a Talento Humano por el chat qué hacer.</div>
+  </section>
+
+  <section class="capitulo" id="seguimiento">
+    <span class="chip">Colaborador</span>
+    <h2>Seguir, cancelar o anular una solicitud</h2>
+    <p class="bajada">Cada solicitud muestra en qué etapa está. Le llega un correo en cada paso.</p>
+    <figure><img src="img/u06_solicitudes.webp" alt="Lista de documentos para firmar y de mis solicitudes" loading="lazy">
+      <figcaption>«Mis solicitudes» con su estado, y arriba los documentos que debe firmar.</figcaption></figure>
+    <ul>
+      <li><b>Mientras no está aprobada</b>, puede <b>cancelarla</b> desde «Mis solicitudes».</li>
+      <li><b>Si ya está aprobada</b> y no la va a usar, pulse <b>«Pedir anulación»</b> y explique por qué. Talento
+        Humano la revisa; si la autoriza, <b>se le devuelven los días</b> y el código de salida deja de servir.</li>
+      <li>Si la rechazan, verá el <b>motivo del rechazo</b> en la solicitud y en el correo.</li>
+    </ul>
+    <p>Los estados posibles están en la <a href="#estados">tabla de estados</a>.</p>
+  </section>
+
+  <section class="capitulo" id="qr">
+    <span class="chip">Colaborador</span>
+    <h2>Su código de salida (QR)</h2>
+    <p class="bajada">Para salir de la empresa con un permiso aprobado.</p>
+    <ol class="pasos">
+      <li>Cuando su permiso queda aprobado, le llega un <b>código QR</b> por correo. También lo encuentra en
+        <b>Mi panel</b>, en la solicitud aprobada (<b>«Su código de salida»</b>).</li>
+      <li>Al salir, muéstrelo en garita. El guardia lo escanea: queda registrada su salida.</li>
+      <li>Al regresar, muéstrelo de nuevo: queda registrado su regreso, y si se pasó de la hora.</li>
+    </ol>
+    <div class="nota info"><b>El código solo vale en las fechas y horas aprobadas.</b> Si anulan la solicitud, deja
+      de servir.</div>
+  </section>
+
+  <section class="capitulo" id="firmar">
+    <span class="chip">Colaborador</span>
+    <h2>Documentos para firmar</h2>
+    <p class="bajada">Las vacaciones aprobadas terminan con su firma a mano en Talento Humano.</p>
+    <ol class="pasos">
+      <li>Cuando su jefe aprueba, aparece en <b>Mi panel › Documentos para firmar</b> lo que tendrá que firmar:
+        la <b>Solicitud y constancia de vacaciones</b> y, cuando corresponde, la <b>Constancia de goce de
+        vacaciones</b> (su historial completo). Puede revisarlos e imprimirlos antes.</li>
+      <li><b>Talento Humano los imprime</b>; usted solo se acerca a firmarlos.</li>
+      <li>Talento Humano archiva el físico y <b>sube el escaneo el mismo día</b>. Con eso su trámite queda como
+        <b>«Registro concluido»</b>.</li>
+    </ol>
+    <div class="nota ojo"><b>Revise antes de firmar.</b> Si algo no cuadra (fechas, días, saldo), dígaselo a Talento
+      Humano antes de firmar: su firma confirma que lo pidió y que está de acuerdo.</div>
+  </section>
+
+  <section class="capitulo" id="mi-ficha">
+    <span class="chip">Colaborador</span>
+    <h2>Mi ficha</h2>
+    <p class="bajada">Sus datos de contacto los corrige usted. Su expediente laboral, Talento Humano.</p>
+    <p>Abra <b>Mi ficha personal</b> desde el menú (abajo a la izquierda, junto a su nombre).</p>
+    <figure><img src="img/u07_mi_ficha.webp" alt="Mi ficha con teléfono, domicilio por partes y tipo de sangre" loading="lazy">
+      <figcaption>«Cómo ubicarlo»: teléfonos y domicilio. Lo guarda usted mismo; no pasa por nadie.</figcaption></figure>
+    <h3>Lo que usted corrige directamente</h3>
+    <ul>
+      <li><b>Teléfono personal</b> y <b>otro teléfono</b>.</li>
+      <li><b>Domicilio</b> por partes: provincia, cantón, parroquia, calle principal, número, calle secundaria y una
+        referencia. Es opcional.</li>
+      <li><b>Más teléfonos</b> (opcional): hasta cinco números adicionales, con su tipo (celular, fijo, trabajo) y una
+        nota, por ejemplo «WhatsApp».</li>
+      <li><b>Contactos de emergencia:</b> a quién avisar si algo ocurre en la jornada. Puede tener varios y marcar el
+        principal.</li>
+      <li><b>Tipo de sangre</b>, solo para una emergencia.</li>
+      <li>Su <b>foto</b> de perfil.</li>
+      <li>Su <b>correo de acceso</b>: escriba el nuevo y pulse «Enviar enlace». Rige cuando abra el enlace que llega a
+        la dirección nueva.</li>
+    </ul>
+    <h3>Lo que pasa por Talento Humano</h3>
+    <ul>
+      <li><b>Discapacidad:</b> es un dato sensible y opcional. Lo envía a Talento Humano, que lo verifica.</li>
+      <li><b>Su expediente</b> (cédula, fecha de ingreso, contrato, cargo, área, jefe, sede): lo ve, pero no lo cambia.
+        Junto a cada dato se indica si «No se modifica desde aquí» o «Lo confirma Talento Humano».</li>
+      <li><b>Cambios que pidió:</b> lo que envió a revisar y en qué estado está.</li>
+    </ul>
+    <h3>Mis dispositivos</h3>
+    <p>Al final de su ficha ve <b>dónde está abierta su cuenta</b> y desde dónde entró. Si no reconoce alguno,
+      ciérrelo y avise a Talento Humano.</p>
+  </section>
+
+  <section class="capitulo" id="asistente">
+    <span class="chip">Colaborador</span>
+    <h2>Asistente y chat con Talento Humano</h2>
+    <p class="bajada">El botón redondo abajo a la derecha, en cualquier pantalla.</p>
+    <figure><img src="img/u08_asistente.webp" alt="Panel del chat con el asistente y la pestaña Talento Humano" loading="lazy">
+      <figcaption>El asistente responde al momento; la pestaña «Talento Humano» es para escribirle a una persona.</figcaption></figure>
+    <ul>
+      <li><b>Asistente:</b> responde lo frecuente con sus propios datos: «¿Cuántos días tengo?», «¿En qué va mi
+        solicitud?», «Permiso médico», «¿Qué debo firmar?», «Próximos feriados». No es inteligencia artificial: no
+        envía sus datos fuera de la empresa y no inventa respuestas.</li>
+      <li><b>Talento Humano:</b> si el asistente no sabe, le ofrece escribirle a Talento Humano de su sede. Le
+        responden en el mismo chat y le avisan por correo.</li>
+    </ul>
+  </section>
+
+  <!-- ================================================================= JEFE -->
+  <section class="capitulo" id="jefe">
+    <span class="chip">Jefe inmediato</span>
+    <h2>Autorizar las solicitudes de su equipo</h2>
+    <p class="bajada">Usted decide primero; después pasa a Talento Humano.</p>
+    <p>Cuando alguien de su equipo pide vacaciones o un permiso, le llega un correo y aparece un contador en
+      <b>Jefe › Por autorizar</b>.</p>
+    <figure><img src="img/j01_por_autorizar.webp" alt="Solicitud por aprobar con botones Rechazar y Aprobar" loading="lazy">
+      <figcaption>Cada solicitud muestra fechas, días, saldo y quién cubre el puesto.</figcaption></figure>
+    <ol class="pasos">
+      <li>Revise las fechas, los días y el saldo. Si el permiso tiene respaldo, puede abrirlo.</li>
+      <li><b>¿Quién cubre el puesto?</b> Elija a la persona que lo reemplazará, o déjelo sin asignar y decídalo
+        después. Talento Humano lo confirma para el registro.</li>
+      <li>Pulse <b>«Aprobar»</b>, o <b>«Rechazar»</b> escribiendo el motivo: la persona lo verá.</li>
+    </ol>
+    <p>El correo que le llega también trae un enlace para revisar la solicitud y decidir desde ahí.</p>
+    <div class="nota info"><b>Si alguien de su equipo no tiene jefe asignado</b>, la etapa de jefatura la decide
+      Talento Humano. Pídales que se lo asignen para que las próximas lleguen a usted.</div>
+  </section>
+
+  <section class="capitulo" id="calendario">
+    <span class="chip">Jefe inmediato</span>
+    <h2>Calendario y períodos del equipo</h2>
+    <p class="bajada">Quién falta y cuándo, y cuántos días tiene acumulados cada uno.</p>
+    <figure><img src="img/j02_calendario.webp" alt="Calendario del equipo por mes" loading="lazy">
+      <figcaption>Jefe › Calendario: las ausencias del mes por colores (aprobadas, en trámite, permisos).</figcaption></figure>
+    <figure><img src="img/j03_periodos.webp" alt="Tabla de períodos de los colaboradores con saldo y antigüedad" loading="lazy">
+      <figcaption>Jefe › Períodos del equipo: ingreso, años, saldo, fines de semana pendientes y días en trámite.</figcaption></figure>
+    <p>Úselos para planificar: quien acumula muchos días debería tomarlos antes de que se le junten períodos.
+      En <b>Informes › Solicitudes</b> y <b>Por departamento</b> tiene los listados con filtros.</p>
+  </section>
+
+  <!-- ======================================================= TALENTO HUMANO -->
+  <section class="capitulo" id="talento-humano">
+    <span class="chip">Talento Humano</span>
+    <h2>Pendientes por sede</h2>
+    <p class="bajada">Todo lo que espera a Talento Humano en su sede, en una bandeja.</p>
+    <figure><img src="img/t01_pendientes.webp" alt="Bandeja de pendientes de Talento Humano por sede" loading="lazy">
+      <figcaption>Talento Humano › Pendientes por sede: solicitudes, cambios de ficha, consultas del chat y documentos por firmar.</figcaption></figure>
+    <ol class="pasos">
+      <li>Elija su sede (o «Todas») arriba. Los contadores dicen cuánto hay de cada cosa.</li>
+      <li>Pulse <b>«Tomar»</b> en lo que va a revisar: sus compañeros lo verán «en revisión» y no lo duplicarán.</li>
+      <li>Pulse <b>«Atender»</b> para resolverlo. Lo resuelto pasa a <b>«Atendido hoy»</b>.</li>
+    </ol>
+  </section>
+
+  <section class="capitulo" id="th-autorizar">
+    <span class="chip">Talento Humano</span>
+    <h2>Autorizar, cambios de ficha y anulaciones</h2>
+    <ul>
+      <li><b>Talento Humano › Por autorizar:</b> las solicitudes que ya aprobó el jefe esperan su autorización final.
+        Al aprobar, la persona recibe el correo (y el código de salida si es un permiso).</li>
+      <li><b>Anulaciones por resolver:</b> cuando alguien pide anular una solicitud aprobada. Si la autoriza, se
+        devuelven los días y el código de salida deja de servir; si no, escriba el motivo.</li>
+      <li><b>Cambios de ficha</b> (en Administración): lo que los colaboradores pidieron cambiar en su expediente.
+        «Confirmar» lo aplica; «Rechazar» lo deja como estaba.</li>
+    </ul>
+    <figure><img src="img/t11_cambios_ficha.webp" alt="Lista de cambios de ficha por confirmar" loading="lazy">
+      <figcaption>Cambios de ficha: dato, valor anterior y valor pedido.</figcaption></figure>
+  </section>
+
+  <section class="capitulo" id="th-documentos">
+    <span class="chip">Talento Humano</span>
+    <h2>Documentos firmados</h2>
+    <p class="bajada">Imprimir, recoger la firma y archivar el escaneo el mismo día.</p>
+    <figure><img src="img/t04_documentos.webp" alt="Lista de documentos firmados con impresiones y escaneos" loading="lazy">
+      <figcaption>Talento Humano › Documentos firmados: cada documento con su folio, impresiones, firma y escaneo.</figcaption></figure>
+    <ol class="pasos">
+      <li><b>Imprima</b> el documento. El sistema pregunta la fecha: por defecto <b>hoy</b>. Puede consignar una
+        <b>fecha anterior</b> con justificación, hasta <b>3 veces por documento</b>; queda en la bitácora y el pie
+        del documento dice la fecha real de impresión.</li>
+      <li>La persona firma a mano. Pulse <b>«Registrar firma»</b>.</li>
+      <li>Escanee el documento firmado y pulse <b>«Subir escaneo»</b>. El sistema guarda su huella digital para
+        auditoría. Con eso el trámite queda <b>concluido</b>.</li>
+    </ol>
+    <div class="nota ojo"><b>El escaneo es el último paso.</b> Si un documento firmado no se escanea ese día,
+      Talento Humano recibe un aviso cada mañana hasta que se suba.</div>
+  </section>
+
+  <section class="capitulo" id="th-colaboradores">
+    <span class="chip">Talento Humano</span>
+    <h2>Colaboradores, fichas y mensajes</h2>
+    <ul>
+      <li><b>Colaboradores:</b> el listado con saldo, antigüedad, fines de semana pendientes y días en trámite de
+        toda la planilla. El buscador de arriba a la izquierda («Buscar una persona…») lleva directo a una ficha.</li>
+      <li><b>Ficha de la persona:</b> datos personales y laborales, domicilio, teléfonos, contactos de emergencia,
+        saldo y solicitudes. Solo Talento Humano ve los datos de contacto; el jefe no.</li>
+      <li><b>Mensajes:</b> las consultas que llegan por el chat. Responda desde ahí; la persona recibe el aviso por
+        correo.</li>
+    </ul>
+    <figure><img src="img/t12_persona.webp" alt="Ficha de una persona vista por Talento Humano" loading="lazy">
+      <figcaption>La ficha completa de una persona. Cada cambio queda en la bitácora.</figcaption></figure>
+  </section>
+
+  <section class="capitulo" id="th-informes">
+    <span class="chip">Talento Humano</span>
+    <h2>Tableros e informes</h2>
+    <figure><img src="img/t05_tableros.webp" alt="Tableros con indicadores en tarjetas" loading="lazy">
+      <figcaption>Informes › Tableros: indicadores en tarjetas que se arrastran, cambian de tamaño y se filtran.</figcaption></figure>
+    <ul>
+      <li><b>Filtros del tablero</b> (sede, área, fechas): se aplican a todas las tarjetas. Un clic en una barra
+        filtra todo por ese valor.</li>
+      <li><b>Arrastrar (⠿)</b> para ordenar, <b>⤢</b> para cambiar el tamaño, <b>⛶</b> para ampliar.</li>
+      <li><b>Configurar</b> para crear sus propios gráficos (barras, columnas, línea, cifra) y compartirlos.</li>
+      <li><b>Informes › Solicitudes:</b> filtros combinables por estado, tipo, departamento, cargo, jefe, fechas.</li>
+    </ul>
+  </section>
+
+  <section class="capitulo" id="th-exportar">
+    <span class="chip">Talento Humano</span>
+    <h2>Exportar datos</h2>
+    <p class="bajada">Un Excel, PDF o CSV con logo, folio y motivo. Queda registrado quién se llevó qué y para qué.</p>
+    <figure><img src="img/t07_exportar.webp" alt="Pantalla de exportar datos con tipos y filtros" loading="lazy">
+      <figcaption>Informes › Exportar datos: qué, de quién y para qué.</figcaption></figure>
+    <ol class="pasos">
+      <li><b>Qué exportar:</b> personal, saldos por período, solicitudes, vacaciones gozadas o documentos firmados.</li>
+      <li><b>De quién:</b> una o varias personas, áreas, cargos, ciudades, sede, tipo de contrato o el equipo de un
+        jefe. Sin filtros sale todo el personal activo; los filtros se suman.</li>
+      <li><b>Para qué:</b> el motivo es obligatorio. Elija el formato y descargue.</li>
+    </ol>
+    <div class="nota alto"><b>Son datos personales (LOPDP).</b> Guarde los archivos solo en equipos de la empresa y
+      compártalos solo con quien los necesita. Cada archivo lleva el folio <code>EXP-AAAA-NNNN</code> y la marca
+      «Confidencial».</div>
+  </section>
+
+  <section class="capitulo" id="th-catalogo">
+    <span class="chip">Talento Humano</span>
+    <h2>Cargos y áreas</h2>
+    <p class="bajada">La lista oficial de la que eligen los colaboradores al entrar.</p>
+    <figure><img src="img/t08_catalogo.webp" alt="Catálogo de áreas y cargos" loading="lazy">
+      <figcaption>Administración › Cargos y áreas.</figcaption></figure>
+    <ul>
+      <li><b>Agregar</b> un área o un cargo (el cargo, dentro de un área).</li>
+      <li><b>Renombrar:</b> cambia el nombre también en las fichas de todas las personas que lo tienen.</li>
+      <li><b>Unificar:</b> junta dos que son el mismo («BODEGA» y «Bodega Norte» → «Bodega»): las personas pasan
+        al destino y queda un solo registro.</li>
+      <li><b>Desactivar:</b> lo quita de las listas para elegir, sin tocar a quien ya lo tiene.</li>
+      <li>Si arriba aparece <b>«En fichas pero no en el catálogo»</b>, pulse <b>«Agregarlos al catálogo»</b>.</li>
+    </ul>
+  </section>
+
+  <section class="capitulo" id="th-masivo">
+    <span class="chip">Talento Humano</span>
+    <h2>Actualización masiva por Excel</h2>
+    <p class="bajada">Cambiar cargo, área, jefe o sede de muchas personas a la vez, con vista previa.</p>
+    <figure><img src="img/t09_masivo.webp" alt="Pantalla de actualización masiva" loading="lazy">
+      <figcaption>Administración › Actualización masiva › Actualizar personas registradas.</figcaption></figure>
+    <ol class="pasos">
+      <li>Elija área o sede (o todas) y pulse <b>«Descargar plantilla»</b>: trae los datos actuales.</li>
+      <li>Corrija en Excel las columnas en azul. <b>Una celda vacía no cambia nada</b>; no se borra nada desde aquí.</li>
+      <li>Pulse <b>«Subir archivo corregido»</b>. Verá persona por persona qué cambiaría (antes y después) y los
+        errores. <b>Todavía no cambia nada.</b></li>
+      <li>Si está bien, escriba el <b>motivo</b> y pulse <b>«Aplicar cambios»</b>. Queda con folio
+        <code>CM-AAAA-NNNN</code>. Si no, <b>«Descartar»</b>.</li>
+    </ol>
+    <p>Se pueden cambiar: cargo, área, cédula del jefe, ciudad de trabajo, bodega, centro de costo, cliente, tipo y
+      fin de contrato. Cambiar la ciudad puede cambiar la sede de Talento Humano que atiende a la persona; sus
+      trámites pendientes se mueven con ella.</p>
+  </section>
+
+  <section class="capitulo" id="th-altas">
+    <span class="chip">Talento Humano</span>
+    <h2>Registrar personas nuevas (completar la planilla)</h2>
+    <p class="bajada">Para quienes faltan en el sistema. Puede subir la nómina completa: quien ya está se omite.</p>
+    <figure><img src="img/t10_altas.webp" alt="Pantalla para registrar personas nuevas por Excel" loading="lazy">
+      <figcaption>Administración › Actualización masiva › Registrar personas nuevas.</figcaption></figure>
+    <ol class="pasos">
+      <li>Pulse <b>«Descargar plantilla de personas nuevas»</b>.</li>
+      <li>Pegue su nómina vigente. Obligatorio: <b>cédula, apellidos y nombres, fecha de ingreso</b>. Muy
+        recomendado: <b>días de vacaciones disponibles</b> (el saldo conciliado a hoy) y <b>correo personal</b>.
+        Opcional: celular, cargo, área, cédula del jefe, ciudad, bodega, centro de costo, cliente, contrato y fecha
+        de nacimiento.</li>
+      <li>Súbala. La revisión le dice:
+        <ul>
+          <li>quiénes se registrarían, con el saldo que quedaría;</li>
+          <li>cuántos <b>ya estaban</b> registrados (no se tocan);</li>
+          <li>los <b>errores</b> por fila (cédula inválida, fecha futura, correo repetido, saldo mayor que lo devengado…);</li>
+          <li>quién está en el sistema y <b>no en su archivo</b>: si subió la nómina completa, revíselos, pueden haber salido.</li>
+        </ul></li>
+      <li>Escriba el motivo y pulse <b>«Registrar personas»</b>.</li>
+    </ol>
+    <div class="nota ojo"><b>Sin «días disponibles», el saldo se calcula desde la fecha de ingreso como si la persona no
+      hubiera gozado nada.</b> Para alguien con años en la empresa casi nunca es lo correcto: cargue el saldo conciliado.</div>
+    <div class="nota info"><b>Sin correo, la persona no puede entrar.</b> Regístreselo después en Administración ›
+      Usuarios. Las personas nuevas quedan con perfil «Colaborador»; los jefes se asignan en Jefaturas.</div>
+  </section>
+
+  <!-- ================================================================ GARITA -->
+  <section class="capitulo" id="garita">
+    <span class="chip">Garita</span>
+    <h2>Validar salidas, regresos y visitas</h2>
+    <p class="bajada">Pensada para usarse de pie y rápido: el veredicto ocupa toda la pantalla.</p>
+    <figure><img src="img/g01_garita.webp" alt="Pantalla de garita con el campo para escanear" loading="lazy">
+      <figcaption>Garita: el campo del escáner, el personal autorizado hoy, las visitas y los últimos movimientos.</figcaption></figure>
+    <ol class="pasos">
+      <li>Escanee el código QR del colaborador con el lector (o escríbalo y pulse <kbd>Enter</kbd>). También puede
+        usar la <b>cámara</b> del equipo.</li>
+      <li>La pantalla se pone <b>verde</b> si está autorizado o <b>roja</b> si no, con el motivo. <kbd>Enter</kbd>
+        cierra el aviso y deja listo el siguiente.</li>
+      <li>El mismo código leído por segunda vez registra el <b>regreso</b>, y si llegó tarde.</li>
+    </ol>
+    <ul>
+      <li><b>Personal autorizado hoy:</b> quién tiene permiso de salir hoy.</li>
+      <li><b>Visitas:</b> «Registrar» una visita al entrar; queda en «Visitas dentro» hasta que marque su salida.</li>
+      <li><b>Últimos movimientos:</b> lo registrado en la jornada.</li>
+    </ul>
+  </section>
+
+  <section class="capitulo" id="temporal">
+    <span class="chip">Garita · Talento Humano</span>
+    <h2>Personal temporal</h2>
+    <figure><img src="img/g02_temporal.webp" alt="Pantalla de personal temporal" loading="lazy">
+      <figcaption>Personal temporal: registro con la cédula, jornada y lo trabajado en la semana.</figcaption></figure>
+    <ul>
+      <li><b>Registrar:</b> Talento Humano da de alta al operario temporal; con <b>«Escanear»</b> se lee la cédula
+        con la cámara para no escribir los datos.</li>
+      <li><b>Jornada:</b> cada persona tiene un solo botón que cambia según corresponda: <b>«Entró»</b>,
+        <b>«Salió»</b> o <b>«Listo»</b>.</li>
+      <li><b>Lo trabajado esta semana</b> e <b>«Informe para Finanzas»</b>: las horas y jornadas para el pago. Las
+        jornadas que quedaron sin salida las cierra Talento Humano a mano, y queda en la bitácora.</li>
+    </ul>
+  </section>
+
+  <!-- ======================================================== ADMINISTRACIÓN -->
+  <section class="capitulo" id="administracion">
+    <span class="chip">Administración</span>
+    <h2>Panel de administración</h2>
+    <p class="bajada">La configuración del sistema. Talento Humano ve casi todo; algunas opciones son solo del administrador.</p>
+    <figure><img src="img/a01_usuarios.webp" alt="Listado de usuarios en administración" loading="lazy">
+      <figcaption>Administración › Usuarios.</figcaption></figure>
+    <div class="tabla"><table>
+      <thead><tr><th>Opción</th><th>Para qué sirve</th></tr></thead>
+      <tbody>
+        <tr><td><b>Usuarios</b></td><td>Crear a una persona («+ Nuevo»), corregir su ficha, registrar su correo, cambiar su perfil, <b>cerrar sus sesiones</b> si perdió el celular y registrar su <b>salida</b> con la causa.</td></tr>
+        <tr><td><b>Jefaturas</b></td><td>Nombrar jefaturas y asignarles su equipo (por área, cargo o persona).</td></tr>
+        <tr><td><b>Cambios de ficha</b></td><td>Confirmar o rechazar lo que pidieron los colaboradores.</td></tr>
+        <tr><td><b>Talento Humano</b></td><td>Quién integra Talento Humano y qué sede atiende, y el correo del departamento que recibe copia de los avisos.</td></tr>
+        <tr><td><b>Cargos y áreas · Actualización masiva</b></td><td>Ver las secciones de <a href="#th-catalogo">Talento Humano</a>.</td></tr>
+        <tr><td><b>Sedes y regiones</b></td><td>Las sedes de Talento Humano y qué ciudades atiende cada una.</td></tr>
+        <tr><td><b>Documentos firmados</b></td><td>Impresiones, firmas y escaneos.</td></tr>
+        <tr><td><b>Tipos de solicitud</b></td><td>Los tipos de permiso: si piden respaldo o justificación, si descuentan de vacaciones, sus topes de días y horas.</td></tr>
+        <tr><td><b>Lineamientos</b></td><td>Lo que se lee bajo «Antes de enviar, tenga presente» al pedir vacaciones o permisos.</td></tr>
+        <tr><td><b>Días no laborables</b></td><td>Feriados nacionales y locales del año.</td></tr>
+        <tr><td><b>Antigüedades</b></td><td>Cuántos días devenga cada persona según sus años de servicio (Art. 69 del Código del Trabajo).</td></tr>
+        <tr><td><b>Ingreso y firmas</b></td><td>Qué se pide en el primer ingreso y quién firma por Talento Humano en cada sede.</td></tr>
+        <tr><td><b>Asistente</b></td><td>Las respuestas propias de la empresa y lo que el asistente no supo responder.</td></tr>
+        <tr><td><b>Parámetros y base legal</b></td><td>Las reglas: anticipación, bloques, fines de semana, caducidad, feriados dentro de las vacaciones. Cada cambio queda en la bitácora.</td></tr>
+        <tr><td><b>Pantalla principal</b> <span class="estado e-gris">solo administrador</span></td><td>El aviso de la empresa y qué bloques ve el colaborador en su panel.</td></tr>
+        <tr><td><b>Actualizaciones</b> <span class="estado e-gris">solo administrador</span></td><td>Versión instalada, migraciones pendientes y las notas de cada entrega.</td></tr>
+        <tr><td><b>Bitácora</b></td><td>Registro inmutable de quién hizo qué y cuándo. No se puede editar ni borrar.</td></tr>
+        <tr><td><b>Cotejo de la carga · Depuración</b></td><td>Bajar lo que quedó en el sistema para compararlo con el archivo de origen (cédulas, ingresos, jefes y saldos), y encontrar lo que hay que corregir: por ejemplo, quién no puede entrar por falta de correo.</td></tr>
+      </tbody>
+    </table></div>
+    <div class="dos">
+      <figure><img src="img/a08_parametros.webp" alt="Parámetros del sistema con su base legal" loading="lazy">
+        <figcaption>Parámetros y base legal.</figcaption></figure>
+      <figure><img src="img/a03_sedes.webp" alt="Sedes de Talento Humano y ciudades" loading="lazy">
+        <figcaption>Sedes y regiones.</figcaption></figure>
+    </div>
+  </section>
+
+  <!-- ============================================================ REFERENCIA -->
+  <section class="capitulo" id="como-se-cuentan">
+    <span class="chip">Referencia</span>
+    <h2>Cómo se cuentan los días</h2>
+    <h3>Cuántos días le corresponden</h3>
+    <p><b>15 días</b> por cada año completo de servicio. Desde el <b>sexto año</b> se suma un día por cada año
+      adicional, hasta 15 adicionales (Código del Trabajo, Art. 69).</p>
+    <div class="tabla"><table>
+      <thead><tr><th>Año de servicio</th><th>1 a 5</th><th>6</th><th>7</th><th>10</th><th>20 o más</th></tr></thead>
+      <tbody><tr><td>Días de ese año</td><td>15</td><td>16</td><td>17</td><td>20</td><td>30</td></tr></tbody>
+    </table></div>
+    <p>Los días del año en curso se van acumulando mes a mes (1,25 por mes). Tomarlos por adelantado lo autoriza
+      Talento Humano.</p>
+    <h3>Cómo se descuentan</h3>
+    <ul>
+      <li><b>Vacaciones: días calendario.</b> Todos los días entre la fecha de inicio y la de fin, incluidos sábados,
+        domingos y feriados: <code>fin − inicio + 1</code>, igual que en la hoja de Talento Humano.</li>
+      <li><b>Permisos: días hábiles.</b></li>
+      <li>Se descuenta primero del período <b>más antiguo</b>.</li>
+    </ul>
+    <h3>Ejemplos</h3>
+    <ul>
+      <li>Del lunes 1 al domingo 14: <b>14 días</b>.</li>
+      <li>Del lunes al viernes: <b>5 días</b>. El fin de semana siguiente no se descuenta porque vuelve a trabajar el lunes.</li>
+      <li>En cada período deben caer <b>al menos dos fines de semana completos</b> (sábado y domingo) dentro de sus vacaciones.</li>
+    </ul>
+  </section>
+
+  <section class="capitulo" id="estados">
+    <span class="chip">Referencia</span>
+    <h2>Estados de una solicitud</h2>
+    <div class="tabla"><table>
+      <thead><tr><th>Estado</th><th>Qué significa</th><th>Qué puede hacer</th></tr></thead>
+      <tbody>
+        <tr><td><span class="estado e-jefe">Espera a su jefe</span></td><td>La revisa su jefe inmediato.</td><td>Cancelarla.</td></tr>
+        <tr><td><span class="estado e-th">Espera a Talento Humano</span></td><td>El jefe la aprobó; falta la autorización final.</td><td>Cancelarla.</td></tr>
+        <tr><td><span class="estado e-ok">Aprobada</span></td><td>Autorizada. Si es un permiso, tiene su código de salida.</td><td>Firmar los documentos; pedir anulación si no la usará.</td></tr>
+        <tr><td><span class="estado e-th">Anulación en trámite</span></td><td>Pidió anularla; Talento Humano decide.</td><td>Esperar la respuesta.</td></tr>
+        <tr><td><span class="estado e-no">Rechazada</span></td><td>No se autorizó. El motivo está en la solicitud.</td><td>Hacer otra, corrigiendo lo indicado.</td></tr>
+        <tr><td><span class="estado e-gris">Cancelada</span></td><td>La canceló usted, o se anuló.</td><td>—</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="capitulo" id="preguntas">
+    <span class="chip">Referencia</span>
+    <h2>Preguntas frecuentes</h2>
+    <details class="faq"><summary>No me llega el código de acceso.</summary>
+      <p>Revise spam y «Promociones», y espere un minuto. Si sigue sin llegar, su correo puede no estar registrado o estar
+        mal escrito: pídale a Talento Humano que lo revise.</p></details>
+    <details class="faq"><summary>Cambié de celular o lo perdí.</summary>
+      <p>Entre desde el nuevo: la sesión del anterior se cierra sola. Si lo perdió o se lo robaron, avise a Talento
+        Humano para que cierre todas sus sesiones.</p></details>
+    <details class="faq"><summary>Mi cargo, mi área o mi jefe están mal.</summary>
+      <p>Escríbale a Talento Humano por el chat. El jefe se puede pedir corregir desde «Mi ficha»; el cargo y el área los
+        corrige Talento Humano.</p></details>
+    <details class="faq"><summary>¿Por qué me descontó también el sábado y el domingo?</summary>
+      <p>Las vacaciones se cuentan en días calendario (Art. 69). Ver <a href="#como-se-cuentan">cómo se cuentan los días</a>.</p></details>
+    <details class="faq"><summary>Necesito vacaciones con menos de 10 días de anticipación.</summary>
+      <p>Hable con su jefe y con Talento Humano. La anticipación protege la organización del equipo; las excepciones se
+        autorizan caso por caso.</p></details>
+    <details class="faq"><summary>Mi saldo no coincide con lo que yo tenía.</summary>
+      <p>Abra «¿De dónde salen estos días?» en Mi panel para ver el detalle por año. Si algo no cuadra, escriba a Talento
+        Humano por el chat con el año que no coincide.</p></details>
+    <details class="faq"><summary>¿Quién ve mis datos?</summary>
+      <p>Usted y Talento Humano. Su jefe ve lo necesario para autorizar (fechas, días, saldo), no sus datos de contacto ni
+        de salud.</p></details>
+  </section>
+
+  <section class="capitulo" id="privacidad">
+    <span class="chip">Referencia</span>
+    <h2>Sus datos y su privacidad</h2>
+    <p>Sus datos se tratan conforme a la <b>Ley Orgánica de Protección de Datos Personales</b> del Ecuador:</p>
+    <ul>
+      <li>Se usan solo para su relación laboral: vacaciones, permisos, control de salidas y contacto en emergencias.</li>
+      <li>Los ven usted y Talento Humano. Su jefe, solo lo necesario para autorizar.</li>
+      <li>La discapacidad y el tipo de sangre son datos sensibles: opcionales, y solo para lo que la ley prevé.</li>
+      <li>El sistema funciona en servidores de la empresa. El asistente no envía sus datos a servicios externos.</li>
+      <li>Cada acceso y cada cambio queda en una bitácora que no se puede borrar.</li>
+      <li>Puede pedir a Talento Humano conocer, corregir o actualizar sus datos.</li>
+    </ul>
+    <div class="nota info"><b>Las capturas de este manual usan datos inventados.</b> Los nombres, cédulas y saldos que
+      aparecen no corresponden a ninguna persona.</div>
+  </section>
+
+  </main>
+</div>
+
+<footer>
+  <div class="marco">
+    <img src="img/logo-oscuro.png" alt="itsanet" width="96" height="26">
+    <span>Sistema Integrado de Permisos, Vacaciones y Control de Garita · Manual de usuario</span>
+    <span>¿Dudas? Escríbale a Talento Humano por el chat del sistema.</span>
+  </div>
+</footer>
+
+<dialog id="zoom" aria-label="Imagen ampliada"><img alt=""><p></p></dialog>
+
+<script>
+  // Índice en el celular
+  const indice = document.getElementById("indice");
+  const boton = document.getElementById("abrir-indice");
+  boton.addEventListener("click", () => {
+    const abierto = indice.classList.toggle("abierto");
+    boton.setAttribute("aria-expanded", String(abierto));
+  });
+  indice.addEventListener("click", (e) => {
+    if (e.target.closest("a")) { indice.classList.remove("abierto"); boton.setAttribute("aria-expanded", "false"); }
+  });
+
+  // Marca en el índice la sección que se está leyendo
+  const enlaces = [...indice.querySelectorAll("a")];
+  const observador = new IntersectionObserver((entradas) => {
+    for (const e of entradas) {
+      if (!e.isIntersecting) continue;
+      enlaces.forEach((a) => a.classList.toggle("activo", a.getAttribute("href") === "#" + e.target.id));
+    }
+  }, { rootMargin: "-20% 0px -70% 0px" });
+  document.querySelectorAll("section.capitulo").forEach((s) => observador.observe(s));
+
+  // Ampliar una captura
+  const zoom = document.getElementById("zoom");
+  document.querySelectorAll("figure img").forEach((img) => img.addEventListener("click", () => {
+    zoom.querySelector("img").src = img.src;
+    zoom.querySelector("img").alt = img.alt;
+    zoom.querySelector("p").textContent = img.closest("figure").querySelector("figcaption")?.textContent || "";
+    zoom.showModal();
+  }));
+  zoom.addEventListener("click", () => zoom.close());
+</script>
+</body>
+</html>

@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manual técnico · Permisos y Vacaciones ITSANET</title>
+<meta name="description" content="Manual técnico para TI: arquitectura, instalación, actualizaciones, base de datos, respaldos, seguridad y solución de problemas del sistema de Permisos, Vacaciones y Garita.">
+<meta name="theme-color" content="#06122B">
+<style>
+  @font-face { font-family: "Schibsted Grotesk"; font-style: normal; font-weight: 400 900; font-display: swap;
+    src: url("../usuario/fuentes/schibsted-grotesk-latin-wght-normal.woff2") format("woff2"); }
+  :root {
+    --azul: #1C58D7; --oscuro: #06122B; --celeste: #D2DEF7; --celeste-suave: #EEF3FC;
+    --gris-fondo: #F7F7F7; --gris-linea: #E6E6E6; --gris-borde: #C2C2C2; --gris-texto: #707171; --texto: #333434;
+    --ambar: #FFF7E6; --ambar-borde: #F2C46D; --ambar-texto: #6B4A00;
+    --rojo: #FDECEC; --rojo-borde: #F0A3A3; --rojo-texto: #7F1D1D;
+    --verde: #EAF7EF; --verde-borde: #7CC79A; --verde-texto: #14532D;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+  body { margin: 0; background: var(--gris-fondo); color: var(--texto);
+    font: 15.5px/1.65 "Schibsted Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+  a { color: var(--azul); text-underline-offset: 2px; }
+  h1, h2, h3 { color: var(--oscuro); line-height: 1.25; }
+  h2 { font-size: 1.6rem; margin: 0 0 .3rem; }
+  h3 { font-size: 1.12rem; margin: 1.9rem 0 .45rem; }
+  p { margin: .45rem 0 .85rem; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .88em;
+    background: var(--celeste-suave); color: var(--oscuro); padding: .05rem .35rem; border-radius: 6px; }
+  pre { background: var(--oscuro); color: #E8EEFC; border-radius: 12px; padding: .9rem 1rem; overflow-x: auto;
+    font: .86rem/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: .6rem 0 1rem; }
+  pre code { background: none; color: inherit; padding: 0; }
+  pre .c { color: #8FA3C9; }
+  .barra { position: sticky; top: 0; z-index: 20; background: var(--oscuro); color: #fff; display: flex; align-items: center;
+    gap: 1rem; padding: .7rem 1.25rem; }
+  .barra img { height: 28px; display: block; }
+  .barra span { font-weight: 600; font-size: .95rem; opacity: .9; border-left: 1px solid rgba(255,255,255,.25); padding-left: 1rem; }
+  .portada { background: linear-gradient(135deg, var(--oscuro), #0F2C68 70%, var(--azul) 150%); color: #fff; padding: 2.6rem 1.25rem 2.8rem; }
+  .portada .marco { max-width: 1180px; margin: 0 auto; }
+  .portada h1 { color: #fff; font-size: clamp(1.8rem, 4vw, 2.6rem); margin: .3rem 0 .5rem; }
+  .portada p { color: var(--celeste); max-width: 50rem; }
+  .etiqueta { display: inline-block; background: rgba(210,222,247,.15); color: var(--celeste); border-radius: 999px;
+    padding: .2rem .8rem; font-size: .8rem; letter-spacing: .04em; text-transform: uppercase; }
+  .contenedor { max-width: 1180px; margin: 0 auto; padding: 1.8rem 1.25rem 4rem; display: grid;
+    grid-template-columns: 240px minmax(0, 1fr); gap: 2rem; align-items: start; }
+  nav { position: sticky; top: 70px; max-height: calc(100vh - 90px); overflow: auto; font-size: .9rem; background: #fff;
+    border: 1px solid var(--gris-linea); border-radius: 16px; padding: .9rem .6rem .9rem .9rem; }
+  nav a { display: block; padding: .2rem .5rem; border-radius: 8px; color: var(--texto); text-decoration: none; }
+  nav a:hover { background: var(--gris-fondo); }
+  nav p { margin: .8rem 0 .2rem; font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--gris-texto); }
+  nav p:first-child { margin-top: 0; }
+  section { background: #fff; border: 1px solid var(--gris-linea); border-radius: 18px; padding: 1.8rem clamp(1rem, 3vw, 2.2rem); margin-bottom: 1.4rem; }
+  .bajada { color: var(--gris-texto); margin-top: 0; }
+  table { width: 100%; border-collapse: collapse; margin: .8rem 0 1.2rem; font-size: .92rem; }
+  th, td { text-align: left; padding: .5rem .65rem; border-bottom: 1px solid var(--gris-linea); vertical-align: top; }
+  th { background: var(--gris-fondo); color: var(--oscuro); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
+  .tabla { overflow-x: auto; }
+  .nota { border-radius: 12px; padding: .8rem 1rem; margin: .9rem 0; border: 1px solid; font-size: .94rem; }
+  .nota b:first-child { display: block; margin-bottom: .1rem; }
+  .info { background: var(--celeste-suave); border-color: var(--celeste); color: var(--oscuro); }
+  .ojo { background: var(--ambar); border-color: var(--ambar-borde); color: var(--ambar-texto); }
+  .alto { background: var(--rojo); border-color: var(--rojo-borde); color: var(--rojo-texto); }
+  .bien { background: var(--verde); border-color: var(--verde-borde); color: var(--verde-texto); }
+  /* Diagrama de arquitectura */
+  .diagrama { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; align-items: center; gap: .6rem; margin: 1rem 0 1.4rem; }
+  .caja { border: 1.5px solid var(--gris-borde); border-radius: 14px; padding: .8rem .9rem; background: #fff; font-size: .9rem; }
+  .caja b { display: block; color: var(--oscuro); }
+  .caja small { color: var(--gris-texto); display: block; line-height: 1.4; margin-top: .2rem; }
+  .caja.marca { border-color: var(--azul); background: var(--celeste-suave); }
+  .caja.oscura { border-color: var(--oscuro); background: var(--oscuro); color: #fff; }
+  .caja.oscura b { color: #fff; } .caja.oscura small { color: var(--celeste); }
+  .caja.oscura code { background: rgba(255,255,255,.14); color: #fff; }
+  .flecha { color: var(--azul); font-weight: 700; text-align: center; font-size: .8rem; }
+  .apilado { display: grid; gap: .5rem; }
+  @media (max-width: 900px) {
+    .contenedor { grid-template-columns: minmax(0, 1fr); padding: 1.2rem 1rem 3rem; }
+    nav { position: static; max-height: none; }
+    .diagrama { grid-template-columns: 1fr; }
+    .flecha { transform: rotate(90deg); }
+  }
+  @media print { .barra, nav { display: none; } .contenedor { display: block; } section { border: 0; page-break-inside: avoid; } }
+</style>
+</head>
+<body>
+<header class="barra"><img src="../usuario/img/logo-oscuro.png" alt="itsanet" width="104" height="28"><span>Manual técnico · uso interno de TI</span></header>
+<div class="portada"><div class="marco">
+  <span class="etiqueta">Manual técnico · versión del 13 de noviembre de 2026</span>
+  <h1>Sistema de Permisos, Vacaciones y Control de Garita</h1>
+  <p>Para el área de TI: cómo está armado, dónde vive en el servidor, cómo se instala, se actualiza, se respalda y se
+    diagnostica. Los comandos van en la terminal del servidor (VS Code Remote-SSH, línea <code>enicolalde@apps</code>),
+    uno por uno.</p>
+</div></div>
+
+<div class="contenedor">
+<nav aria-label="Índice">
+  <p>Visión general</p>
+  <a href="#resumen">Resumen</a>
+  <a href="#arquitectura">Arquitectura</a>
+  <a href="#ubicaciones">Ubicaciones en el servidor</a>
+  <a href="#no-tocar">Lo que no se toca</a>
+  <p>Operación</p>
+  <a href="#configuracion">Configuración (.env)</a>
+  <a href="#instalacion">Primera instalación</a>
+  <a href="#actualizar">Actualizaciones</a>
+  <a href="#base">Base de datos y migraciones</a>
+  <a href="#tareas">Tareas programadas</a>
+  <a href="#respaldos">Respaldos y restauración</a>
+  <a href="#monitoreo">Monitoreo y registros</a>
+  <p>Datos</p>
+  <a href="#datos">Carga y mantenimiento de datos</a>
+  <a href="#completar">Completar la planilla</a>
+  <p>Seguridad</p>
+  <a href="#seguridad">Seguridad y LOPDP</a>
+  <p>Desarrollo</p>
+  <a href="#desarrollo">Código y pruebas</a>
+  <a href="#manual-usuario">Publicar el manual de usuario</a>
+  <p>Referencia</p>
+  <a href="#problemas">Solución de problemas</a>
+  <a href="#retirar">Retirar el sistema</a>
+</nav>
+<main>
+
+<section id="resumen">
+  <h2>Resumen</h2>
+  <p class="bajada">Qué es, quién lo usa y de qué depende.</p>
+  <p>Aplicación web interna que reemplaza el registro de vacaciones en hojas de cálculo: solicitudes de vacaciones y
+    permisos con aprobación de jefe y Talento Humano, saldos por período (Código del Trabajo, Art. 69), documentos
+    firmados con escaneo, control de garita con código QR, personal temporal, informes y exportaciones.</p>
+  <div class="tabla"><table>
+    <thead><tr><th>Pieza</th><th>Tecnología</th></tr></thead>
+    <tbody>
+      <tr><td>Interfaz</td><td>HTML + módulos JavaScript (sin framework) + Tailwind CSS 3.4 compilado. Archivos estáticos.</td></tr>
+      <tr><td>API</td><td>Python 3.11, FastAPI 0.115, Uvicorn 0.34, Pydantic 2.10, aiomysql / PyMySQL.</td></tr>
+      <tr><td>Base de datos</td><td>MySQL 8.0, base <code>rrhh</code>, <code>utf8mb4_0900_ai_ci</code>. Reglas críticas también en disparadores y funciones.</td></tr>
+      <tr><td>Documentos</td><td>openpyxl (Excel), reportlab (PDF), qrcode + Pillow (QR).</td></tr>
+      <tr><td>Correo</td><td>SMTP con STARTTLS (aiosmtplib). Envía los códigos de acceso y los avisos.</td></tr>
+      <tr><td>Publicación</td><td>Apache (HTTPS, puerto propio 8444) como proxy inverso; servicio y temporizadores de systemd.</td></tr>
+    </tbody>
+  </table></div>
+  <p>El repositorio <code>brantos102/RRHH_ITSANET</code> es la única fuente del código. Todo cambio se hace ahí y el
+    servidor lo trae con <code>git pull</code> (o con <code>bash despliegue/actualizar.sh</code>).</p>
+</section>
+
+<section id="arquitectura">
+  <h2>Arquitectura</h2>
+  <p class="bajada">Un solo servidor. Nada se expone salvo el puerto 8444.</p>
+  <div class="diagrama" role="img" aria-label="Navegador hacia Apache 8444, que sirve la web y envía /api al backend en 8010, que usa MySQL, la carpeta de adjuntos y el correo">
+    <div class="caja"><b>Navegador</b><small>Colaboradores, jefes, TH, garita<br>Computadora o celular</small></div>
+    <div class="flecha">HTTPS<br>→</div>
+    <div class="caja marca"><b>Apache · :8444</b><small>Sitio <code>rrhh-itsanet.conf</code><br>Estáticos de <code>/var/www/rrhh-itsanet/</code><br><code>/api</code> → 127.0.0.1:8010</small></div>
+    <div class="flecha">HTTP local<br>→</div>
+    <div class="apilado">
+      <div class="caja oscura"><b>API · 127.0.0.1:8010</b><small><code>rrhh-itsanet-api.service</code> (Uvicorn + FastAPI)</small></div>
+      <div class="caja"><b>MySQL 8 · base <code>rrhh</code></b><small>usuario <code>rrhh_app</code>, permisos mínimos</small></div>
+      <div class="caja"><b>Adjuntos</b><small><code>~/bryan/rrhh_datos/adjuntos/</code> (700)</small></div>
+      <div class="caja"><b>SMTP</b><small>códigos de acceso y avisos</small></div>
+    </div>
+  </div>
+  <ul>
+    <li><b>Autenticación:</b> cédula + código de un solo uso (6 dígitos, 10 minutos, 5 intentos, 5 envíos por hora) enviado
+      al correo registrado. El backend emite un JWT de 8 horas ligado a una sesión registrada; por omisión, una sesión
+      por persona (<code>sesiones_simultaneas</code>).</li>
+    <li><b>Autorización:</b> por perfil (<code>empleado</code>, <code>jefe</code>, <code>rrhh</code>, <code>guardia</code>,
+      <code>admin</code>) en cada ruta de la API; la interfaz solo oculta lo que no corresponde.</li>
+    <li><b>Reglas de negocio:</b> saldos por período (<code>vacation_periods</code>), consumo del período más antiguo,
+      dos fines de semana por período, días calendario en vacaciones y hábiles en permisos, sin solapes. La base las
+      refuerza con disparadores, así valen aunque alguien escriba directo en MySQL.</li>
+    <li><b>Tareas:</b> devengo diario, caducidad, avisos y depuración por retención, con temporizadores de systemd.</li>
+  </ul>
+</section>
+
+<section id="ubicaciones">
+  <h2>Ubicaciones en el servidor</h2>
+  <p class="bajada">Servidor <code>192.168.4.94</code>, usuario <code>enicolalde</code>, carpeta <code>~/bryan/</code>.</p>
+  <div class="tabla"><table>
+    <thead><tr><th>Pieza</th><th>Dónde</th><th>Notas</th></tr></thead>
+    <tbody>
+      <tr><td>Código</td><td><code>~/bryan/RRHH_ITSANET</code></td><td>Clon del repositorio. Entorno Python en <code>.venv/</code>.</td></tr>
+      <tr><td>Configuración</td><td><code>~/bryan/RRHH_ITSANET/servidor/.env</code></td><td>Claves de base, JWT y SMTP. No se versiona.</td></tr>
+      <tr><td>Datos</td><td><code>~/bryan/rrhh_datos/</code></td><td>Excel, CSV, informes y respaldos. Permisos 700.</td></tr>
+      <tr><td>Adjuntos</td><td><code>~/bryan/rrhh_datos/adjuntos/</code></td><td>Certificados, <code>fotos/</code> y <code>firmados/</code> (escaneos).</td></tr>
+      <tr><td>Respaldos</td><td><code>~/bryan/rrhh_datos/respaldos/</code></td><td>Volcados de MySQL y <code>.tar.gz</code> de adjuntos.</td></tr>
+      <tr><td>Web publicada</td><td><code>/var/www/rrhh-itsanet/</code></td><td>Copia de <code>frontend/</code> que hace <code>instalar.sh</code>.</td></tr>
+      <tr><td>Apache</td><td><code>/etc/apache2/sites-available/rrhh-itsanet.conf</code></td><td><code>Listen 8444</code> propio. Registro: <code>/var/log/apache2/rrhh-itsanet-error.log</code>.</td></tr>
+      <tr><td>systemd</td><td><code>/etc/systemd/system/rrhh-itsanet-*</code></td><td><code>-api.service</code>, <code>-tareas.timer</code>, <code>-retencion.timer</code>.</td></tr>
+      <tr><td>Dirección</td><td><code>https://192.168.4.94:8444</code></td><td>Salud: <code>/api/salud</code>.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="no-tocar">
+  <h2>Lo que no se toca</h2>
+  <div class="nota alto"><b>El servidor aloja otros sistemas en producción.</b> No se modifican IV ITSANET (base
+    <code>iv_itsanet</code>, carpeta <code>~/bryan/IV_ITSANET</code>), los sitios <code>itsanet-app-8443.conf</code> e
+    <code>itsanet-data-sync*.conf</code>, ni los puertos 3000, 3002, 8000, 8080 y 8443. Este sistema usa solo
+    <b>8010</b> (interno) y <b>8444</b> (web). Apache solo se recarga, y solo si <code>apache2ctl configtest</code> da
+    «Syntax OK».</div>
+  <pre><code><span class="c"># Ver puertos, servicios y quién tiene acceso a la base (solo mira)</span>
+bash despliegue/accesos.sh
+bash despliegue/diagnostico.sh</code></pre>
+</section>
+
+<section id="configuracion">
+  <h2>Configuración (<code>servidor/.env</code>)</h2>
+  <p class="bajada">Variables principales. Los valores no se escriben en documentos ni en el repositorio.</p>
+  <div class="tabla"><table>
+    <thead><tr><th>Variable</th><th>Para qué</th></tr></thead>
+    <tbody>
+      <tr><td><code>MYSQL_URL</code></td><td>Conexión con el usuario <code>rrhh_app</code>. La crea <code>despliegue/crear_base.sh</code>.</td></tr>
+      <tr><td><code>JWT_SECRET</code></td><td>Firma de las sesiones. Cambiarla cierra todas las sesiones.</td></tr>
+      <tr><td><code>ADJUNTOS_DIR</code></td><td>Carpeta de adjuntos, fotos y escaneos.</td></tr>
+      <tr><td><code>SMTP_HOST</code>, <code>SMTP_PORT</code>, <code>SMTP_USER</code>, <code>SMTP_PASSWORD</code>, <code>SMTP_REMITENTE</code></td><td>Correo saliente. Se configuran con <code>bash despliegue/configurar_correo.sh</code>.</td></tr>
+      <tr><td><code>EMAIL_BACKEND</code></td><td><code>smtp</code> en producción; <code>console</code> solo para pruebas locales.</td></tr>
+      <tr><td><code>APP_URL</code>, <code>CORS_ORIGINS</code></td><td>Dirección pública (<code>https://192.168.4.94:8444</code>) y orígenes permitidos.</td></tr>
+      <tr><td><code>ENTORNO</code></td><td><code>produccion</code>: exige la lista explícita de <code>CORS_ORIGINS</code>.</td></tr>
+    </tbody>
+  </table></div>
+  <p>Las reglas de negocio (anticipación, bloques, fines de semana, caducidad, feriados dentro de las vacaciones, datos
+    de la empresa) no van en <code>.env</code>: están en la tabla <code>app_config</code> y se cambian en
+    <b>Administración › Parámetros y base legal</b>, con bitácora.</p>
+</section>
+
+<section id="instalacion">
+  <h2>Primera instalación</h2>
+  <p class="bajada">Ya hecha en el servidor. Queda como referencia para una reinstalación.</p>
+  <pre><code>cd ~/bryan/RRHH_ITSANET
+git pull
+<span class="c"># 1. Base y usuario de la aplicación (guarda la clave en servidor/.env)</span>
+bash despliegue/crear_base.sh
+<span class="c"># 2. Estructura: primero revisar, después aplicar</span>
+sudo env MYSQL_URL="mysql://root@localhost/rrhh?unix_socket=/var/run/mysqld/mysqld.sock" .venv/bin/python mysql/migrar.py
+sudo env MYSQL_URL="mysql://root@localhost/rrhh?unix_socket=/var/run/mysqld/mysqld.sock" .venv/bin/python mysql/migrar.py --aplicar
+<span class="c"># 3. Correo y prueba</span>
+bash despliegue/configurar_correo.sh
+.venv/bin/python despliegue/probar_correo.py correo.de.prueba@itsanet.com
+<span class="c"># 4. Servicio, tareas, web y sitio de Apache (muestra todo y pregunta antes)</span>
+bash despliegue/instalar.sh</code></pre>
+  <div class="nota info"><b>Certificado.</b> La cámara de garita y el escaneo de cédulas exigen HTTPS. El instalador
+    reutiliza el certificado de otro sitio del mismo Apache (solo lee la ruta). Para usar otro:
+    <code>CERT=/ruta/cert.pem LLAVE=/ruta/llave.key bash despliegue/instalar.sh</code>.</div>
+</section>
+
+<section id="actualizar">
+  <h2>Actualizaciones</h2>
+  <p class="bajada">Cada entrega trae su nota en <code>despliegue/actualizaciones/AAAA-MM-DD_NN_tema.md</code>.</p>
+  <p>El atajo respalda la base y los adjuntos, trae el código (<code>git pull --ff-only</code>), aplica las migraciones
+    que falten, reinstala y comprueba <code>/api/salud</code>:</p>
+  <pre><code>cd ~/bryan/RRHH_ITSANET
+bash despliegue/actualizar.sh</code></pre>
+  <p>Después, <b>Ctrl+F5</b> en el navegador. Las notas (qué cambia, comandos uno por uno y qué probar) se leen y
+    descargan en <b>Administración › Actualizaciones</b> (solo administrador), que además muestra la versión
+    instalada y las migraciones pendientes.</p>
+  <h3>Paso a paso (equivalente)</h3>
+  <pre><code>sudo mysqldump --single-transaction --routines --triggers rrhh &gt; ~/bryan/rrhh_datos/respaldos/rrhh_$(date +%F_%H%M).sql
+tar -czf ~/bryan/rrhh_datos/respaldos/adjuntos_$(date +%F_%H%M).tar.gz -C ~/bryan/rrhh_datos adjuntos
+git pull
+sudo env MYSQL_URL="mysql://root@localhost/rrhh?unix_socket=/var/run/mysqld/mysqld.sock" .venv/bin/python mysql/migrar.py --aplicar
+bash despliegue/instalar.sh --si</code></pre>
+</section>
+
+<section id="base">
+  <h2>Base de datos y migraciones</h2>
+  <p class="bajada"><code>mysql/migrar.py</code> aplica cada archivo de <code>mysql/migraciones/</code> una sola vez y en orden.</p>
+  <p>Lleva el registro en <code>schema_migraciones</code> con la huella de cada archivo: si alguien edita una migración
+    ya aplicada, lo detecta. Sin <code>--aplicar</code> solo muestra lo que haría. Todas son idempotentes.</p>
+  <div class="tabla"><table>
+    <thead><tr><th>Migración</th><th>Contenido</th></tr></thead>
+    <tbody>
+      <tr><td>0001 – 0007</td><td>Esquema, disparadores de reglas, datos base, funciones (cálculo de días, saldos), solicitudes, vistas y feriados.</td></tr>
+      <tr><td>0008</td><td>Reemplazo confirmado por Talento Humano.</td></tr>
+      <tr><td>0009</td><td>Primer ingreso y firmantes por sede.</td></tr>
+      <tr><td>0010</td><td>Sesiones por dispositivo; jefe por registrar.</td></tr>
+      <tr><td>0011</td><td>Asistente y atención de pendientes.</td></tr>
+      <tr><td>0012 – 0013</td><td>Etiqueta de teléfono; sedes y regiones, ficha, discapacidad, escaneos firmados.</td></tr>
+      <tr><td>0014</td><td>Tableros e indicadores.</td></tr>
+      <tr><td>0015</td><td>Fecha al imprimir, exportaciones con folio, feriados dentro de las vacaciones.</td></tr>
+      <tr><td>0016</td><td>Catálogo de áreas y cargos, actualizaciones masivas, teléfonos adicionales y domicilio.</td></tr>
+      <tr><td>0017</td><td>Altas masivas: columna <code>tipo</code> en <code>cargas_masivas</code>.</td></tr>
+    </tbody>
+  </table></div>
+  <h3>Usuarios de la base</h3>
+  <ul>
+    <li><code>rrhh_app</code>: el de la aplicación. Solo <code>SELECT, INSERT, UPDATE, DELETE, EXECUTE</code> sobre <code>rrhh.*</code>.</li>
+    <li>Usuario de solo lectura para consultas y DBeaver: <code>bash despliegue/usuario_lectura.sh</code>; acceso desde
+      Windows por túnel SSH según <code>despliegue/DBEAVER.md</code>.</li>
+    <li>Las migraciones se aplican como <code>root</code> por el socket local (crean disparadores y funciones).</li>
+  </ul>
+  <div class="nota ojo"><b>No se corrigen datos a mano en la base.</b> Cada cambio en el aplicativo deja bitácora y
+    mantiene los saldos coherentes. Para correcciones masivas existe Administración › Actualización masiva; para
+    depurar, las consultas guiadas de <code>mysql/depuracion/</code> (empezar por <code>00_LEER_PRIMERO.sql</code>).</div>
+</section>
+
+<section id="tareas">
+  <h2>Tareas programadas</h2>
+  <div class="tabla"><table>
+    <thead><tr><th>Temporizador</th><th>Cuándo</th><th>Qué hace</th></tr></thead>
+    <tbody>
+      <tr><td><code>rrhh-itsanet-tareas.timer</code></td><td>Diario, 06:50 (Ecuador)</td><td>Devengo diario de toda la planilla, caducidad de períodos (si está activa), avisos (saldos altos, períodos por vencer, escaneos pendientes).</td></tr>
+      <tr><td><code>rrhh-itsanet-retencion.timer</code></td><td>Mensual</td><td>Depura registros según la retención: accesos 24 meses, auditoría 84 meses (configurables).</td></tr>
+    </tbody>
+  </table></div>
+  <pre><code>systemctl list-timers 'rrhh-itsanet-*'                <span class="c"># próximas ejecuciones</span>
+sudo systemctl start rrhh-itsanet-tareas.service        <span class="c"># correr la diaria ahora</span>
+.venv/bin/python mysql/tareas.py diaria                 <span class="c"># lo mismo, viendo el resultado</span></code></pre>
+</section>
+
+<section id="respaldos">
+  <h2>Respaldos y restauración</h2>
+  <p class="bajada"><code>actualizar.sh</code> respalda antes de cada actualización. Además, conviene uno diario fuera del servidor.</p>
+  <pre><code>mkdir -p ~/bryan/rrhh_datos/respaldos
+sudo mysqldump --single-transaction --routines --triggers rrhh &gt; ~/bryan/rrhh_datos/respaldos/rrhh_$(date +%F_%H%M).sql
+tar -czf ~/bryan/rrhh_datos/respaldos/adjuntos_$(date +%F_%H%M).tar.gz -C ~/bryan/rrhh_datos adjuntos
+ls -lh ~/bryan/rrhh_datos/respaldos/</code></pre>
+  <p>La base guarda la huella SHA-256 de cada escaneo firmado; sin el respaldo de <code>adjuntos/</code>, la auditoría
+    tendría la huella pero no el documento. Los respaldos se copian a almacenamiento de la empresa, nunca a nubes o
+    correos personales (LOPDP).</p>
+  <h3>Restaurar (reemplaza todo lo actual; solo con autorización)</h3>
+  <pre><code>sudo systemctl stop rrhh-itsanet-api
+sudo mysql rrhh &lt; ~/bryan/rrhh_datos/respaldos/ARCHIVO.sql
+sudo systemctl start rrhh-itsanet-api</code></pre>
+</section>
+
+<section id="monitoreo">
+  <h2>Monitoreo y registros</h2>
+  <pre><code>systemctl is-active rrhh-itsanet-api                                  <span class="c"># debe decir: active</span>
+curl -k https://127.0.0.1:8444/api/salud                              <span class="c"># "estado":"ok","base_datos":"conectada"</span>
+sudo journalctl -u rrhh-itsanet-api --since "10 min ago" --no-pager | tail -40
+sudo journalctl -u rrhh-itsanet-api -f                                <span class="c"># en vivo (Ctrl + C para salir)</span>
+sudo tail -40 /var/log/apache2/rrhh-itsanet-error.log</code></pre>
+  <p>Cada línea del registro del backend lleva un identificador de petición y la cédula de quien la hizo, para seguir
+    un caso de punta a punta. La <b>bitácora</b> funcional (quién hizo qué) está en la base y se consulta en
+    Administración › Bitácora; no se puede editar ni borrar desde la aplicación.</p>
+</section>
+
+<section id="datos">
+  <h2>Carga y mantenimiento de datos</h2>
+  <p class="bajada">Los archivos con datos personales viven solo en <code>~/bryan/rrhh_datos/</code>. Nunca en el repositorio.</p>
+  <div class="tabla"><table>
+    <thead><tr><th>Herramienta</th><th>Para qué</th><th>Dónde</th></tr></thead>
+    <tbody>
+      <tr><td><b>Registrar personas nuevas</b></td><td>Altas por Excel con saldo conciliado, vista previa y folio. Reconoce a quien ya está.</td><td>Web: Administración › Actualización masiva</td></tr>
+      <tr><td><b>Actualización masiva</b></td><td>Cambiar cargo, área, jefe, ciudad, bodega, CECO, cliente y contrato de personas registradas.</td><td>Web: Administración › Actualización masiva</td></tr>
+      <tr><td><b>Cargos y áreas</b></td><td>Catálogo oficial: crear, renombrar, unificar, desactivar.</td><td>Web: Administración › Cargos y áreas</td></tr>
+      <tr><td><code>mysql/cargar_registro.py</code></td><td>Carga inicial desde el registro de vacaciones (Excel). Solo antes de la publicación.</td><td>Terminal</td></tr>
+      <tr><td><code>scripts/cargar_historial.py</code></td><td>Historial de vacaciones de la hoja (no toca saldos).</td><td>Terminal</td></tr>
+      <tr><td><code>mysql/cargar_personas.py</code></td><td>Personas desde CSV con correo, rol y jefe (crea o actualiza por cédula).</td><td>Terminal</td></tr>
+      <tr><td><code>mysql/saldos.py</code></td><td>Explicar, recalcular, regenerar o fijar el saldo de una persona.</td><td>Terminal</td></tr>
+    </tbody>
+  </table></div>
+  <div class="nota alto"><b>No volver a cargar el registro de Google Sheets después de la publicación.</b> Reemplazaría
+    los saldos por los de la hoja y borraría los ajustes hechos en el aplicativo.</div>
+</section>
+
+<section id="completar">
+  <h2>Completar la planilla con quienes faltan</h2>
+  <p class="bajada">Procedimiento recomendado cuando la carga inicial no trajo a todo el personal activo.</p>
+  <ol>
+    <li><b>Respaldo</b> (ver <a href="#respaldos">Respaldos</a>).</li>
+    <li><b>Nómina vigente:</b> Talento Humano prepara en Excel la lista del personal activo hoy, con cédula, apellidos y
+      nombres, fecha de ingreso y, de preferencia, el saldo de vacaciones conciliado a la fecha y el correo personal.</li>
+    <li><b>Plantilla:</b> Administración › Actualización masiva › Registrar personas nuevas › «Descargar plantilla de
+      personas nuevas». Se pega la nómina respetando las columnas.</li>
+    <li><b>Revisión:</b> al subirla, el sistema ensaya cada alta dentro de una transacción que se deshace y muestra:
+      quién se registraría (con el saldo resultante), cuántos ya estaban, los errores por fila y quién está en el sistema
+      pero no en el archivo. No escribe nada.</li>
+    <li><b>Corrección:</b> se corrigen los errores en el Excel y se vuelve a subir (cada subida genera su folio; la
+      anterior queda «revisada, sin aplicar» y conviene descartarla).</li>
+    <li><b>Aplicar</b> con un motivo. Todo entra en una sola transacción: o entran todas las altas de la carga, o ninguna.</li>
+    <li><b>Después:</b> registrar el correo de quien no lo tenga (Usuarios), asignar jefaturas (Jefaturas), revisar
+      «Depuración › No pueden entrar», y dar de baja con su causa a quien figure en el sistema y ya no trabaje.</li>
+  </ol>
+  <p>Alternativa por terminal, para TI: <code>mysql/cargar_personas.py</code> con un CSV
+    (<code>despliegue/personas_plantilla.csv</code>), que exige correo y rol y también crea o actualiza por cédula.</p>
+</section>
+
+<section id="seguridad">
+  <h2>Seguridad y protección de datos (LOPDP)</h2>
+  <ul>
+    <li><b>Sin contraseñas almacenadas:</b> acceso por código de un solo uso; se guarda solo su hash, con vigencia,
+      intentos máximos y límite de envíos por hora.</li>
+    <li><b>Sesiones:</b> JWT de 8 horas ligado a una sesión revocable. Talento Humano puede cerrar todas las sesiones
+      de una persona (celular perdido); cada persona ve y cierra las suyas en «Mi ficha».</li>
+    <li><b>Mínimo privilegio:</b> el usuario de la aplicación no puede alterar la estructura; el backend escucha solo en
+      127.0.0.1; Apache publica solo HTTPS en 8444.</li>
+    <li><b>Datos sensibles</b> (discapacidad, tipo de sangre, certificados médicos): visibles solo para la persona y
+      Talento Humano; los adjuntos en carpeta con permisos 700; el jefe ve lo necesario para autorizar.</li>
+    <li><b>Trazabilidad:</b> bitácora inmutable, folios en exportaciones (<code>EXP-AAAA-NNNN</code>) y cargas
+      masivas (<code>CM-AAAA-NNNN</code>) con motivo obligatorio y huella del archivo.</li>
+    <li><b>Retención:</b> registros de acceso 24 meses y auditoría 84 meses, depurados por el temporizador mensual.</li>
+    <li><b>Sin servicios externos de IA:</b> el asistente responde con reglas en el propio servidor.</li>
+  </ul>
+  <div class="nota ojo"><b>Pendientes de TI.</b> Rotar la clave SMTP (se compartió durante la configuración) y volver a
+    ejecutar <code>bash despliegue/configurar_correo.sh</code>. Si el cortafuegos está activo, abrir solo el 8444.
+    El repositorio es <b>público</b>: no debe contener claves, datos de empleados, Excel ni CSV (el
+    <code>.gitignore</code> los excluye); conviene evaluar hacerlo privado.</div>
+</section>
+
+<section id="desarrollo">
+  <h2>Código y pruebas</h2>
+  <div class="tabla"><table>
+    <thead><tr><th>Carpeta</th><th>Contenido</th></tr></thead>
+    <tbody>
+      <tr><td><code>servidor/app/</code></td><td>API: <code>routers/</code> (rutas), <code>reglas/</code> (lógica de negocio), <code>db.py</code>, <code>config.py</code>.</td></tr>
+      <tr><td><code>servidor/tests/</code></td><td>Pruebas de la API contra MySQL (pytest).</td></tr>
+      <tr><td><code>mysql/</code></td><td>Migraciones, <code>migrar.py</code>, cargas, saldos, tareas, pruebas del esquema.</td></tr>
+      <tr><td><code>frontend/</code></td><td>Páginas HTML, <code>js/</code> (módulos), <code>vendor/</code> (Tailwind compilado y fuentes).</td></tr>
+      <tr><td><code>build/</code></td><td>Configuración de Tailwind con los colores de marca.</td></tr>
+      <tr><td><code>despliegue/</code></td><td>Instalación, actualización, correo, accesos y notas de cada entrega.</td></tr>
+      <tr><td><code>manuales/</code></td><td>Este manual y el manual de usuario.</td></tr>
+    </tbody>
+  </table></div>
+  <pre><code><span class="c"># Pruebas (en un equipo de desarrollo con MySQL de pruebas, nunca contra la base real)</span>
+cd servidor &amp;&amp; ../.venv/bin/python -m pytest -q
+.venv/bin/python -m pytest -q mysql/pruebas
+node --test frontend/tests/cedula.test.mjs
+<span class="c"># Estilos: solo si se cambia el diseño</span>
+cd build &amp;&amp; npm install &amp;&amp; npm run estilos
+<span class="c"># Verificar un módulo JavaScript</span>
+node --experimental-default-type=module --check frontend/js/administracion.js</code></pre>
+</section>
+
+<section id="manual-usuario">
+  <h2>Publicar el manual de usuario</h2>
+  <p>El manual de usuario está en <code>manuales/usuario/</code> y se publica en GitHub Pages con el flujo
+    <code>.github/workflows/manual-usuario.yml</code>, que sube <b>solo esa carpeta</b>. Una sola vez, en GitHub:
+    <b>Settings › Pages › Build and deployment › Source: GitHub Actions</b>. Desde entonces se publica solo cada vez que
+    cambia la carpeta (o a mano desde la pestaña Actions › «Publicar manual de usuario» › Run workflow).</p>
+  <p>Las capturas usan datos inventados y tapan cédulas y teléfonos. Este manual técnico no se publica en Pages.</p>
+</section>
+
+<section id="problemas">
+  <h2>Solución de problemas</h2>
+  <div class="tabla"><table>
+    <thead><tr><th>Síntoma</th><th>Causa probable</th><th>Qué hacer</th></tr></thead>
+    <tbody>
+      <tr><td>La página no carga</td><td>Apache o el certificado; puerto 8444 bloqueado</td><td><code>sudo apache2ctl configtest</code>; registro de Apache; cortafuegos.</td></tr>
+      <tr><td>Carga la página, pero «no se pudo conectar con el servidor»</td><td>Backend detenido o sin base</td><td><code>systemctl status rrhh-itsanet-api</code>; <code>curl -k https://127.0.0.1:8444/api/salud</code>; <code>journalctl</code>.</td></tr>
+      <tr><td>No llega el código</td><td>Correo no registrado o SMTP</td><td>Depuración › «No pueden entrar»; <code>.venv/bin/python despliegue/probar_correo.py …</code>.</td></tr>
+      <tr><td>«Pruebe en unos minutos» al pedir código</td><td>Límite de 5 envíos por hora</td><td>Esperar; revisar si el correo está bien escrito.</td></tr>
+      <tr><td>La cámara de garita no abre</td><td>Sin HTTPS o permiso del navegador</td><td>Entrar por <code>https://…:8444</code> y permitir la cámara.</td></tr>
+      <tr><td>Se ven estilos viejos</td><td>Caché del navegador</td><td><b>Ctrl+F5</b>.</td></tr>
+      <tr><td>Un saldo no cuadra</td><td>Fecha de ingreso o carga</td><td><code>.venv/bin/python mysql/saldos.py explicar --cedula …</code>.</td></tr>
+      <tr><td>Administración › Actualizaciones muestra migraciones pendientes</td><td>Faltó migrar</td><td><code>bash despliegue/actualizar.sh</code>.</td></tr>
+      <tr><td><code>git pull</code> se niega</td><td>Cambios locales en el servidor</td><td>No editar código en el servidor; <code>git status</code> y consultar antes de descartar.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="retirar">
+  <h2>Retirar el sistema</h2>
+  <pre><code>sudo systemctl disable --now rrhh-itsanet-api rrhh-itsanet-tareas.timer rrhh-itsanet-retencion.timer
+sudo a2dissite rrhh-itsanet &amp;&amp; sudo systemctl reload apache2</code></pre>
+  <p>Deja Apache y el resto del servidor como estaban. La base <code>rrhh</code> y <code>~/bryan/rrhh_datos</code> no se
+    borran: son datos personales sujetos a la LOPDP y a su plazo de conservación.</p>
+</section>
+
+</main>
+</div>
+</body>
+</html>
