@@ -43,6 +43,7 @@ const MODULOS = [
       { texto: "Tableros", href: "indicadores.html", roles: ["rrhh", "admin"] },
       { texto: "Solicitudes", href: "informes.html" },
       { texto: "Por departamento", href: "informes.html#departamentos" },
+      { texto: "Exportar datos", href: "exportar.html", roles: ["rrhh", "admin"] },
     ],
   },
   {
@@ -56,6 +57,7 @@ const MODULOS = [
       { texto: "Jefaturas", href: "administracion.html#jefaturas" },
       { texto: "Configuración", href: "administracion.html#configuracion" },
       { texto: "Pantalla principal", href: "pantalla-principal.html", roles: ["admin"] },
+      { texto: "Actualizaciones", href: "administracion.html#actualizaciones", roles: ["admin"] },
       { texto: "Bitácora", href: "administracion.html#bitacora" },
     ],
   },
@@ -113,6 +115,8 @@ const ICONOS_OPCION = {
   "Sedes y regiones":         'M12 21s-7-6.1-7-11.5a7 7 0 1 1 14 0C19 14.9 12 21 12 21Zm0-9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z',
   "Documentos firmados":      'M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Zm7 0v5h5M9 15l2 2 4-4',
   "Tableros":                 'M3 3v18h18M7 17v-5m5 5V8m5 9v-7',
+  "Exportar datos":           'M12 3v12m0 0-4-4m4 4 4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2',
+  "Actualizaciones":          'M4 4v6h6M20 20v-6h-6M5.5 15a7 7 0 0 0 12.4 2.5M18.5 9A7 7 0 0 0 6.1 6.5',
 };
 
 const iconoOpcion = (texto) => `

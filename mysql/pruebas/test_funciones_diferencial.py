@@ -50,7 +50,12 @@ def my(base_de_pruebas, pg):
                     [(f, n, 1 if a else 0) for f, n, a in feriados])
     for clave, valor in pg.execute("select clave, valor from public.app_config").fetchall():
         cur.execute("UPDATE app_config SET valor = %s WHERE clave = %s", (valor, clave))
+    # La referencia descontaba los feriados de las vacaciones; desde la 0015
+    # el sistema los cuenta por defecto (como la hoja de producción). Para
+    # comparar, se usa la regla de la referencia, y se restablece al final.
+    cur.execute("UPDATE app_config SET valor = 'false' WHERE clave = 'vacaciones_feriados_cuentan'")
     yield cur
+    cur.execute("UPDATE app_config SET valor = 'true' WHERE clave = 'vacaciones_feriados_cuentan'")
     con.close()
 
 

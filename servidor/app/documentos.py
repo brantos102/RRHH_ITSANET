@@ -126,6 +126,21 @@ def _imagen(nombre: str, alto: float) -> Image | Spacer:
     return img
 
 
+def _fecha_documento(informe: dict) -> date:
+    """La fecha que se consigna en el documento: la elegida al imprimir (hoy,
+    o una anterior justificada) o, si no se eligió, la de emisión."""
+    return (_como_fecha(informe.get("fecha_documento")) or _como_fecha(informe.get("emitido_en"))
+            or date.today())
+
+
+def _nota_fecha(informe: dict) -> str:
+    """Si la fecha consignada es anterior a la impresión, el pie lo dice."""
+    if not informe.get("retroactiva"):
+        return ""
+    return (f" · Fecha consignada {_fecha(informe.get('fecha_documento'))}, impreso el "
+            f"{date.today():%d/%m/%Y} (fecha anterior autorizada por Talento Humano)")
+
+
 def _ciudad(d: dict) -> str:
     c = d.get("colaborador") or {}
     return (c.get("sede") or c.get("ciudad") or (d.get("empresa") or {}).get("ciudad") or "")
@@ -155,7 +170,7 @@ def constancia_de_goce(informe: dict, firmante: dict | None = None) -> bytes:
     e = d.get("empresa") or {}
     gozadas = d.get("gozadas") or []
     s = _estilos()
-    emitido = _como_fecha(informe.get("emitido_en")) or date.today()
+    emitido = _fecha_documento(informe)
 
     cabecera = Table([[_imagen("logo_itsanet.png", 13 * mm), "", _imagen("logo_flexnet.png", 13 * mm)]],
                      colWidths=[70 * mm, ANCHO - 140 * mm, 70 * mm])
@@ -260,8 +275,9 @@ def constancia_de_goce(informe: dict, firmante: dict | None = None) -> bytes:
             f"{_t(informe.get('autorizacion_motivo'))}. La constancia anterior sigue siendo válida.",
             s["nota"])]
 
-    pie_txt = (f"Folio {informe.get('folio') or ''} · Emitido el {_fecha(informe.get('emitido_en'))} · "
-               "Documento para firma manuscrita; el ejemplar firmado se archiva en el expediente.")
+    pie_txt = (f"Folio {informe.get('folio') or ''} · Emitido el {_fecha(informe.get('emitido_en'))}"
+               f"{_nota_fecha(informe)} · Documento para firma manuscrita; el ejemplar firmado se "
+               "archiva en el expediente.")
 
     def al_pie(lienzo, _doc):
         lienzo.saveState()
@@ -388,7 +404,11 @@ def solicitud_y_constancia(informe: dict, firmante: dict | None = None) -> bytes
              "correcta y corresponde al período de vacaciones solicitado, autorizado y/o "
              "efectivamente gozado. El presente registro forma parte del expediente laboral del "
              "colaborador y se conservará como respaldo de la gestión y goce de vacaciones."),
-        Spacer(1, 3 * mm),
+        Spacer(1, 2 * mm),
+        Paragraph(f"{_t(_ciudad(d)) or 'Ecuador'}, {_fecha_documento(informe).day} de "
+                  f"{MESES[_fecha_documento(informe).month - 1]} de {_fecha_documento(informe).year}",
+                  s["celda"]),
+        Spacer(1, 2 * mm),
     ]
 
     def firma(titulo_: str, nombre: str, cargo: str = "") -> Table:
@@ -424,7 +444,7 @@ def solicitud_y_constancia(informe: dict, firmante: dict | None = None) -> bytes
                       "autorización correspondiente.", AMARILLO, "nota")]
 
     pie_txt = (f"Folio {informe.get('folio') or ''} · Emitido el {_fecha(informe.get('emitido_en'))}"
-               f" · Impresión N.º {int(informe.get('impresiones') or 0) + 1}")
+               f" · Impresión N.º {int(informe.get('impresiones') or 0) + 1}{_nota_fecha(informe)}")
 
     def al_pie(lienzo, _doc):
         lienzo.saveState()

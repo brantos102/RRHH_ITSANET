@@ -147,11 +147,39 @@ async def aplicar_retencion() -> list[dict[str, Any]]:
     return [{"tabla": "audit_logs", "eliminados": n1}, {"tabla": "access_logs", "eliminados": n2}]
 
 
+async def avisar_escaneos_pendientes() -> int:
+    """A Talento Humano de cada sede: documentos firmados cuyo escaneo no se
+    subió el mismo día. Un aviso por persona y por día, con el total."""
+    hoy = (await obtener_uno("SELECT CURRENT_DATE() AS d"))["d"]
+    generados = 0
+    for r in await obtener_todos(
+            """SELECT t.id AS user_id, COUNT(i.id) AS n
+                 FROM v_rrhh_por_region t
+                 JOIN users u ON COALESCE(u.region, 'sierra') = t.region
+                 JOIN informes_firmados i ON i.user_id = u.id
+                WHERE i.firmado_en IS NOT NULL AND i.escaneo_ruta IS NULL
+                  AND DATE(i.firmado_en) < CURRENT_DATE()
+                GROUP BY t.id"""):
+        n = await ejecutar(
+            """INSERT INTO notifications (user_id, tipo, severidad, titulo, mensaje, entidad,
+                                         clave_dedupe, accion_url)
+               VALUES (%s, 'documento_faltante', 'advertencia', %s, %s, 'informes_firmados', %s,
+                       'administracion.html#pendientes')
+               ON DUPLICATE KEY UPDATE clave_dedupe = clave_dedupe""",
+            (str(r["user_id"]), "Escaneos firmados pendientes",
+             f"{r['n']} documento(s) firmados en días anteriores todavía no tienen su escaneo. "
+             "El registro de esas vacaciones no está concluido hasta subirlo.",
+             f"escaneo:{hoy}:{r['user_id']}"))
+        generados += 1 if n == 1 else 0
+    return generados
+
+
 async def tarea_diaria() -> dict[str, Any]:
     """Cada mañana: devengar lo del mes a toda la planilla, caducar (si está
     activa) y avisar."""
     devengo = await periodos.devengar_todos()
     caducados = await periodos.caducar_periodos_vencidos()
     avisos = await generar_alertas_vacaciones()
+    avisos.append({"tipo": "escaneos_pendientes", "generadas": await avisar_escaneos_pendientes()})
     return {"fecha": dt.date.today().isoformat(), "devengo": devengo,
             "periodos_caducados": caducados, "avisos": avisos}

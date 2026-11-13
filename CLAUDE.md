@@ -42,6 +42,15 @@ PowerShell solo si hace falta, y la de 64 bits («Windows PowerShell», no la
 scp "C:\Users\IMORETA\Documents\AP\MOD_RRHH\ARCHIVO.xlsx" enicolalde@192.168.4.94:bryan/rrhh_datos/
 ```
 
+## Actualizaciones del servidor
+
+Hasta que el sistema pase a producción, **cada entrega que requiera pasos en el
+servidor agrega su propia nota** en `despliegue/actualizaciones/`, con nombre
+`AAAA-MM-DD_NN_tema.md`: qué cambia, los comandos uno por uno y qué probar. El
+atajo para aplicarla es `bash despliegue/actualizar.sh` (respalda, trae el
+código, migra y reinstala). Las notas se leen y descargan en el sistema:
+Administración › Actualizaciones.
+
 ## No tocar en el servidor
 
 IV ITSANET (base `iv_itsanet`, carpeta `~/bryan/IV_ITSANET`), los demás sitios de

@@ -75,6 +75,9 @@ TEMAS: dict[str, tuple[str, ...]] = {
     "jefe": ("mi jefe", "jefe inmediato", "quien aprueba", "quien me aprueba", "supervisor"),
     "documentos": ("firmar", "firma", "documento", "constancia", "papel", "imprimir"),
     "feriados": ("feriado", "festivo", "no laborable", "asueto", "puente"),
+    "como_se_cuentan": ("fin de semana", "fines de semana", "como se cuentan", "como cuentan",
+                        "dias calendario", "cuentan los dias", "feriado dentro",
+                        "se descuentan", "me descuentan", "sabado y domingo"),
     "garita": ("qr", "garita", "salir", "salida", "codigo qr", "guardia"),
     "mis_datos": ("mi correo", "cambiar correo", "telefono", "direccion", "mis datos",
                   "mi ficha", "actualizar datos", "mi cargo", "mi area"),
@@ -241,6 +244,18 @@ async def _feriados(u: dict) -> dict:
               detalles=[f"{_fecha(f['fecha'])}: {f['nombre']}" for f in filas])
 
 
+def _como_se_cuentan() -> dict:
+    return _r("Las vacaciones se cuentan en días calendario: todos los días entre la fecha de "
+              "inicio y la de fin, incluidos sábados, domingos y feriados (Art. 69 del Código del "
+              "Trabajo). Es fin − inicio + 1, igual que en la hoja de Talento Humano.",
+              detalles=["Del lunes 1 al domingo 14: 14 días.",
+                        "Del lunes al viernes: 5 días; el fin de semana siguiente no se "
+                        "descuenta porque vuelve a trabajar el lunes.",
+                        "En cada período deben caer al menos dos fines de semana completos "
+                        "(sábado y domingo) dentro de sus vacaciones.",
+                        "Los permisos, en cambio, cuentan solo días hábiles."])
+
+
 def _garita() -> dict:
     return _r("Para salir de la empresa durante un permiso:", detalles=[
         "Cuando su solicitud queda aprobada recibe un código QR por correo.",
@@ -316,7 +331,7 @@ async def preguntar(datos: Pregunta, usuario: Usuario) -> dict:
         "permisos": lambda: _permisos(usuario, texto), "jefe": lambda: _jefe(usuario),
         "documentos": lambda: _documentos(usuario), "feriados": lambda: _feriados(usuario),
     }
-    fijas = {"garita": _garita, "mis_datos": _mis_datos, "dispositivos": _dispositivos,
+    fijas = {"como_se_cuentan": _como_se_cuentan, "garita": _garita, "mis_datos": _mis_datos, "dispositivos": _dispositivos,
              "talento_humano": _talento_humano}
     if tema in respuestas:
         await _guardar(tema, True, None, region)

@@ -59,13 +59,24 @@ SELECT * FROM (
     FROM v_conversaciones_bandeja v
    WHERE v.estado = 'abierta' AND v.sin_leer > 0
   UNION ALL
+  -- El trámite termina con el escaneo del papel firmado: hasta entonces
+  -- sigue aquí, diciendo qué falta y desde cuándo.
   SELECT 'firma', i.id, i.user_id, u.nombre, COALESCE(u.region, 'sierra'),
-         CONCAT('Firmar solicitud N.º ', r.folio, ' · folio ', i.folio),
-         COALESCE(r.rrhh_aprobado_en, i.emitido_en), 'administracion.html#papeles'
+         CASE WHEN i.firmado_en IS NULL
+              THEN CONCAT(IF(i.tipo = 'solicitud', CONCAT('Firmar solicitud N.º ', r.folio),
+                             'Firmar constancia de goce'), ' y subir el escaneo · folio ', i.folio)
+              ELSE CONCAT('Firmado el ', DATE_FORMAT(i.firmado_en, '%%d/%%m/%%Y'),
+                          ': falta subir el escaneo',
+                          IF(DATEDIFF(CURRENT_DATE(), DATE(i.firmado_en)) > 0,
+                             CONCAT(' (', DATEDIFF(CURRENT_DATE(), DATE(i.firmado_en)), ' día(s) de atraso)'), ''),
+                          ' · folio ', i.folio) END,
+         COALESCE(i.firmado_en, r.rrhh_aprobado_en, i.emitido_en), 'administracion.html#papeles'
     FROM informes_firmados i
-    JOIN requests r ON r.id = i.request_id AND r.estado = 'aprobado'
+    LEFT JOIN requests r ON r.id = i.request_id
     JOIN users u ON u.id = i.user_id
-   WHERE i.tipo = 'solicitud' AND i.firmado_en IS NULL
+   WHERE i.escaneo_ruta IS NULL
+     AND ((i.tipo = 'solicitud' AND r.estado = 'aprobado')
+          OR (i.tipo = 'trazabilidad' AND (i.impresiones > 0 OR i.firmado_en IS NOT NULL)))
 ) p
 """
 
@@ -82,11 +93,13 @@ SELECT * FROM (
     FROM requests r JOIN users u ON u.id = r.user_id LEFT JOIN users q ON q.id = r.rrhh_aprobado_por
    WHERE r.rrhh_aprobado_en >= CURRENT_DATE()
   UNION ALL
-  SELECT 'firma', u.nombre, COALESCE(u.region, 'sierra'), CONCAT('Firmó · folio ', i.folio),
-         q.nombre, i.firmado_en
+  SELECT 'firma', u.nombre, COALESCE(u.region, 'sierra'),
+         CONCAT('Escaneo firmado subido · folio ', i.folio,
+                IF(DATE(i.firmado_en) < DATE(i.escaneo_subido_en), ' (fuera del día de la firma)', '')),
+         q.nombre, i.escaneo_subido_en
     FROM informes_firmados i JOIN users u ON u.id = i.user_id
-    LEFT JOIN users q ON q.id = i.firmado_registrado_por
-   WHERE i.firmado_en >= CURRENT_DATE()
+    LEFT JOIN users q ON q.id = i.escaneo_subido_por
+   WHERE i.escaneo_subido_en >= CURRENT_DATE()
 ) a
 """
 

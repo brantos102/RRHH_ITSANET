@@ -1,6 +1,6 @@
 /* Panel del empleado: perfil, saldo, alertas y solicitudes. */
 import { api, sesion, fecha, fechaHora, esc, ESTADOS, ErrorApi, uuid } from "./api.js";
-import { elegirFirmante } from "./firmante.js";
+import { prepararImpresion } from "./firmante.js";
 import { montarNavegacion } from "./navegacion.js";
 
 const $ = (id) => document.getElementById(id);
@@ -403,6 +403,14 @@ function pintarSolicitudes() {
           <span>Enviada ${fechaHora(s.created_at)}</span>
           ${s.reemplazo ? `<span>🔁 Lo cubre ${esc(s.reemplazo)}</span>` : ""}
           ${s.adjuntos ? `<span>📎 ${s.adjuntos} adjunto(s)</span>` : ""}
+          ${s.tipo === "vacacion" && s.estado === "aprobado" && s.documento
+            ? `<span class="rounded-full px-2 py-0.5 ring-1 ${{
+                concluido: "bg-emerald-50 text-emerald-800 ring-emerald-200",
+                firmado: "bg-amber-50 text-amber-800 ring-amber-200",
+                sin_firmar: "bg-amber-50 text-amber-800 ring-amber-200" }[s.documento]}">${{
+                concluido: "✔ Registro concluido (firmado y archivado)",
+                firmado: "Firmado · Talento Humano archiva el escaneo",
+                sin_firmar: "Falta firmar el documento en Talento Humano" }[s.documento]}</span>` : ""}
           ${s.qr_hash && s.estado === "aprobado"
             ? `<button data-qr="${s.id}" data-hasta="${s.fecha_fin}"
                        class="font-medium text-emerald-700 hover:underline">Ver código QR</button>`
@@ -708,8 +716,8 @@ document.addEventListener("click", async (e) => {
   if (docs) {
     try {
       const papel = await api.papelDeLaSolicitud(docs.dataset.docsSolicitud);
-      const firmante = await elegirFirmante(docs.dataset.region);
-      if (firmante !== null) await api.abrirPapel(papel.id, firmante);
+      const op = await prepararImpresion(papel.id, docs.dataset.region);
+      if (op !== null) await api.abrirPapel(papel.id, op.firmante, op);
     } catch (err) {
       avisar(err.message, true);
     }
@@ -1596,7 +1604,8 @@ async function previsualizar() {
       `<p class="mt-1 text-xs opacity-75">${esc(lineas.join(" · "))}</p>` +
       ((d.feriados || []).length
         ? `<p class="mt-1.5 text-xs">Feriados en el rango: ${
-            d.feriados.map((f) => `${esc(f.nombre)} (${fecha(f.fecha, false)})`).join(", ")}</p>`
+            d.feriados.map((f) => `${esc(f.nombre)} (${fecha(f.fecha, false)})`).join(", ")}${
+            d.feriados_cuentan ? " · cuentan como días de vacaciones (Art. 69)" : " · no se descuentan"}</p>`
         : "") +
       // En una excepción se callan los avisos del descanso anual completo: la
       // previsualización no sabe que esto va por otra vía, y le respondía

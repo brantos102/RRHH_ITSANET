@@ -329,6 +329,9 @@ export const api = {
   guardarVista: (d) => peticion("/tablero/vistas", { method: "POST", body: JSON.stringify(d) }),
   cambiarVista: (id, d) => peticion(`/tablero/vistas/${id}`, { method: "PATCH", body: JSON.stringify(d) }),
   quitarVista: (id) => peticion(`/tablero/vistas/${id}`, { method: "DELETE" }),
+  ordenarVistas: (ids) => peticion("/tablero/vistas/orden", { method: "POST", body: JSON.stringify({ ids }) }),
+  ordenarBloquesTablero: (claves) =>
+    peticion("/admin/tablero/orden", { method: "POST", body: JSON.stringify({ claves }) }),
   tableroConfiguracion: () => peticion("/admin/tablero"),
   cambiarBloqueTablero: (clave, cambio) =>
     peticion(`/admin/tablero/${clave}`, { method: "PATCH", body: JSON.stringify(cambio) }),
@@ -377,6 +380,44 @@ export const api = {
 
   // El expediente de una persona, para jefaturas y Talento Humano.
   buscarPersona: (q) => peticion(`/personas/buscar?q=${encodeURIComponent(q)}`),
+  actualizaciones: () => peticion("/admin/actualizaciones"),
+  async notaActualizacion(archivo) {
+    const r = await fetch(`${API}/admin/actualizaciones/${encodeURIComponent(archivo)}`, {
+      headers: { Authorization: `Bearer ${sesion.token}` } });
+    if (!r.ok) throw new ErrorApi("No se pudo leer la nota.", r.status);
+    return r.text();
+  },
+  async descargarNota(archivo) {
+    const r = await fetch(`${API}/admin/actualizaciones/${encodeURIComponent(archivo)}?descargar=true`, {
+      headers: { Authorization: `Bearer ${sesion.token}` } });
+    if (!r.ok) throw new ErrorApi("No se pudo descargar la nota.", r.status);
+    const url = URL.createObjectURL(await r.blob());
+    const a = Object.assign(document.createElement("a"), { href: url, download: archivo });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  },
+  exportacionesOpciones: () => peticion("/admin/exportaciones/opciones"),
+  exportacionPrevia: (d) => peticion("/admin/exportaciones/previa", { method: "POST", body: JSON.stringify(d) }),
+  exportacionesHistorial: () => peticion("/admin/exportaciones"),
+  /* El archivo llega con su folio y su huella en las cabeceras. */
+  async exportar(d) {
+    const r = await fetch(`${API}/admin/exportaciones`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${sesion.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(d),
+    });
+    if (!r.ok) {
+      const c = await r.json().catch(() => ({}));
+      const det = c.detail;
+      throw new ErrorApi(det?.mensaje || (Array.isArray(det) ? det[0]?.msg : det) || "No se pudo exportar.", r.status);
+    }
+    const nombre = (r.headers.get("content-disposition") || "").match(/filename="([^"]+)"/)?.[1] || "exportacion";
+    const url = URL.createObjectURL(await r.blob());
+    const a = Object.assign(document.createElement("a"), { href: url, download: nombre });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    return { folio: r.headers.get("x-folio"), sha256: r.headers.get("x-sha256"), nombre };
+  },
   expediente: (id) => peticion(`/personas/${id}`),
 
   // La pantalla principal: qué bloques se ven, en qué orden y para qué roles.
@@ -388,16 +429,24 @@ export const api = {
      mandaría, así que el enlace daría 401 y el colaborador vería una
      pantalla en blanco sin saber por qué. */
   misPapeles: () => peticion("/papeles/mios"),
+  fechasDelPapel: (id) => peticion(`/papeles/${id}/fechas`),
   papelDeLaSolicitud: (id) => peticion(`/papeles/de-la-solicitud/${id}`),
   asegurarTrazabilidad: () => peticion("/papeles/trazabilidad", { method: "POST" }),
 
-  async abrirPapel(id, firmante = "") {
-    const parametro = firmante ? `?firmante=${encodeURIComponent(firmante)}` : "";
+  async abrirPapel(id, firmante = "", { fecha = "", justificacion = "" } = {}) {
+    const q = new URLSearchParams();
+    if (firmante) q.set("firmante", firmante);
+    if (fecha) q.set("fecha", fecha);
+    if (justificacion) q.set("justificacion", justificacion);
+    const parametro = q.toString() ? `?${q}` : "";
     const r = await fetch(`${API}/papeles/${id}.pdf${parametro}`, {
       headers: { Authorization: `Bearer ${sesion.token}` },
     });
     if (!r.ok) {
-      throw new ErrorApi("No se pudo preparar el documento para imprimir.", r.status);
+      // El motivo exacto importa aquí: «ya usó las 3 fechas anteriores».
+      const d = await r.json().then((c) => c.detail).catch(() => null);
+      throw new ErrorApi(d?.mensaje || (typeof d === "string" ? d : null)
+        || "No se pudo preparar el documento para imprimir.", r.status);
     }
     const url = URL.createObjectURL(new Blob([await r.arrayBuffer()], { type: "application/pdf" }));
     const ventana = window.open(url, "_blank");

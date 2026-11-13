@@ -483,7 +483,13 @@ async def mis_solicitudes(usuario: Annotated[dict, Depends(usuario_actual)]) -> 
                r.qr_hash, r.qr_emitido_en, r.qr_usado_en,
                j.nombre as jefe, rp.nombre as reemplazo,
                r.jefe_aprobado_en, r.rrhh_aprobado_en,
-               (select count(*) from request_attachments a where a.request_id = r.id) as adjuntos
+               (select count(*) from request_attachments a where a.request_id = r.id) as adjuntos,
+               -- El registro de unas vacaciones termina con el papel firmado
+               -- y escaneado: sin_firmar, firmado (falta el escaneo) o concluido.
+               (select case when i.escaneo_ruta is not null then 'concluido'
+                            when i.firmado_en is not null then 'firmado' else 'sin_firmar' end
+                  from informes_firmados i where i.request_id = r.id and i.tipo = 'solicitud'
+                 order by i.emitido_en desc limit 1) as documento
         from requests r
         left join users j on j.id = r.jefe_id
         left join users rp on rp.id = r.reemplazo_id

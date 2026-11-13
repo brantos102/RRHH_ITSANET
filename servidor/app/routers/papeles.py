@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
@@ -122,10 +123,42 @@ async def _firmante_elegido(informe: dict, usuario: dict, firmante: str | None) 
     return await reglas_papeles.firmante_por_defecto(informe["user_id"])
 
 
+async def _fechas_de(informe_id: str) -> dict:
+    """Cuántas fechas anteriores se usaron en este documento y cuántas quedan."""
+    fila = await obtener_uno(
+        """select cfg_int('papeles_fechas_anteriores_max') as maximo, current_date() as hoy,
+                  (select count(*) from impresiones_papel
+                    where informe_id = %s and retroactiva) as usadas,
+                  (select u.fecha_ingreso from informes_firmados i join users u on u.id = i.user_id
+                    where i.id = %s) as minimo""", (informe_id, informe_id))
+    maximo = int(fila["maximo"] if fila["maximo"] is not None else 3)
+    return {"hoy": fila["hoy"], "maximo": maximo, "usadas": int(fila["usadas"]),
+            "restantes": max(maximo - int(fila["usadas"]), 0), "minimo": fila["minimo"]}
+
+
+@router.get("/papeles/{informe_id}/fechas")
+async def fechas_del_papel(informe_id: uuid.UUID, usuario: RRHH) -> dict:
+    """Para el diálogo de impresión: qué fecha se puede consignar y el historial."""
+    datos = await _fechas_de(str(informe_id))
+    historial = await obtener_todos(
+        """select p.fecha_documento, p.retroactiva, p.justificacion, p.impreso_en, u.nombre as por
+             from impresiones_papel p left join users u on u.id = p.impreso_por
+            where p.informe_id = %s order by p.impreso_en desc limit 30""", (str(informe_id),))
+    return {**datos, "historial": booleanos(historial, "retroactiva")}
+
+
 @router.get("/papeles/{informe_id}.pdf", response_class=Response)
 async def imprimir(informe_id: uuid.UUID, request: Request, usuario: Usuario,
-                   firmante: str | None = None) -> Response:
-    """El documento en PDF, listo para imprimir y firmar a mano."""
+                   firmante: str | None = None, fecha: date | None = None,
+                   justificacion: str | None = None) -> Response:
+    """El documento en PDF, listo para imprimir y firmar a mano.
+
+    `fecha`: la que se consigna en el documento. Por defecto, hoy. Una
+    anterior solo la puede poner Talento Humano, con justificación, y hasta
+    `papeles_fechas_anteriores_max` veces por documento: el sistema entra a
+    funcionar con vacaciones que ya se gozaron y hay que documentarlas con
+    su fecha, pero no puede volverse una forma de rehacer papeles a voluntad.
+    """
     informe = await _buscar(informe_id)
     if informe is None:
         raise HTTPException(status_code=404, detail={"mensaje": "Ese documento no existe."})
@@ -136,8 +169,37 @@ async def imprimir(informe_id: uuid.UUID, request: Request, usuario: Usuario,
         raise HTTPException(status_code=403, detail={
             "mensaje": "Ese documento es del colaborador y de Talento Humano."})
 
+    limites = await _fechas_de(str(informe_id))
+    hoy = limites["hoy"]
+    fecha = fecha or hoy
+    retroactiva = fecha < hoy
+    if fecha > hoy:
+        raise HTTPException(status_code=422, detail={
+            "mensaje": "No se puede consignar una fecha futura."})
+    if retroactiva:
+        if usuario["rol"] not in ("rrhh", "admin"):
+            raise HTTPException(status_code=403, detail={
+                "mensaje": "Solo Talento Humano puede imprimir con una fecha anterior."})
+        if len((justificacion or "").strip()) < 15:
+            raise HTTPException(status_code=422, detail={
+                "mensaje": "Explique en al menos 15 caracteres por qué va con fecha anterior."})
+        if limites["restantes"] <= 0:
+            raise HTTPException(status_code=409, detail={
+                "mensaje": f"Este documento ya se imprimió {limites['usadas']} veces con fecha "
+                           f"anterior, que es el máximo. Imprímalo con la fecha de hoy."})
+        if limites["minimo"] and fecha < limites["minimo"]:
+            raise HTTPException(status_code=422, detail={
+                "mensaje": "La fecha no puede ser anterior al ingreso de la persona."})
+
     elegido = await _firmante_elegido(informe, usuario, firmante)
-    contenido = armar(informe, elegido)
+    contenido = armar({**informe, "fecha_documento": fecha, "retroactiva": retroactiva}, elegido)
+
+    from ..db import ejecutar
+    await ejecutar(
+        """insert into impresiones_papel (informe_id, fecha_documento, retroactiva, justificacion,
+                                          impreso_por) values (%s, %s, %s, %s, %s)""",
+        (str(informe_id), fecha, retroactiva,
+         (justificacion or "").strip()[:400] or None, str(usuario["id"])))
 
     # Cada impresión se cuenta: es la diferencia entre «se emitió una vez» y
     # «se imprimió catorce veces», y la segunda es la que cuenta en una
@@ -148,7 +210,11 @@ async def imprimir(informe_id: uuid.UUID, request: Request, usuario: Usuario,
                     entidad_id=str(informe_id),
                     detalle={"tipo": informe["tipo"], "folio": informe["folio"],
                              "de": informe["de_quien"], "propio": propio,
-                             "firma_th": elegido["nombre"] if elegido else None})
+                             "firma_th": elegido["nombre"] if elegido else None,
+                             "fecha_documento": fecha.isoformat(),
+                             "retroactiva": retroactiva,
+                             "justificacion": ((justificacion or "").strip() or None)
+                             if retroactiva else None})
 
     return Response(content=contenido, media_type="application/pdf",
                     headers={"Cache-Control": "no-store",
@@ -234,8 +300,8 @@ async def reemitir(user_id: uuid.UUID, datos: Reemision,
 
 @router.post("/admin/papeles/{informe_id}/firmado")
 async def registrar_firma(informe_id: uuid.UUID, request: Request, usuario: RRHH) -> dict:
-    """Talento Humano recibió el documento firmado por el colaborador: con eso
-    el trámite queda concluido."""
+    """Talento Humano recibió el documento firmado por el colaborador. El
+    registro queda concluido cuando, además, se sube el escaneo."""
     informe = await _buscar(informe_id)
     if informe is None:
         raise HTTPException(status_code=404, detail={"mensaje": "Ese documento no existe."})
@@ -248,7 +314,7 @@ async def registrar_firma(informe_id: uuid.UUID, request: Request, usuario: RRHH
                     entidad_id=str(informe_id),
                     detalle={"folio": informe["folio"], "de": informe["de_quien"]})
     return {"mensaje": f"Documento {informe['folio']} registrado como firmado por "
-                       f"{informe['de_quien']}."}
+                       f"{informe['de_quien']}. Suba hoy el escaneo para concluir el registro."}
 
 
 # ------------------------------------------------------------ escaneo firmado

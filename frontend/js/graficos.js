@@ -6,7 +6,8 @@
    pasar el cursor o al tocarla, y todo gráfico tiene su vista de tabla. */
 import { esc } from "./api.js";
 
-const COLOR = "#0369a1";          // sky-700: una sola serie
+// El azul de la marca ITSANET (config.js · COLOR_MARCA). Una sola serie.
+const COLOR = (window.RRHH_CONFIG || {}).COLOR_MARCA || "#1c58d7";
 const numero = (n) => Number(n ?? 0).toLocaleString("es-EC", { maximumFractionDigits: 1 });
 
 let tooltip;
@@ -28,8 +29,8 @@ function ocultarTooltip() { if (tooltip) tooltip.style.display = "none"; }
 function barras(datos) {
   const tope = Math.max(...datos.map((d) => d.valor), 0) || 1;
   return `<div class="space-y-1.5">${datos.map((d) => `
-    <div class="grid grid-cols-[minmax(6rem,40%)_1fr_auto] items-center gap-2 text-xs" data-punto
-         data-texto="${esc(`${d.etiqueta}: ${numero(d.valor)}`)}">
+    <div class="grid cursor-pointer grid-cols-[minmax(6rem,40%)_1fr_auto] items-center gap-2 rounded text-xs hover:bg-slate-50" data-punto
+         data-etiqueta="${esc(d.etiqueta)}" data-texto="${esc(`${d.etiqueta}: ${numero(d.valor)}`)}">
       <span class="truncate text-slate-600" title="${esc(d.etiqueta)}">${esc(d.etiqueta)}</span>
       <span class="h-4 rounded-r" style="width:${Math.max((d.valor / tope) * 100, d.valor ? 1.5 : 0)}%;
             background:${COLOR}; border-radius:0 4px 4px 0"></span>
@@ -61,6 +62,20 @@ function linea(datos, ancho = 600) {
   </svg>`;
 }
 
+/* Columnas verticales: para pocas categorías ordenadas (antigüedad, meses). */
+function columnas(datos) {
+  const tope = Math.max(...datos.map((d) => d.valor), 0) || 1;
+  return `<div class="flex h-48 items-end gap-1.5 border-b border-slate-200 pb-0.5">${datos.map((d) => `
+    <div class="flex h-full min-w-0 flex-1 cursor-pointer flex-col items-center justify-end gap-1" data-punto
+         data-etiqueta="${esc(d.etiqueta)}" data-texto="${esc(`${d.etiqueta}: ${numero(d.valor)}`)}">
+      <span class="text-[11px] font-medium tabular-nums text-slate-700">${numero(d.valor)}</span>
+      <span class="w-full max-w-[3rem]" style="height:${Math.max((d.valor / tope) * 82, d.valor ? 1.5 : 0)}%;
+            background:${COLOR}; border-radius:4px 4px 0 0"></span>
+    </div>`).join("")}</div>
+    <div class="mt-1 flex gap-1.5">${datos.map((d) =>
+      `<span class="min-w-0 flex-1 truncate text-center text-[11px] text-slate-500" title="${esc(d.etiqueta)}">${esc(d.etiqueta)}</span>`).join("")}</div>`;
+}
+
 function tabla(datos, titulos) {
   return `<div class="max-h-72 overflow-y-auto"><table class="w-full text-left text-sm">
     <thead class="sticky top-0 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
@@ -70,13 +85,26 @@ function tabla(datos, titulos) {
     </tbody></table></div>`;
 }
 
+/* La cifra grande, y si hay período, cuánto cambió frente al anterior del
+   mismo largo. La flecha va con su texto: el color nunca dice solo. */
 function cifra(r) {
   const valor = r.total ?? (r.datos.length === 1 ? r.datos[0].valor : null);
-  return `<p class="text-4xl font-semibold tabular-nums">${valor === null ? "—" : numero(valor)}</p>
+  let cambio = "";
+  if (valor !== null && r.anterior !== null && r.anterior !== undefined) {
+    const dif = valor - r.anterior;
+    const pct = r.anterior ? Math.round((dif / r.anterior) * 100) : null;
+    cambio = `<p class="mt-1 text-sm ${dif > 0 ? "text-emerald-700" : dif < 0 ? "text-rose-700" : "text-slate-500"}">
+      ${dif > 0 ? "▲" : dif < 0 ? "▼" : "="} ${numero(Math.abs(dif))}${pct !== null ? ` (${pct > 0 ? "+" : ""}${pct} %)` : ""}
+      <span class="text-slate-500">frente al período anterior (${numero(r.anterior)})</span></p>`;
+  }
+  return `<p class="text-5xl font-semibold tracking-tight tabular-nums" style="color:${COLOR}">${valor === null ? "—" : numero(valor)}</p>
+    ${cambio}
     ${r.datos.length > 1 ? `<p class="mt-1 text-xs text-slate-500">${r.datos.length} grupos</p>` : ""}`;
 }
 
-export function dibujar(caja, r, tipo = "barras") {
+/* `alElegir(etiqueta)`: un clic en una barra o columna filtra el resto del
+   tablero por ese valor (filtrado cruzado, como en Power BI). */
+export function dibujar(caja, r, tipo = "barras", alElegir = null) {
   if (!r.datos.length) {
     caja.innerHTML = '<p class="py-6 text-center text-sm text-slate-500">Sin datos con estos filtros.</p>';
     return;
@@ -84,11 +112,15 @@ export function dibujar(caja, r, tipo = "barras") {
   const titulos = { dimension: r.titulo_dimension, medida: r.titulo_medida };
   caja.innerHTML = tipo === "linea" ? linea(r.datos, Math.max(caja.clientWidth || 600, 280))
     : tipo === "tabla" ? tabla(r.datos, titulos)
-      : tipo === "cifra" ? cifra(r) : barras(r.datos);
+      : tipo === "cifra" ? cifra(r)
+        : tipo === "columnas" ? columnas(r.datos) : barras(r.datos);
   caja.querySelectorAll("[data-punto]").forEach((el) => {
     el.addEventListener("mousemove", (e) => verTooltip(e, el.dataset.texto));
     el.addEventListener("mouseleave", ocultarTooltip);
-    el.addEventListener("click", (e) => verTooltip(e, el.dataset.texto));
+    el.addEventListener("click", (e) => {
+      if (alElegir && el.dataset.etiqueta) { ocultarTooltip(); alElegir(el.dataset.etiqueta); }
+      else verTooltip(e, el.dataset.texto);
+    });
   });
 }
 

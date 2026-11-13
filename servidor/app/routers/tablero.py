@@ -150,19 +150,27 @@ class Vista(BaseModel):
     nombre: str = Field(..., min_length=2, max_length=120)
     medida: str = Field(..., max_length=30)
     dimension: str = Field(..., max_length=30)
-    grafico: Literal["barras", "linea", "tabla", "cifra"] = "barras"
+    grafico: Literal["barras", "columnas", "linea", "tabla", "cifra"] = "barras"
     filtros: Filtros = Filtros()
-    ancho: Literal[1, 2] = 1
+    ancho: Literal[1, 2, 3, 4] = 2
     compartida: bool = False
+
+
+class Orden(BaseModel):
+    ids: list[int] = Field(..., max_length=200)
+
+
+class OrdenBloques(BaseModel):
+    claves: list[str] = Field(..., max_length=50)
 
 
 class CambioVista(BaseModel):
     nombre: str | None = Field(None, min_length=2, max_length=120)
     medida: str | None = Field(None, max_length=30)
     dimension: str | None = Field(None, max_length=30)
-    grafico: Literal["barras", "linea", "tabla", "cifra"] | None = None
+    grafico: Literal["barras", "columnas", "linea", "tabla", "cifra"] | None = None
     filtros: Filtros | None = None
-    ancho: Literal[1, 2] | None = None
+    ancho: Literal[1, 2, 3, 4] | None = None
     compartida: bool | None = None
     orden: int | None = Field(None, ge=0, le=9999)
 
@@ -182,10 +190,13 @@ async def catalogo_explorador(usuario: RRHH) -> dict:
 @router.get("/tablero/explorar")
 async def explorar(usuario: RRHH, medida: str, dimension: str, sede: str | None = None,
                    area: str | None = None, desde: str | None = None, hasta: str | None = None,
-                   tipo: str | None = None) -> dict:
+                   tipo: str | None = None, ciudad: str | None = None, cargo: str | None = None,
+                   contrato: str | None = None, comparar: bool = False) -> dict:
     try:
         return await reglas_tablero.explorar(
-            medida, dimension, {"sede": sede, "area": area, "desde": desde, "hasta": hasta, "tipo": tipo})
+            medida, dimension, {"sede": sede, "area": area, "desde": desde, "hasta": hasta, "tipo": tipo,
+                                "ciudad": ciudad, "cargo": cargo, "contrato": contrato,
+                                "comparar": comparar})
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
 
@@ -258,3 +269,24 @@ async def quitar_vista(vista_id: int, usuario: RRHH) -> dict:
     await _propia(vista_id, usuario)
     await ejecutar("delete from tablero_vistas where id = %s", (vista_id,))
     return {"mensaje": "Gráfico quitado del tablero."}
+
+
+@router.post("/tablero/vistas/orden")
+async def ordenar_vistas(datos: Orden, usuario: RRHH) -> dict:
+    """Las tarjetas arrastradas a su nuevo lugar. Solo se mueven las propias."""
+    for posicion, vid in enumerate(datos.ids):
+        await ejecutar("update tablero_vistas set orden = %s where id = %s and creado_por = %s",
+                       ((posicion + 1) * 10, vid, str(usuario["id"])))
+    return {"mensaje": "Orden guardado."}
+
+
+@router.post("/admin/tablero/orden")
+async def ordenar_bloques(datos: OrdenBloques, request: Request, usuario: RRHH) -> dict:
+    """El orden de los indicadores fijos, que es el mismo para todo el equipo."""
+    for posicion, clave in enumerate(datos.claves):
+        await ejecutar(
+            """update tablero_bloques set orden = %s, actualizado_en = now(6), actualizado_por = %s
+                where clave = %s""", ((posicion + 1) * 10, str(usuario["id"]), clave))
+    await registrar(request, "tablero_reordenado", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="tablero_bloques", detalle={"orden": datos.claves})
+    return {"mensaje": "Orden de los indicadores guardado."}

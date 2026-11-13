@@ -167,12 +167,19 @@ async def desglose_dias(tipo: str, inicio: dt.date, fin: dt.date) -> dict[str, A
     }
     dias = [inicio + dt.timedelta(days=i) for i in range(max((fin - inicio).days + 1, 0))]
     fin_de_semana = [d for d in dias if d.isoweekday() >= 6]
-    descontar = (await obtener_uno("SELECT calcular_dias(%s, %s, %s) AS d", (tipo, inicio, fin)))["d"]
+    fila = await obtener_uno(
+        "SELECT calcular_dias(%s, %s, %s) AS d, cfg_bool('vacaciones_feriados_cuentan') AS fc",
+        (tipo, inicio, fin))
+    descontar, feriados_cuentan = fila["d"], bool(fila["fc"])
     return {
         "total_calendario": len(dias),
         "dias_descontar": descontar,
+        # Con la regla de producción (Art. 69) el feriado de unas vacaciones
+        # se descuenta como cualquier día; en un permiso nunca.
+        "feriados_cuentan": feriados_cuentan if tipo == "vacacion" else False,
         "dias_no_laborables": sum(1 for d in dias
-                                  if d in feriados or (tipo == "permiso" and d.isoweekday() >= 6)),
+                                  if (d in feriados and not (tipo == "vacacion" and feriados_cuentan))
+                                  or (tipo == "permiso" and d.isoweekday() >= 6)),
         "fines_de_semana": len(fin_de_semana),
         "feriados": [{"fecha": d, "nombre": feriados[d]} for d in dias if d in feriados],
     }

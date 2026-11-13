@@ -11,6 +11,16 @@ llevan `--aplicar` sí escriben.
 
 ## 1. Entrar y actualizar
 
+**Atajo (recomendado):** un solo comando que respalda la base y los adjuntos,
+trae el código, aplica las migraciones y reinstala el servicio. Antes de
+empezar muestra qué trae y qué nota de `despliegue/actualizaciones/` leer.
+
+```bash
+cd ~/bryan/RRHH_ITSANET && bash despliegue/actualizar.sh
+```
+
+Paso a paso:
+
 ```bash
 cd ~/bryan/RRHH_ITSANET                       # ir al sistema
 git pull                                      # traer la última versión del repositorio

@@ -48,14 +48,43 @@
     <div class="mb-3 flex flex-wrap items-end justify-between gap-3">
       <div>
         <h2 class="font-semibold">Mis gráficos</h2>
-        <p class="mt-0.5 text-sm text-slate-500">Arme los suyos: elija qué medir, cómo agruparlo y qué filtrar.
-          Los compartidos los ve todo Talento Humano.</p>
+        <p class="mt-0.5 text-sm text-slate-500">Arrástrelos por <b>⠿</b> para ordenarlos, cambie su tamaño con <b>⤢</b> y
+          haga clic en una barra para filtrar todo el tablero por ese valor.</p>
       </div>
-      <button id="btn-nuevo-grafico" class="rounded-xl bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-800">
+      <button id="btn-nuevo-grafico" class="rounded-xl bg-[#1c58d7] px-4 py-2 text-sm font-medium text-white hover:bg-[#1747b0]">
         + Nuevo gráfico</button>
     </div>
-    <div id="mis-graficos" class="grid gap-3 lg:grid-cols-2"></div>
+
+    <!-- Filtros del tablero (segmentadores): valen para todos los gráficos
+         de abajo, encima de los que cada uno tenga guardados. -->
+    <div id="filtros-tablero" class="mb-3 flex flex-wrap items-end gap-2 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200">
+      <span class="mr-1 self-center text-xs font-semibold uppercase tracking-wide text-slate-500">Filtros</span>
+      <label class="text-xs text-slate-500">Sede
+        <select id="ft-sede" class="mt-0.5 block rounded-lg border-0 bg-slate-50 px-2 py-1.5 text-sm text-slate-900 ring-1 ring-slate-300"><option value="">Todas</option></select></label>
+      <label class="text-xs text-slate-500">Área
+        <select id="ft-area" class="mt-0.5 block max-w-[12rem] rounded-lg border-0 bg-slate-50 px-2 py-1.5 text-sm text-slate-900 ring-1 ring-slate-300"><option value="">Todas</option></select></label>
+      <label class="text-xs text-slate-500">Desde
+        <input id="ft-desde" type="date" class="mt-0.5 block rounded-lg border-0 bg-slate-50 px-2 py-1 text-sm text-slate-900 ring-1 ring-slate-300"></label>
+      <label class="text-xs text-slate-500">Hasta
+        <input id="ft-hasta" type="date" class="mt-0.5 block rounded-lg border-0 bg-slate-50 px-2 py-1 text-sm text-slate-900 ring-1 ring-slate-300"></label>
+      <div id="ft-chips" class="flex flex-wrap items-center gap-1.5 self-center"></div>
+      <button type="button" id="ft-limpiar" class="ml-auto self-center rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100">Limpiar filtros</button>
+    </div>
+
+    <div id="mis-graficos" class="grid gap-3 lg:grid-cols-12"></div>
   </section>
+
+  <!-- Un gráfico en grande, con su tabla debajo. -->
+  <dialog id="modal-ampliar" class="w-[min(100vw-1.5rem,72rem)] rounded-2xl p-0">
+    <div class="max-h-[90dvh] overflow-y-auto p-5">
+      <div class="flex items-start justify-between gap-3">
+        <div><h2 id="amp-titulo" class="text-lg font-semibold"></h2><p id="amp-pie" class="text-xs text-slate-500"></p></div>
+        <button type="button" data-cerrar class="rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100" aria-label="Cerrar">✕</button>
+      </div>
+      <div id="amp-grafico" class="mt-4"></div>
+      <div id="amp-tabla" class="mt-6"></div>
+    </div>
+  </dialog>
 </main>
 
 <!-- ================= Diseñar un gráfico ================= -->
@@ -72,7 +101,7 @@
         <select id="g-dimension" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></select></label>
       <label class="block"><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Tipo de gráfico</span>
         <select id="g-grafico" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
-          <option value="barras">Barras</option><option value="linea">Línea (por mes)</option>
+          <option value="barras">Barras</option><option value="columnas">Columnas</option><option value="linea">Línea (por mes)</option>
           <option value="tabla">Tabla</option><option value="cifra">Cifra grande</option></select></label>
       <fieldset class="space-y-2 rounded-xl p-3 ring-1 ring-slate-200">
         <legend class="px-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Filtros</legend>
@@ -90,7 +119,10 @@
           <select id="g-tipo" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"><option value="">Ambos</option>
             <option value="vacacion">Vacaciones</option><option value="permiso">Permisos</option></select></label>
       </fieldset>
-      <label class="flex items-center gap-2 text-sm"><input id="g-ancho" type="checkbox" class="h-4 w-4"> Ancho completo</label>
+      <label class="block"><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Tamaño de la tarjeta</span>
+        <select id="g-ancho" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300">
+          <option value="1">Pequeña (un tercio)</option><option value="2" selected>Mediana (media fila)</option>
+          <option value="3">Grande (dos tercios)</option><option value="4">Ancho completo</option></select></label>
       <label class="flex items-center gap-2 text-sm"><input id="g-compartida" type="checkbox" class="h-4 w-4"> Compartir con Talento Humano</label>
     </div>
     <div class="flex flex-col p-5">

@@ -279,6 +279,13 @@ async def explorar(medida: str, dimension: str, filtros: dict) -> dict:
     if filtros.get("area"):
         condiciones.append("u.departamento = %s")
         params.append(str(filtros["area"])[:120])
+    # Los del filtrado cruzado: un clic en una barra de ciudad, cargo o
+    # contrato filtra los demás gráficos por ese valor.
+    for clave, columna in (("ciudad", "TRIM(u.ciudad)"), ("cargo", "u.cargo"),
+                           ("contrato", "u.tipo_contrato")):
+        if filtros.get(clave):
+            condiciones.append(f"{columna} = %s")
+            params.append(str(filtros[clave])[:120])
     desde = hasta = None
     if m["fecha"] is not None:
         hoy = dt.date.today()
@@ -328,7 +335,16 @@ async def explorar(medida: str, dimension: str, filtros: dict) -> dict:
         if medida != "saldo_promedio":
             otros = {"etiqueta": f"Otros ({len(resto)})", "valor": round(sum(x["valor"] for x in resto), 1)}
             datos.append(otros)
-    return {"medida": medida, "dimension": dimension, "titulo_medida": m["titulo"],
+    anterior = None
+    if filtros.get("comparar") and desde and medida != "saldo_promedio":
+        # El mismo período inmediatamente anterior, del mismo largo: para la
+        # flecha de «sube / baja» de las cifras.
+        largo = (hasta - desde).days + 1
+        previo = await explorar(medida, "total", {**filtros, "comparar": False,
+                                                  "desde": (desde - dt.timedelta(days=largo)).isoformat(),
+                                                  "hasta": (desde - dt.timedelta(days=1)).isoformat()})
+        anterior = previo["total"]
+    return {"medida": medida, "dimension": dimension, "titulo_medida": m["titulo"], "anterior": anterior,
             "titulo_dimension": d["titulo"], "datos": datos,
             "periodo": {"desde": desde.isoformat(), "hasta": hasta.isoformat()} if desde else None,
             "total": round(sum(x["valor"] for x in datos), 1) if medida != "saldo_promedio" else None}

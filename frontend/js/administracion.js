@@ -2,7 +2,7 @@
 import { api, sesion, esc, fecha, fechaHora, validarCedula, llenarSedes, sedesActivas, olvidarSedes } from "./api.js";
 import { montarNavegacion, ROL_TEXTO } from "./navegacion.js";
 import { montarBuscador } from "./buscador.js";
-import { elegirFirmante } from "./firmante.js";
+import { prepararImpresion } from "./firmante.js";
 
 const $ = (id) => document.getElementById(id);
 if (!sesion.vigente) location.replace("index.html");
@@ -35,7 +35,11 @@ const CARGADORES = {
   jefaturas: cargarJefaturasAdmin, "talento-humano": cargarTalentoHumano,
   depuracion: cargarDepuracion, "ingreso-firmas": cargarIngresoFirmas,
   pendientes: cargarPendientes, asistente: cargarAsistente, sedes: cargarSedes,
+  actualizaciones: cargarActualizaciones,
 };
+
+// Lo que es solo del administrador no se le ofrece a Talento Humano.
+if (!esAdmin) document.querySelectorAll("[data-solo-admin]").forEach((b) => b.remove());
 
 /* El selector del celular se arma con el mismo menú de escritorio: los
    títulos de grupo pasan a ser <optgroup>. Una sola lista que mantener. */
@@ -894,9 +898,9 @@ document.addEventListener("click", async (e) => {
   const ver = e.target.closest("[data-ver-papel]");
   if (ver) {
     try {
-      const firmante = await elegirFirmante(ver.dataset.region);
-      if (firmante === null) return;
-      await api.abrirPapel(ver.dataset.verPapel, firmante);
+      const op = await prepararImpresion(ver.dataset.verPapel, ver.dataset.region);
+      if (op === null) return;
+      await api.abrirPapel(ver.dataset.verPapel, op.firmante, op);
     } catch (err) {
       avisar(err.message, true);
     }
@@ -2219,8 +2223,8 @@ async function atenderSolicitud(item) {
     try {
       if (e.target.closest("[data-docs]")) {
         const papel = await api.papelDeLaSolicitud(s.id);
-        const firmante = await elegirFirmante(s.region || item.region);
-        if (firmante !== null) await api.abrirPapel(papel.id, firmante);
+        const op = await prepararImpresion(papel.id, s.region || item.region);
+        if (op !== null) await api.abrirPapel(papel.id, op.firmante, op);
       } else if (e.target.closest("[data-aprobar]")) {
         const r = await api.decidir(s.id, "aprobar");
         v.cuerpo.innerHTML = `<p class="text-emerald-700">${esc(r.mensaje)}</p>`;
@@ -2274,21 +2278,39 @@ async function atenderFirma(item) {
   await tomarAlAbrir("firma", item.id, v.msg);
   v.cuerpo.innerHTML = `
     <p>${esc(item.detalle)}</p>
-    <p class="text-slate-600">Imprímalo (elija quién firma por Talento Humano), hágalo firmar por el
-      colaborador y registre la firma: con eso el trámite queda concluido.</p>
+    <ol class="list-decimal space-y-1 pl-5 text-slate-600">
+      <li>Imprímalo (elija la fecha y quién firma por Talento Humano).</li>
+      <li>Hágalo firmar por el colaborador y archive el original en su expediente físico.</li>
+      <li><b>El mismo día</b>, escanéelo y súbalo: con eso el registro de vacaciones queda concluido.</li>
+    </ol>
     <div class="flex flex-wrap gap-2">
       <button data-imprimir class="${CLASE_BTN} bg-slate-100 hover:bg-slate-200">🖨️ Imprimir</button>
-      <button data-firmado class="${CLASE_BTN} bg-emerald-600 text-white hover:bg-emerald-700">Registrar firma</button>
+      <button data-escaneo class="${CLASE_BTN} bg-emerald-600 text-white hover:bg-emerald-700">⬆ Subir escaneo firmado</button>
+      <button data-firmado class="${CLASE_BTN} bg-white text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50">Solo registrar la firma (escaneo después)</button>
     </div>`;
   v.cuerpo.addEventListener("click", async (e) => {
     try {
       if (e.target.closest("[data-imprimir]")) {
-        const firmante = await elegirFirmante(item.region);
-        if (firmante !== null) await api.abrirPapel(item.id, firmante);
+        const op = await prepararImpresion(item.id, item.region);
+        if (op !== null) await api.abrirPapel(item.id, op.firmante, op);
+      } else if (e.target.closest("[data-escaneo]")) {
+        const entrada = Object.assign(document.createElement("input"),
+          { type: "file", accept: "application/pdf,image/jpeg,image/png" });
+        entrada.addEventListener("change", async () => {
+          const archivo = entrada.files[0];
+          if (!archivo) return;
+          try {
+            const r = await api.subirEscaneo(item.id, archivo);
+            v.cuerpo.innerHTML = `<p class="text-emerald-700">${esc(r.mensaje)} El registro de vacaciones quedó concluido.</p>`;
+          } catch (err) { v.msg(err.message, true); }
+        });
+        entrada.click();
       } else if (e.target.closest("[data-firmado]")) {
-        if (!confirm(`¿${item.persona} ya firmó y el documento está en su expediente?`)) return;
+        if (!confirm(`¿${item.persona} ya firmó y el original está en su expediente? ` +
+                     "El pendiente sigue abierto hasta subir el escaneo.")) return;
         const r = await api.registrarFirma(item.id);
-        v.cuerpo.innerHTML = `<p class="text-emerald-700">${esc(r.mensaje)}</p>`;
+        v.cuerpo.insertAdjacentHTML("beforeend",
+          `<p class="text-emerald-700">${esc(r.mensaje)} Falta subir el escaneo.</p>`);
       }
     } catch (err) { v.msg(err.message, true); }
   });
@@ -2309,6 +2331,106 @@ async function atenderFirma(item) {
     } catch (err) { avisar(err.message, true); }
   }, 300);
 })();
+
+/* ---------------------------------------------------------- actualizaciones */
+/* Markdown mínimo y seguro: se escapa todo primero y después se dan formato
+   títulos, listas, tablas, código y negritas. Nada del archivo se ejecuta. */
+function markdown(texto) {
+  const lineas = esc(texto).split("\n");
+  const html = [];
+  let enCodigo = false, lista = null, tabla = [];
+  const enLinea = (t) => t.replace(/`([^`]+)`/g, '<code class="rounded bg-slate-100 px-1 text-[0.85em]">$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/«([^»]+)»/g, "«$1»");
+  const cerrar = () => {
+    if (lista) { html.push(`</${lista}>`); lista = null; }
+    if (tabla.length) {
+      const filas = tabla.filter((f) => !/^\|\s*-/.test(f)).map((f) => f.replace(/^\||\|$/g, "").split("|"));
+      html.push(`<div class="my-2 overflow-x-auto"><table class="w-full text-left text-xs">${filas.map((f, i) =>
+        `<tr class="${i ? "border-t border-slate-100" : "bg-slate-50 font-medium"}">${f.map((c) =>
+          `<td class="px-2 py-1">${enLinea(c.trim())}</td>`).join("")}</tr>`).join("")}</table></div>`);
+      tabla = [];
+    }
+  };
+  for (const l of lineas) {
+    if (l.startsWith("```")) {
+      cerrar();
+      html.push(enCodigo ? "</pre>" : '<pre class="my-2 overflow-x-auto rounded-xl bg-slate-900 p-3 font-mono text-xs text-slate-100">');
+      enCodigo = !enCodigo;
+      continue;
+    }
+    if (enCodigo) { html.push(l + "\n"); continue; }
+    if (/^\|/.test(l)) { tabla.push(l); continue; }
+    // La continuación de un punto de la lista (línea con sangría) va en el mismo punto.
+    if (lista && /^\s{2,}\S/.test(l) && !/^\s*(?:[-*]|\d+\.) /.test(l) && html[html.length - 1].endsWith("</li>")) {
+      html[html.length - 1] = html[html.length - 1].replace(/<\/li>$/, ` ${enLinea(l.trim())}</li>`);
+      continue;
+    }
+    const t = l.match(/^(#{1,4}) (.*)/);
+    const li = l.match(/^\s*(?:[-*]|\d+\.) (.*)/);
+    if (t) { cerrar(); html.push(`<h${t[1].length + 2} class="mt-4 font-semibold text-slate-900">${enLinea(t[2])}</h${t[1].length + 2}>`); }
+    else if (li) {
+      const tipo = /^\s*\d+\./.test(l) ? "ol" : "ul";
+      if (lista !== tipo) { cerrar(); lista = tipo; html.push(`<${tipo} class="${tipo === "ol" ? "list-decimal" : "list-disc"} my-1 space-y-0.5 pl-5">`); }
+      html.push(`<li>${enLinea(li[1])}</li>`);
+    } else if (!l.trim()) cerrar();
+    else { if (lista) cerrar(); html.push(`<p class="my-1.5">${enLinea(l)}</p>`); }
+  }
+  cerrar();
+  if (enCodigo) html.push("</pre>");
+  return html.join("");
+}
+
+let notaActual = null;
+async function cargarActualizaciones() {
+  const d = await api.actualizaciones();
+  const faltan = d.migraciones.faltan;
+  $("act-estado").innerHTML = `
+    <div class="rounded-xl bg-slate-50 p-3"><p class="text-xs text-slate-500">Versión instalada</p>
+      <p class="font-mono text-lg font-semibold">${esc(d.version.commit || "—")}</p>
+      <p class="text-xs text-slate-500">${esc(d.version.rama || "")}</p></div>
+    <div class="rounded-xl p-3 ${faltan.length ? "bg-amber-50 ring-1 ring-amber-300" : "bg-emerald-50"}">
+      <p class="text-xs text-slate-500">Base de datos</p>
+      <p class="text-lg font-semibold">${d.migraciones.aplicadas} de ${d.migraciones.disponibles} migraciones</p>
+      <p class="text-xs ${faltan.length ? "text-amber-800" : "text-emerald-800"}">${faltan.length
+        ? `Faltan: ${faltan.map(esc).join(", ")}` : "Al día"}</p></div>
+    <div class="rounded-xl bg-slate-50 p-3"><p class="text-xs text-slate-500">Notas de actualización</p>
+      <p class="text-lg font-semibold">${d.notas.length}</p>
+      <p class="text-xs text-slate-500">${d.notas[0] ? `La última: ${esc(d.notas[0].fecha)}` : ""}</p></div>`;
+  $("act-comando").textContent = d.comando;
+  $("act-notas").innerHTML = d.notas.map((n, i) => `
+    <li><button type="button" data-nota="${esc(n.archivo)}"
+        class="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-100">
+        <span class="block text-xs text-slate-500">${esc(n.fecha)}${i === 0 ? " · la más reciente" : ""}</span>
+        ${esc(n.titulo)}</button></li>`).join("") || '<li class="px-3 py-2 text-sm text-slate-500">Sin notas.</li>';
+  if (d.notas[0]) abrirNota(d.notas[0].archivo);
+}
+
+async function abrirNota(archivo) {
+  notaActual = archivo;
+  document.querySelectorAll("[data-nota]").forEach((b) => b.classList.toggle("bg-slate-100", b.dataset.nota === archivo));
+  const texto = await api.notaActualizacion(archivo);
+  $("act-titulo").textContent = (texto.match(/^# (.*)$/m) || [, archivo])[1];
+  $("act-texto").innerHTML = markdown(texto.replace(/^# .*\n/, ""));
+  $("act-descargar").classList.remove("hidden");
+}
+
+$("act-notas")?.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-nota]");
+  if (b) abrirNota(b.dataset.nota).catch((err) => avisar(err.message, true));
+});
+$("act-descargar")?.addEventListener("click", () =>
+  api.descargarNota(notaActual).catch((err) => avisar(err.message, true)));
+$("act-copiar")?.addEventListener("click", async () => {
+  // El portapapeles solo existe por HTTPS: por http en la red interna no
+  // está, y se dice en vez de fallar callado.
+  if (!window.isSecureContext || !navigator.clipboard) {
+    return avisar("Copiar solo funciona entrando por https. Selecciónelo a mano.", true);
+  }
+  try {
+    await navigator.clipboard.writeText(`cd ~/bryan/RRHH_ITSANET && ${$("act-comando").textContent}`);
+    avisar("Comando copiado.");
+  } catch { avisar("No se pudo copiar: selecciónelo a mano.", true); }
+});
 
 /* --------------------------------------------------------- sedes y regiones */
 const NATURAL = { costa: "Costa", sierra: "Sierra", amazonia: "Amazonía", insular: "Galápagos" };

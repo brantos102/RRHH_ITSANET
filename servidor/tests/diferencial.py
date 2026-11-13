@@ -225,7 +225,20 @@ def json_normal(valor: Any) -> Any:
         if isinstance(v, uuid.UUID):
             return str(v)
         raise TypeError(type(v))
-    return _instantes(json.loads(json.dumps(valor, default=conv)))
+    return _sin_nuevas(_instantes(json.loads(json.dumps(valor, default=conv))))
+
+
+# Claves que el sistema nuevo agrega a sus respuestas y la referencia de
+# PostgreSQL no tenía. No cambian ningún cálculo: solo informan a la pantalla.
+CLAVES_NUEVAS = {"feriados_cuentan"}
+
+
+def _sin_nuevas(v):
+    if isinstance(v, dict):
+        return {k: _sin_nuevas(x) for k, x in v.items() if k not in CLAVES_NUEVAS}
+    if isinstance(v, list):
+        return [_sin_nuevas(x) for x in v]
+    return v
 
 
 def _instantes(valor: Any) -> Any:
@@ -301,6 +314,12 @@ def muestra():
     import migrar
     assert migrar.principal(aplicar=True, url=url) == 0
     assert trasladar.principal(pg_url, aplicar=True, destino=url) == 0
+    # La referencia descontaba los feriados aparte; el sistema nuevo, por
+    # defecto, los cuenta como en la hoja de producción (migración 0015).
+    # Para comparar cálculo con cálculo, la muestra usa la regla de la
+    # referencia.
+    raiz.cursor().execute(f"UPDATE `{MUESTRA_MY}`.app_config SET valor = 'false' "
+                          "WHERE clave = 'vacaciones_feriados_cuentan'")
 
     pg = psycopg.connect(pg_url)
     from psycopg.rows import dict_row

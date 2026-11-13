@@ -21,7 +21,16 @@ from typing import Any, Sequence
 
 from fastapi import Response
 
+from pathlib import Path
+
 from .db import ZONA_ECUADOR
+
+# Marca: el azul del logo de ITSANET (el mismo de la interfaz) y su logo
+# arriba en cada archivo. Si el manual de marca define otros tonos, se
+# cambian aquí y en frontend/config.js (COLOR_MARCA).
+AZUL_MARCA = "1C58D7"
+TINTA = "111827"
+LOGO = Path(__file__).resolve().parent / "recursos" / "logo_itsanet.png"
 
 MIME = {
     "csv": "text/csv; charset=utf-8",
@@ -42,6 +51,22 @@ class Informe:
     filtros: Sequence[tuple[str, str]] = field(default_factory=list)
     generado_por: str = ""
     nota: str = ""
+    # Exportaciones con trazabilidad: su folio y para qué se generó.
+    folio: str = ""
+    motivo: str = ""
+
+
+def _metadatos(informe: "Informe") -> list[tuple[str, str]]:
+    """Lo que identifica al archivo, en el mismo orden en los tres formatos."""
+    filas = list(informe.filtros)
+    if informe.folio:
+        filas.insert(0, ("Folio de exportación", informe.folio))
+    if informe.motivo:
+        filas.append(("Motivo", informe.motivo))
+    if informe.generado_por:
+        filas.append(("Generado por", informe.generado_por))
+    filas.append(("Generado el", datetime.now(ZONA_ECUADOR).strftime("%d/%m/%Y %H:%M")))
+    return filas
 
 
 def _texto(valor: Any) -> str:
@@ -72,12 +97,9 @@ def a_csv(informe: Informe) -> Response:
     # archivos separados por coma y deja todo en una columna.
     escritor = csv.writer(memoria, delimiter=";", quoting=csv.QUOTE_MINIMAL)
 
-    escritor.writerow([informe.titulo])
-    for etiqueta, valor in informe.filtros:
+    escritor.writerow([f"ITSANET · {informe.titulo}"])
+    for etiqueta, valor in _metadatos(informe):
         escritor.writerow([etiqueta, valor])
-    if informe.generado_por:
-        escritor.writerow(["Generado por", informe.generado_por])
-    escritor.writerow(["Generado el", datetime.now(ZONA_ECUADOR).strftime("%d/%m/%Y %H:%M")])
     # La nota, arriba y en los tres formatos. Solo salía en el PDF, y es
     # justo lo que tiene que viajar con el archivo: dice qué NO contiene
     # —importes, jornadas sin cerrar— y esa advertencia no puede quedarse en
@@ -106,20 +128,31 @@ def a_excel(informe: Informe) -> Response:
     hoja = libro.active
     hoja.title = informe.titulo[:31] or "Informe"   # Excel no admite más de 31
 
-    hoja.append([informe.titulo])
-    hoja["A1"].font = Font(size=14, bold=True)
-    for etiqueta, valor in informe.filtros:
+    # El logo arriba a la izquierda, y el título al lado.
+    if LOGO.exists():
+        try:
+            from openpyxl.drawing.image import Image as ImagenXL
+            logo = ImagenXL(str(LOGO))
+            logo.height, logo.width = 36, int(36 * logo.width / logo.height)
+            hoja.add_image(logo, "A1")
+            hoja.row_dimensions[1].height = 30
+        except Exception:  # noqa: BLE001 — sin logo, el archivo igual sirve
+            pass
+    hoja.append(["", informe.titulo])
+    hoja["B1"].font = Font(size=14, bold=True, color=AZUL_MARCA)
+    hoja.append([])
+    for etiqueta, valor in _metadatos(informe):
         hoja.append([etiqueta, valor])
-    if informe.generado_por:
-        hoja.append(["Generado por", informe.generado_por])
-    hoja.append(["Generado el", datetime.now(ZONA_ECUADOR).strftime("%d/%m/%Y %H:%M")])
+        hoja.cell(row=hoja.max_row, column=1).font = Font(bold=True, color=TINTA)
     if informe.nota:
         hoja.append(["Nota", informe.nota])
     hoja.append([])
 
-    fila_cabecera = hoja.max_row + 1
+    # La fila se toma DESPUÉS de agregarla: una fila vacía agregada antes no
+    # cuenta en max_row, y calcularla de antemano pintaba la fila de arriba.
     hoja.append([etiqueta for _, etiqueta in informe.columnas])
-    relleno = PatternFill("solid", fgColor="0F172A")
+    fila_cabecera = hoja.max_row
+    relleno = PatternFill("solid", fgColor=AZUL_MARCA)
     for celda in hoja[fila_cabecera]:
         celda.font = Font(bold=True, color="FFFFFF")
         celda.fill = relleno
@@ -168,20 +201,29 @@ def a_pdf(informe: Informe) -> Response:
 
     estilos = getSampleStyleSheet()
     titulo = ParagraphStyle("titulo", parent=estilos["Heading1"],
-                            fontSize=15, spaceAfter=2, textColor=colors.HexColor("#0f172a"))
+                            fontSize=15, spaceAfter=2, textColor=colors.HexColor(f"#{AZUL_MARCA}"))
     menor = ParagraphStyle("menor", parent=estilos["Normal"],
                            fontSize=8, textColor=colors.HexColor("#64748b"))
     celda = ParagraphStyle("celda", parent=estilos["Normal"], fontSize=7.2, leading=9)
     celda_cab = ParagraphStyle("celdacab", parent=celda, textColor=colors.white,
                                fontName="Helvetica-Bold")
 
-    piezas: list = [Paragraph(informe.titulo, titulo)]
-    linea = " · ".join(f"{e}: {v}" for e, v in informe.filtros) or "Sin filtros"
-    piezas.append(Paragraph(linea, menor))
-    pie = f"{len(informe.filas)} registro(s) · {datetime.now(ZONA_ECUADOR):%d/%m/%Y %H:%M}"
-    if informe.generado_por:
-        pie += f" · generado por {informe.generado_por}"
-    piezas.append(Paragraph(pie, menor))
+    from reportlab.platypus import Image as ImagenPDF
+    cabecera_celdas = [Paragraph(informe.titulo, titulo)]
+    if LOGO.exists():
+        logo = ImagenPDF(str(LOGO))
+        proporcion = logo.imageWidth / logo.imageHeight
+        logo.drawHeight, logo.drawWidth = 11 * mm, 11 * mm * proporcion
+        cabecera_celdas = [logo, Paragraph(informe.titulo, titulo)]
+    cabecera = Table([cabecera_celdas], colWidths=[45 * mm, None] if len(cabecera_celdas) == 2 else None)
+    cabecera.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                  ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                                  ("LINEBELOW", (0, 0), (-1, -1), 1.2, colors.HexColor(f"#{AZUL_MARCA}"))]))
+    piezas: list = [cabecera, Spacer(1, 2 * mm)]
+    meta = _metadatos(informe)
+    linea = " · ".join(f"{e}: {v}" for e, v in meta) or "Sin filtros"
+    piezas.append(Paragraph(linea.replace("&", "&amp;").replace("<", "&lt;"), menor))
+    piezas.append(Paragraph(f"{len(informe.filas)} registro(s)", menor))
     if informe.nota:
         piezas.append(Spacer(1, 3 * mm))
         piezas.append(Paragraph(informe.nota, menor))
@@ -199,7 +241,7 @@ def a_pdf(informe: Informe) -> Response:
     tabla = Table(datos, repeatRows=1,
                   colWidths=[ancho_util / len(informe.columnas)] * len(informe.columnas))
     tabla.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(f"#{AZUL_MARCA}")),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#dde3ea")),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1),
@@ -217,8 +259,9 @@ def a_pdf(informe: Informe) -> Response:
         lienzo.setFillColor(colors.HexColor("#94a3b8"))
         lienzo.drawString(
             12 * mm, 8 * mm,
-            "Documento con datos personales. Tratamiento conforme a la Ley Orgánica "
-            "de Protección de Datos Personales del Ecuador.")
+            (f"{informe.folio} · " if informe.folio else "") +
+            "CONFIDENCIAL · Documento con datos personales. Tratamiento conforme a la Ley "
+            "Orgánica de Protección de Datos Personales del Ecuador.")
         lienzo.drawRightString(doc.pagesize[0] - 12 * mm, 8 * mm, f"Página {doc.page}")
         lienzo.restoreState()
 

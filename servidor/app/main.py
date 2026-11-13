@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from . import registro
 from .config import get_settings
 from .db import abrir_pool, cerrar_pool, obtener_uno
-from .routers import (administracion, asistente, pendientes, sedes, fotos, aprobaciones, auth, chat, ficha, ingreso_firmas,
+from .routers import (administracion, asistente, pendientes, sedes, fotos, exportaciones, actualizaciones, aprobaciones, auth, chat, ficha, ingreso_firmas,
                       garita, informes, panel, papeles, personas, solicitudes,
                       tablero, temporal)
 
@@ -74,7 +74,7 @@ app.add_middleware(
     # `Content-Disposition` para que las descargas conserven el nombre que
     # pone el servidor: sin exponerla, el archivo bajaba como «cotejo.xlsx»
     # en vez de «cotejo-de-la-carga-inicial-2026-09-27.xlsx».
-    expose_headers=["X-Peticion-Id", "Content-Disposition"],
+    expose_headers=["X-Peticion-Id", "Content-Disposition", "X-Folio", "X-Sha256", "X-Integridad"],
     max_age=600,
 )
 
@@ -224,6 +224,8 @@ app.include_router(asistente.router)
 app.include_router(pendientes.router)
 app.include_router(sedes.router)
 app.include_router(fotos.router)
+app.include_router(exportaciones.router)
+app.include_router(actualizaciones.router)
 app.include_router(chat.router)
 app.include_router(temporal.router)
 app.include_router(panel.router)

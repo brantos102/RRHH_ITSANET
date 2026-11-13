@@ -117,8 +117,10 @@ async def test_el_desglose_explica_de_que_se_componen_los_dias(cliente, auth):
                                  "fecha_fin": str(inicio + timedelta(days=6))})
     d = r.json()["desglose"]
     assert d["total_calendario"] == 7
-    assert d["dias_no_laborables"] >= 1
-    assert d["dias_descontar"] == 7 - d["dias_no_laborables"]
+    # Regla de producción (Art. 69): el feriado dentro de unas vacaciones
+    # cuenta como día de vacaciones, y se dice.
+    assert d["feriados_cuentan"] is True
+    assert d["dias_no_laborables"] == 0 and d["dias_descontar"] == 7
     assert any(f["nombre"] for f in d["feriados"]), "debe nombrar el feriado"
 
 

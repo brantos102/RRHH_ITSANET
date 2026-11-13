@@ -235,13 +235,17 @@ async def test_el_catalogo_llega_agrupado_y_con_ejemplos(cliente, auth):
             assert sub["guia_adjuntos"], f"{sub['codigo']} sin guía de adjuntos"
 
 
-async def test_un_feriado_dentro_del_rango_no_invalida_la_semana(cliente, auth):
+@pytest.mark.parametrize("feriados_cuentan, esperado", [("true", 7), ("false", 6)])
+async def test_un_feriado_dentro_del_rango_no_invalida_la_semana(cliente, auth, feriados_cuentan,
+                                                                  esperado):
     """El mínimo cuenta días de ausencia, no días cobrados al saldo.
 
-    Una semana de lunes a domingo con un feriado dentro descuenta 6 días del
-    saldo pero la persona está fuera 7. Medirlo contra los días cobrados hacía
-    imposible tomar la semana de Navidad o la de Carnaval.
+    Por defecto (regla de la hoja de producción y del Art. 69) el feriado
+    cuenta: lunes a domingo son 7. Con el parámetro apagado, descuenta 6 pero
+    la persona está fuera 7, y la semana sigue siendo válida.
     """
+    await ejecutar("update app_config set valor = %s where clave = 'vacaciones_feriados_cuentan'",
+                   (feriados_cuentan,))
     feriado = await obtener_uno(
         """select fecha from feriados
             where activo and fecha > current_date() + interval 30 day
@@ -257,5 +261,5 @@ async def test_un_feriado_dentro_del_rango_no_invalida_la_semana(cliente, auth):
         "descripcion": "Semana completa con feriado incluido", "firmar": False,
     })
     assert r.status_code == 201, r.text
-    # Se descuentan menos días del saldo, pero la solicitud es válida
-    assert float(r.json()["dias_solicitados"]) < 7
+    await ejecutar("update app_config set valor = 'true' where clave = 'vacaciones_feriados_cuentan'")
+    assert float(r.json()["dias_solicitados"]) == esperado
