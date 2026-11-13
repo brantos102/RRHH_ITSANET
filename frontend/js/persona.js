@@ -1,0 +1,284 @@
+/* El expediente de una persona, en una sola pantalla.
+
+   Talento Humano y las jefaturas tenían los datos repartidos: la ficha en una
+   pantalla, los períodos en otra, las solicitudes en una tercera y el
+   historial de la hoja dentro de un diálogo del panel de cada quien. Para
+   responder «¿cuándo tomó vacaciones Fulano y qué tiene pendiente?» había que
+   ir a tres sitios y cruzarlos a mano.
+
+   Se llega escribiendo el nombre en el buscador de la barra lateral. Quién
+   puede ver a quién lo decide el servidor: un jefe ve a su gente y nada más,
+   y probar direcciones a mano no le sirve de nada. */
+import { api, sesion, esc, fecha, fechaHora, ESTADOS, llenarSedes } from "./api.js";
+import { montarNavegacion } from "./navegacion.js";
+import { montarBuscador } from "./buscador.js";
+import { montarContactos } from "./contactos.js";
+
+const $ = (id) => document.getElementById(id);
+if (!sesion.vigente) location.replace("index.html");
+if (!["jefe", "rrhh", "admin"].includes(sesion.perfil?.rol)) location.replace("dashboard.html");
+
+montarNavegacion($("barra"), { activo: "panel" });
+
+const ID = new URLSearchParams(location.search).get("id");
+
+const numero = (v) => Number(v || 0).toLocaleString("es-EC",
+  { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
+
+const PROCEDENCIA = {
+  historico: ["Registro de Talento Humano", "bg-slate-100 text-slate-600 ring-slate-200"],
+  solicitud: ["Solicitada aquí", "bg-emerald-50 text-emerald-700 ring-emerald-200"],
+};
+
+const TIPO = { vacacion: "Vacaciones", permiso: "Permiso" };
+
+function pintarPersona(p, resumen, devengo) {
+  $("iniciales").textContent =
+    (p.nombre || "?").split(" ").map((x) => x[0]).slice(0, 2).join("");
+  // La foto, si tiene y si quien mira puede verla (su jefe o Talento Humano).
+  api.foto(p.id).then((url) => {
+    if (url) $("iniciales").innerHTML = `<img src="${url}" alt="" class="h-full w-full object-cover">`;
+  });
+  $("nombre").textContent = p.nombre;
+  document.title = `${p.nombre} · Expediente`;
+  $("puesto").textContent =
+    [p.cargo, p.departamento].filter(Boolean).join(" · ") || "Sin cargo registrado";
+  $("datos").textContent = [
+    p.cedula,
+    p.ciudad,
+    p.jefe_nombre ? `Reporta a ${p.jefe_nombre}` : null,
+    `Ingresó el ${fecha(p.fecha_ingreso)}`,
+    // Que falte el correo no es un detalle: es quien no recibe avisos y
+    // tiene que entrar por «primer ingreso».
+    p.email || "Sin correo registrado",
+  ].filter(Boolean).join(" · ");
+
+  $("saldo").textContent = numero(p.saldo);
+  $("saldo-pie").textContent = "días de vacaciones";
+  $("antiguedad").textContent = plural(p.anios, "año", "años");
+  $("veces").textContent = plural(resumen.veces, "vez", "veces");
+  $("dias-gozados").textContent = `${numero(resumen.dias_gozados)} días en total`;
+  $("en-tramite").textContent = plural(resumen.en_tramite, "solicitud", "solicitudes");
+  $("fines-semana").textContent = p.fines_semana_pendientes ?? "—";
+
+  if (devengo) {
+    $("devengo").textContent =
+      `Del año en curso lleva acumulados ${numero(devengo.devengado_hoja)} días: ` +
+      `${devengo.meses_del_periodo} ${devengo.meses_del_periodo === 1 ? "mes" : "meses"} ` +
+      `corridos a 1,25 al mes. De los años ya cumplidos tiene ` +
+      `${numero(devengo.devengado_de_anios_cumplidos)} días asignados.`;
+  }
+}
+
+function pintarVacaciones(lista) {
+  if (!lista.length) {
+    $("vacaciones").innerHTML =
+      `<p class="rounded-xl bg-slate-50 p-4 text-center text-sm text-slate-500">
+         No hay vacaciones registradas a su nombre.</p>`;
+    return;
+  }
+  $("vacaciones").innerHTML = lista.map((v) => {
+    const [etiqueta, clase] = PROCEDENCIA[v.procedencia] || PROCEDENCIA.historico;
+    return `
+    <div class="flex flex-wrap items-center gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-medium">
+          ${esc(fecha(v.fecha_inicio))} — ${esc(fecha(v.fecha_fin))}
+        </p>
+        <p class="text-xs text-slate-500">
+          ${numero(v.dias)} ${v.dias === 1 ? "día" : "días"}${
+            v.folio ? ` · solicitud Nº ${v.folio}` : ""}
+        </p>
+      </div>
+      <span class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ${clase}">
+        ${etiqueta}
+      </span>
+    </div>`;
+  }).join("");
+}
+
+function pintarSolicitudes(lista) {
+  if (!lista.length) {
+    $("solicitudes").innerHTML =
+      `<p class="rounded-xl bg-slate-50 p-4 text-center text-sm text-slate-500">
+         Todavía no ha pedido nada por el sistema.</p>`;
+    return;
+  }
+  $("solicitudes").innerHTML = lista.map((s) => {
+    const e = ESTADOS[s.estado] || { etiqueta: s.estado, clase: "bg-slate-100 text-slate-600 ring-slate-200" };
+    const cuando = s.hora_inicio
+      ? `${fecha(s.fecha_inicio)}, de ${String(s.hora_inicio).slice(0, 5)} a ${String(s.hora_fin).slice(0, 5)}`
+      : `${fecha(s.fecha_inicio)} — ${fecha(s.fecha_fin)}`;
+    return `
+    <div class="flex flex-wrap items-center gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-medium">
+          Nº ${s.folio} · ${esc(TIPO[s.tipo] || s.tipo)}${
+            s.subtipo ? ` · ${esc(s.subtipo)}` : ""}
+        </p>
+        <p class="text-xs text-slate-500">
+          ${esc(cuando)}${s.dias_solicitados ? ` · ${numero(s.dias_solicitados)} días` : ""}
+          · pedida el ${esc(fechaHora(s.created_at))}
+        </p>
+      </div>
+      <span class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ${e.clase}">
+        ${esc(e.etiqueta)}
+      </span>
+    </div>`;
+  }).join("");
+}
+
+function pintarPeriodos(lista) {
+  if (!lista.length) {
+    $("periodos").innerHTML = `<p class="text-sm text-slate-500">Sin períodos generados.</p>`;
+    return;
+  }
+  $("periodos").innerHTML = `
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+          <th class="py-2 pr-3">Año</th><th class="py-2 pr-3">Desde</th>
+          <th class="py-2 pr-3">Hasta</th><th class="py-2 pr-3 text-right">Asignados</th>
+          <th class="py-2 pr-3 text-right">Gozados</th><th class="py-2 text-right">Saldo</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${lista.map((p) => `
+          <tr class="border-b border-slate-100 ${p.caducado ? "text-slate-400" : ""}">
+            <td class="py-2 pr-3 font-medium">${p.periodo}${
+              p.devengado ? "" : ` <span class="text-xs font-normal text-slate-500">(en curso)</span>`}</td>
+            <td class="py-2 pr-3">${esc(fecha(p.fecha_desde))}</td>
+            <td class="py-2 pr-3">${esc(fecha(p.fecha_hasta))}</td>
+            <td class="py-2 pr-3 text-right tabular-nums">${numero(p.dias_asignados)}</td>
+            <td class="py-2 pr-3 text-right tabular-nums">${numero(p.dias_consumidos)}</td>
+            <td class="py-2 text-right font-medium tabular-nums">${numero(p.dias_saldo)}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>`;
+}
+
+async function cargar() {
+  if (!ID) {
+    $("cargando").classList.add("hidden");
+    $("error").textContent = "No se indicó a quién abrir. Busque la persona en la barra lateral.";
+    $("error").classList.remove("hidden");
+    return;
+  }
+  try {
+    const d = await api.expediente(ID);
+    pintarPersona(d.persona, d.resumen, d.devengo);
+    if (d.ficha) pintarFicha(d.persona, d.ficha);
+    pintarVacaciones(d.vacaciones);
+    pintarSolicitudes(d.solicitudes);
+    pintarPeriodos(d.periodos);
+
+    $("cargando").classList.add("hidden");
+    $("contenido").classList.remove("hidden");
+
+    montarBuscador({ campo: "buscar-vacaciones", contenedor: "vacaciones",
+                     filas: ":scope > div", vacio: "vacaciones-vacio" });
+    montarBuscador({ campo: "buscar-solicitudes", contenedor: "solicitudes",
+                     filas: ":scope > div", vacio: "solicitudes-vacio" });
+  } catch (e) {
+    $("cargando").classList.add("hidden");
+    $("error").textContent = e.message || "No se pudo abrir el expediente.";
+    $("error").classList.remove("hidden");
+  }
+}
+
+/* -------------------------------------------- ficha editable (Talento Humano) */
+let fichaOriginal = {};
+const CAMPOS_FICHA = {
+  "fi-nombre": "nombre", "fi-telefono": "telefono", "fi-telefono-alt": "telefono_alternativo",
+  "fi-region": "region", "fi-ciudad": "ciudad", "fi-direccion": "direccion", "fi-cargo": "cargo",
+  "fi-area": "departamento", "fi-jefe": "jefe_id", "fi-nacimiento": "fecha_nacimiento",
+  "fi-bodega": "bodega", "fi-centro": "centro_costo", "fi-contrato": "tipo_contrato",
+  "fi-contrato-fin": "contrato_fin", "fi-sangre": "tipo_sangre",
+  "fi-disc-porcentaje": "porcentaje_discapacidad", "fi-disc-tipo": "tipo_discapacidad",
+  "fi-disc-carnet": "carnet_conadis",
+};
+// Casillas: se mandan como verdadero o falso, no como texto.
+const CASILLAS_FICHA = { "fi-disc": "tiene_discapacidad", "fi-sustituto": "sustituto_discapacidad" };
+
+function avisarFicha(texto, error = false) {
+  const p = $("fi-nota");
+  p.textContent = texto;
+  p.className = `text-sm sm:col-span-2 lg:col-span-3 ${error ? "text-rose-700" : "text-emerald-700"}`;
+}
+
+async function pintarFicha(p, f) {
+  $("caja-ficha").classList.remove("hidden");
+  const valores = {
+    nombre: p.nombre, telefono: p.telefono, telefono_alternativo: f.telefono_alternativo,
+    region: f.region, ciudad: p.ciudad, direccion: f.direccion, cargo: p.cargo,
+    departamento: p.departamento, jefe_id: f.jefe_id, fecha_nacimiento: f.fecha_nacimiento
+      ? String(f.fecha_nacimiento).slice(0, 10) : "", bodega: f.bodega, centro_costo: f.centro_costo,
+    tipo_contrato: f.tipo_contrato, contrato_fin: f.contrato_fin ? String(f.contrato_fin).slice(0, 10) : "",
+    tipo_sangre: f.tipo_sangre, porcentaje_discapacidad: f.porcentaje_discapacidad,
+    tipo_discapacidad: f.tipo_discapacidad, carnet_conadis: f.carnet_conadis,
+  };
+  await llenarSedes($("fi-region"), f.region);
+  try {
+    const [jefes, cat] = await Promise.all([api.jefaturas(), api.catalogoCargos()]);
+    $("fi-jefe").insertAdjacentHTML("beforeend", jefes.filter((j) => String(j.id) !== ID)
+      .map((j) => `<option value="${esc(j.id)}">${esc(j.nombre)}</option>`).join(""));
+    $("fi-ciudades").innerHTML = cat.ciudades.map((c) => `<option value="${esc(c.ciudad)}">`).join("");
+    $("fi-cargos").innerHTML = [...new Set(cat.cargos.map((c) => c.cargo))].map((c) => `<option value="${esc(c)}">`).join("");
+    $("fi-areas").innerHTML = cat.areas.map((a) => `<option value="${esc(a)}">`).join("");
+  } catch { /* sin sugerencias se escribe igual */ }
+  for (const [id, campo] of Object.entries(CAMPOS_FICHA)) $(id).value = valores[campo] || "";
+  fichaOriginal = Object.fromEntries(Object.entries(CAMPOS_FICHA).map(([id, c]) => [c, $(id).value]));
+  for (const [id, campo] of Object.entries(CASILLAS_FICHA)) {
+    $(id).checked = !!f[campo];
+    fichaOriginal[campo] = !!f[campo];
+  }
+
+  const dom = [[f.domicilio_calle, f.domicilio_numero].filter(Boolean).join(" ")
+                + (f.domicilio_interseccion ? ` y ${f.domicilio_interseccion}` : ""),
+               f.domicilio_parroquia, f.domicilio_canton, f.domicilio_provincia].filter(Boolean).join(", ");
+  $("fi-domicilio").textContent = (dom || f.direccion || "Sin registrar")
+    + (f.domicilio_referencia ? ` (${f.domicilio_referencia})` : "");
+  const TIPO_TEL = { celular: "Celular", fijo: "Fijo", trabajo: "Trabajo", otro: "Otro" };
+  $("fi-telefonos").innerHTML = (f.telefonos || []).map((t) =>
+    `<li><span class="font-mono">${esc(t.numero)}</span> · ${esc(TIPO_TEL[t.tipo] || t.tipo)}${
+      t.etiqueta ? ` · <span class="text-slate-500">${esc(t.etiqueta)}</span>` : ""}</li>`).join("")
+    || '<li class="text-slate-500">Ninguno.</li>';
+
+  montarContactos($("fi-contactos"), {
+    listar: async () => f.contactos,
+    guardar: (cid, d) => api.guardarContactoDe(ID, cid, d),
+    quitar: (cid) => api.quitarContactoDe(ID, cid),
+  }, avisarFicha).cargar();
+}
+
+$("form-ficha").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  // Solo lo que cambió: así la bitácora dice exactamente qué se corrigió.
+  const cambios = {};
+  for (const [id, campo] of Object.entries(CAMPOS_FICHA)) {
+    const v = $(id).value.trim();
+    if (v !== String(fichaOriginal[campo] ?? "")) {
+      cambios[campo] = campo === "porcentaje_discapacidad" ? (Number(v) || null) : (v || null);
+    }
+  }
+  for (const [id, campo] of Object.entries(CASILLAS_FICHA)) {
+    if ($(id).checked !== fichaOriginal[campo]) cambios[campo] = $(id).checked;
+  }
+  if (!Object.keys(cambios).length) return avisarFicha("No cambió ningún dato.", true);
+  try {
+    const r = await api.editarUsuario(ID, cambios);
+    avisarFicha(r.mensaje);
+    Object.assign(fichaOriginal, Object.fromEntries(Object.entries(cambios).map(([k, v]) =>
+      [k, typeof v === "boolean" ? v : v ?? ""])));
+    if ("region" in cambios || "ciudad" in cambios) setTimeout(() => location.reload(), 1500);
+  } catch (err) { avisarFicha(err.message, true); }
+});
+
+$("ficha-cerrar-sesiones").addEventListener("click", async () => {
+  if (!confirm("¿Cerrar todas sus sesiones abiertas? Tendrá que volver a ingresar.")) return;
+  try { avisarFicha((await api.cerrarSesionesDe(ID)).mensaje); }
+  catch (err) { avisarFicha(err.message, true); }
+});
+
+cargar();

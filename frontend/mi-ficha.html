@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#06122B">
+<title>Mi ficha personal</title>
+<link rel="icon" type="image/png" href="img/icono.png">
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="vendor/tailwind.css">
+<script src="config.js"></script>
+<!-- Ajustes de ESTA máquina, fuera del repositorio: el puerto del backend si
+     no es el 8000, una URL distinta. Si el archivo no existe no pasa nada
+     —el servidor de la interfaz devuelve vacío—. Vea config.local.js.ejemplo. -->
+<script src="config.local.js"></script>
+</head>
+
+<body class="min-h-dvh bg-slate-100 text-slate-900 antialiased">
+<div id="barra"></div>
+
+<main class="mx-auto max-w-3xl px-4 py-5 pb-24">
+
+  <!-- ===== Quién es ===== -->
+  <section class="flex items-center gap-4 rounded-2xl bg-slate-900 p-5 text-white shadow-lg">
+    <!-- Foto de perfil. Se guarda en el servidor, sin los datos ocultos que
+         trae la foto del teléfono (ubicación, modelo); la ven usted, su jefe
+         y Talento Humano. -->
+    <div class="relative shrink-0">
+      <div id="mf-foto" class="grid h-20 w-20 place-items-center overflow-hidden rounded-full bg-slate-700
+                               text-2xl font-semibold ring-2 ring-slate-600">?</div>
+      <label for="mf-foto-archivo" title="Cambiar foto"
+             class="absolute -bottom-1 -right-1 grid h-8 w-8 cursor-pointer place-items-center rounded-full
+                    bg-white text-slate-900 shadow ring-2 ring-slate-900 hover:bg-slate-100">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 8h3l2-3h6l2 3h3v11H4V8Zm8 9a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/>
+        </svg>
+        <span class="sr-only">Cambiar foto de perfil</span>
+      </label>
+      <input id="mf-foto-archivo" type="file" accept="image/jpeg,image/png,image/webp" class="hidden">
+    </div>
+    <div class="min-w-0">
+      <p class="text-sm text-slate-300">Mi ficha personal</p>
+      <h1 id="ficha-nombre" class="mt-0.5 text-xl font-semibold">—</h1>
+      <p id="ficha-resumen" class="mt-1 text-sm text-slate-300">—</p>
+      <button type="button" id="mf-foto-quitar"
+              class="mt-1 hidden text-xs text-slate-400 underline hover:text-white">Quitar foto</button>
+    </div>
+  </section>
+
+  <!-- ===== Lo que hay que confirmar ===== -->
+  <section id="caja-confirmar"
+           class="mt-4 hidden rounded-2xl bg-amber-50 p-5 shadow-sm ring-1 ring-amber-300">
+    <h2 class="font-medium text-amber-900">Confirme su jefe inmediato</h2>
+    <p class="mt-1 text-sm text-amber-800">
+      Esto es lo que consta en su expediente. Si algo no corresponde, indíquelo:
+      Talento Humano lo confirma antes de que rija.
+    </p>
+
+    <!-- El cargo y el área los administra Talento Humano: aquí solo se
+         confirma el jefe. -->
+    <p class="mt-3 text-sm text-amber-900">Cargo y área: <b id="mf-cargo">—</b>
+      <span class="block text-xs text-amber-800">Los administra Talento Humano. Si no corresponden, escríbales por el chat.</span></p>
+    <div class="mt-3 rounded-xl bg-white p-4 ring-1 ring-slate-200">
+      <p class="text-xs text-slate-500">Jefe inmediato</p>
+      <p id="mf-jefe" class="font-medium">—</p>
+      <div class="mt-2 flex flex-wrap gap-4 text-sm">
+        <label class="flex items-center gap-1.5">
+          <input type="radio" name="mf-jefe-ok" value="si" checked
+                 class="text-slate-900 focus:ring-slate-900"> Es correcto
+        </label>
+        <label class="flex items-center gap-1.5">
+          <input type="radio" name="mf-jefe-ok" value="no"
+                 class="text-slate-900 focus:ring-slate-900"> No corresponde
+        </label>
+      </div>
+      <select id="mf-jefe-nuevo"
+              class="mt-2 hidden w-full rounded-lg border-0 bg-slate-50 px-3 py-2 text-sm
+                     ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+        <option value="">Elija a su jefe…</option>
+      </select>
+    </div>
+
+    <button id="btn-confirmar-datos"
+            class="mt-3 w-full rounded-xl bg-amber-900 px-4 py-2.5 text-sm font-medium text-white
+                   hover:bg-amber-800">
+      Confirmar
+    </button>
+  </section>
+
+  <!-- ===== Contacto: lo que se corrige solo ===== -->
+  <section class="mt-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <h2 class="font-medium">Cómo ubicarlo</h2>
+    <p class="mt-1 text-sm text-slate-500">
+      Esto lo corrige usted mismo. No pasa por nadie.
+    </p>
+
+    <form id="form-contacto" class="mt-3 grid gap-3 sm:grid-cols-2">
+      <div>
+        <label for="mf-telefono" class="block text-sm font-medium text-slate-700">Teléfono personal</label>
+        <input id="mf-telefono" type="tel" inputmode="numeric" maxlength="13"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
+      </div>
+      <div>
+        <!-- Era «Teléfono de emergencia» y se confundía con los contactos de
+             emergencia, que van en su propia sección: es un segundo número. -->
+        <label for="mf-telefono-alt" class="block text-sm font-medium text-slate-700">
+          Otro teléfono (opcional)
+        </label>
+        <input id="mf-telefono-alt" type="tel" inputmode="numeric" maxlength="13"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
+      </div>
+      <!-- Domicilio por partes, como se escribe en Ecuador. Opcional. -->
+      <fieldset class="rounded-xl p-3 ring-1 ring-slate-200 sm:col-span-2">
+        <legend class="px-1 text-sm font-medium text-slate-700">Domicilio (opcional)</legend>
+        <div class="grid gap-3 sm:grid-cols-3">
+          <label class="block text-sm text-slate-700">Provincia
+            <select id="mf-dom-provincia" class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"><option value="">—</option>
+              <option>Azuay</option><option>Bolívar</option><option>Cañar</option><option>Carchi</option>
+              <option>Chimborazo</option><option>Cotopaxi</option><option>El Oro</option><option>Esmeraldas</option>
+              <option>Galápagos</option><option>Guayas</option><option>Imbabura</option><option>Loja</option>
+              <option>Los Ríos</option><option>Manabí</option><option>Morona Santiago</option><option>Napo</option>
+              <option>Orellana</option><option>Pastaza</option><option>Pichincha</option><option>Santa Elena</option>
+              <option>Santo Domingo de los Tsáchilas</option><option>Sucumbíos</option><option>Tungurahua</option>
+              <option>Zamora Chinchipe</option></select></label>
+          <label class="block text-sm text-slate-700">Cantón
+            <input id="mf-dom-canton" maxlength="80" placeholder="Quito" class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+          <label class="block text-sm text-slate-700">Parroquia o sector
+            <input id="mf-dom-parroquia" maxlength="80" placeholder="Iñaquito" class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+          <label class="block text-sm text-slate-700 sm:col-span-2">Calle principal
+            <input id="mf-dom-calle" maxlength="120" placeholder="Av. Amazonas" class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+          <label class="block text-sm text-slate-700">Número
+            <input id="mf-dom-numero" maxlength="20" placeholder="N34-12" class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+          <label class="block text-sm text-slate-700 sm:col-span-3">Calle secundaria (intersección)
+            <input id="mf-dom-interseccion" maxlength="120" placeholder="Naciones Unidas" class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+          <label class="block text-sm text-slate-700 sm:col-span-3">Referencia
+            <input id="mf-dom-referencia" maxlength="200" placeholder="Frente al parque, casa blanca de dos pisos" class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900"></label>
+        </div>
+      </fieldset>
+      <div>
+        <label for="mf-sangre" class="block text-sm font-medium text-slate-700">Tipo de sangre</label>
+        <select id="mf-sangre"
+                class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                       focus:bg-white focus:ring-2 focus:ring-slate-900">
+          <option value="">Sin indicar</option>
+          <option>O+</option><option>O-</option><option>A+</option><option>A-</option>
+          <option>B+</option><option>B-</option><option>AB+</option><option>AB-</option>
+        </select>
+        <p class="mt-1 text-xs text-slate-500">
+          Solo se usa en una emergencia. Es un dato de salud y no sale de Talento Humano.
+        </p>
+      </div>
+      <div class="flex items-end">
+        <button type="submit"
+                class="w-full rounded-xl bg-slate-900 px-4 py-2.5 font-medium text-white hover:bg-slate-800">
+          Guardar
+        </button>
+      </div>
+    </form>
+  </section>
+
+  <!-- ===== Teléfonos adicionales ===== -->
+  <section class="mt-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <h2 class="font-medium">Más teléfonos (opcional)</h2>
+    <p class="mt-1 text-sm text-slate-500">Otros números donde ubicarlo: WhatsApp, casa, trabajo. Hasta cinco.</p>
+    <ul id="mf-telefonos" class="mt-3 divide-y divide-slate-100 rounded-xl ring-1 ring-slate-200"></ul>
+    <form id="form-telefono" class="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_8rem] md:grid-cols-[minmax(0,1fr)_8rem_minmax(0,1fr)_auto]">
+      <input id="mf-tel-numero" type="tel" inputmode="numeric" maxlength="13" placeholder="Número" required
+             class="w-full min-w-0 rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+      <select id="mf-tel-tipo" class="w-full min-w-0 rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300">
+        <option value="celular">Celular</option><option value="fijo">Fijo</option>
+        <option value="trabajo">Trabajo</option><option value="otro">Otro</option></select>
+      <input id="mf-tel-etiqueta" maxlength="60" placeholder="Nota (opcional): WhatsApp, casa…"
+             class="w-full min-w-0 rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+      <button class="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800">Agregar</button>
+    </form>
+  </section>
+
+  <!-- ===== Discapacidad =====
+       Dato sensible (LOPDP Art. 26). Se pide porque da derechos: permisos,
+       estabilidad reforzada y el cupo que la empresa debe cumplir (CT Art. 42
+       num. 33). Lo ven usted y Talento Humano; rige cuando Talento Humano lo
+       verifica con el carné o el certificado. -->
+  <section class="mt-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <h2 class="font-medium">Discapacidad</h2>
+    <p class="mt-1 text-sm text-slate-500">
+      Opcional. Es un dato sensible: solo lo ven usted y Talento Humano, y se usa para
+      reconocerle los permisos y protecciones de ley.
+    </p>
+    <form id="form-discapacidad" class="mt-3 grid gap-3 sm:grid-cols-2">
+      <label class="flex items-center gap-2 text-sm sm:col-span-2">
+        <input id="mf-disc-tiene" type="checkbox" class="h-4 w-4"> Tengo una discapacidad calificada
+      </label>
+      <div data-disc class="hidden">
+        <label for="mf-disc-porcentaje" class="block text-sm font-medium text-slate-700">Porcentaje</label>
+        <input id="mf-disc-porcentaje" type="number" min="1" max="100" inputmode="numeric"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+      </div>
+      <div data-disc class="hidden">
+        <label for="mf-disc-tipo" class="block text-sm font-medium text-slate-700">Tipo</label>
+        <select id="mf-disc-tipo"
+                class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+          <option value="">Prefiero no indicarlo</option>
+          <option value="fisica">Física</option><option value="intelectual">Intelectual</option>
+          <option value="auditiva">Auditiva</option><option value="visual">Visual</option>
+          <option value="psicosocial">Psicosocial</option><option value="multiple">Múltiple</option>
+        </select>
+      </div>
+      <div data-disc class="hidden sm:col-span-2">
+        <label for="mf-disc-carnet" class="block text-sm font-medium text-slate-700">
+          N.º de carné del CONADIS o del certificado del Ministerio de Salud</label>
+        <input id="mf-disc-carnet" type="text" maxlength="40"
+               class="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+      </div>
+      <label class="flex items-start gap-2 text-sm sm:col-span-2">
+        <input id="mf-disc-sustituto" type="checkbox" class="mt-0.5 h-4 w-4">
+        <span>Soy persona <b>sustituta</b>: tengo a mi cargo a un familiar con discapacidad
+          (Ley Orgánica de Discapacidades, Art. 48).</span>
+      </label>
+      <p id="mf-disc-estado" class="text-xs text-slate-500 sm:col-span-2"></p>
+      <div class="sm:col-span-2">
+        <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2.5 font-medium text-white hover:bg-slate-800">
+          Enviar a Talento Humano
+        </button>
+      </div>
+    </form>
+  </section>
+
+  <!-- ===== Correo ===== -->
+  <!-- ===== Contactos de emergencia ===== -->
+  <section class="mt-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <h2 class="font-medium">Contactos de emergencia</h2>
+    <p class="mt-0.5 text-sm text-slate-600">A quién avisamos si algo ocurre en la jornada. Los corrige usted.</p>
+    <div id="mf-contactos" class="mt-3"></div>
+  </section>
+
+  <section class="mt-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <h2 class="font-medium">Correo de acceso</h2>
+    <p class="mt-1 text-sm text-slate-500">
+      Ahí llega su código cada vez que entra. Lo cambia usted; para que rija hay
+      que abrir el enlace que enviamos a la dirección nueva.
+    </p>
+    <p id="mf-correo-actual" class="mt-3 font-mono text-sm">—</p>
+    <p id="mf-correo-pendiente"
+       class="mt-2 hidden rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200"></p>
+
+    <form id="form-correo" class="mt-3 flex flex-wrap gap-2">
+      <input id="mf-correo-nuevo" type="email" required placeholder="nombre@itsanet.com.ec"
+             class="min-w-0 flex-1 rounded-xl border-0 bg-slate-50 px-3 py-2.5 ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+      <button type="submit"
+              class="rounded-xl bg-slate-100 px-4 py-2.5 font-medium hover:bg-slate-200">
+        Enviar enlace
+      </button>
+    </form>
+  </section>
+
+  <!-- ===== Lo que no se toca y por qué ===== -->
+  <section class="mt-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <h2 class="font-medium">Su expediente</h2>
+      <input type="search" id="buscar-campo" placeholder="Buscar un dato"
+             class="w-44 rounded-xl border-0 bg-slate-50 px-3 py-1.5 text-sm ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+    </div>
+    <div id="mf-expediente" class="mt-3 divide-y divide-slate-100"></div>
+  </section>
+
+  <!-- ===== Lo pedido ===== -->
+  <section id="caja-cambios" class="mt-4 hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <h2 class="font-medium">Cambios que pidió</h2>
+    <div id="mf-cambios" class="mt-3 space-y-2"></div>
+  </section>
+  <!-- ===== Mis dispositivos =====
+       Desde dónde entró. Una cédula puede estar abierta en un solo dispositivo:
+       entrar desde otro cierra el anterior. Si no reconoce alguno, ciérrelo y
+       avise a Talento Humano. -->
+  <section class="mt-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <h2 class="font-medium">Mis dispositivos</h2>
+    <p class="mt-0.5 text-sm text-slate-600">
+      Dónde está abierta su sesión y desde dónde entró. Si no reconoce alguno,
+      ciérrelo y avise a Talento Humano.
+    </p>
+    <ul id="mf-dispositivos" class="mt-3 divide-y divide-slate-100 rounded-xl ring-1 ring-slate-200"></ul>
+  </section>
+</main>
+
+<div class="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4">
+  <p id="aviso" class="hidden max-w-sm rounded-xl bg-slate-900 px-4 py-3 text-center text-sm text-white shadow-lg"></p>
+</div>
+
+<script type="module" src="js/mi-ficha.js"></script>
+</body>
+</html>

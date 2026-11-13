@@ -1,0 +1,22 @@
+/* Ajustes de ESTA máquina. Cópielo a `config.local.js` —sin «.ejemplo»— y
+   cambie lo que necesite. Ese archivo NO se versiona, así que sus ajustes
+   sobreviven a cada `git pull` y no se le cruzan con los de nadie.
+
+   Existe por un tropiezo concreto: el backend corría en un puerto distinto
+   del 8000, se cambió a mano en `frontend/js/api.js`, y a partir de ahí
+   cada `git pull` abortaba con «Your local changes would be overwritten by
+   merge». Un ajuste de una máquina no debe vivir en un archivo del
+   repositorio.
+
+   Lo que escriba aquí pisa a config.js. Deje comentado lo que no use.      */
+
+Object.assign(window.RRHH_CONFIG, {
+
+  // El puerto en el que escucha el backend de esta máquina.
+  // PUERTO_API: 3000,
+
+  // O la URL completa, si el backend está en otro equipo o detrás de un
+  // dominio. Con esto, PUERTO_API deja de usarse.
+  // API: "https://permisos.itsanet.com.ec",
+
+});

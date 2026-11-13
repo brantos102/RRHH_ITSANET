@@ -1,0 +1,123 @@
+"""Que el manual de depuración siga diciendo la verdad.
+
+Los archivos de `mysql/depuracion/` los va a ejecutar una persona contra
+datos reales desde DBeaver. Si una consulta de ahí deja de funcionar porque
+una migración renombró algo, nadie se entera hasta que alguien la corre sobre
+la planilla y le sale un error a mitad de una transacción abierta.
+
+Estas pruebas corren las consultas que no llevan marcadores y comprueban que
+lo que el manual afirma sobre la base sigue siendo cierto.
+"""
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import pytest
+
+from app.db import obtener_todos, obtener_uno
+
+CARPETA = Path(__file__).resolve().parents[2] / "mysql" / "depuracion"
+
+
+def _consultas_ejecutables(archivo: Path) -> list[str]:
+    """Las sentencias del archivo que se pueden correr tal cual.
+
+    Se descartan las que llevan marcadores `<<< >>>` —son plantillas que la
+    persona completa— y las que cambian algo: aquí solo se comprueba que las
+    consultas de lectura sigan siendo válidas.
+    """
+    texto = archivo.read_text(encoding="utf-8")
+    sin_comentarios = re.sub(r"^\s*--.*$", "", texto, flags=re.M)
+    piezas = [p.strip() for p in sin_comentarios.split(";")]
+    return [p for p in piezas
+            if p.lower().startswith("select")
+            and "<<<" not in p
+            and "\\" not in p]
+
+
+def test_los_archivos_del_manual_existen():
+    for nombre in ("00_LEER_PRIMERO.sql", "01_revisar.sql",
+                   "02_corregir.sql", "03_eliminar.sql"):
+        assert (CARPETA / nombre).exists(), f"falta {nombre}"
+
+
+@pytest.mark.parametrize("archivo", sorted(CARPETA.glob("*.sql")), ids=lambda a: a.name)
+async def test_las_consultas_de_lectura_siguen_siendo_validas(cliente, archivo):
+    """Una consulta rota se descubre aquí, no a mitad de una depuración."""
+    consultas = _consultas_ejecutables(archivo)
+    for consulta in consultas:
+        try:
+            # Se duplica el signo de porcentaje solo para poder ejecutarla
+            # desde aquí: psycopg lo lee como marcador de parámetro. En
+            # DBeaver la consulta va tal como está en el archivo, que es lo
+            # que la persona va a copiar.
+            await obtener_todos(consulta.replace("%", "%%"))
+        except Exception as exc:                # noqa: BLE001
+            pytest.fail(f"{archivo.name}: dejó de funcionar\n"
+                        f"{consulta[:220]}\n→ {exc}")
+
+
+async def test_revisar_trae_las_doce_comprobaciones(cliente):
+    """Si alguien quita una, que se note."""
+    consultas = _consultas_ejecutables(CARPETA / "01_revisar.sql")
+    assert len(consultas) >= 10, f"solo quedan {len(consultas)} consultas de revisión"
+
+
+async def test_borrar_una_persona_sigue_arrastrando_su_expediente(cliente):
+    """Es la advertencia central del manual. Si algún día deja de ser cierta
+    —porque una migración cambió una cascada por SET NULL— el manual estaría
+    asustando de más, y eso también se corrige."""
+    cascadas = await obtener_todos("""
+        select table_name as tabla
+          from information_schema.referential_constraints
+         where constraint_schema = database()
+           and referenced_table_name = 'users' and delete_rule = 'CASCADE'""")
+    nombres = {c["tabla"] for c in cascadas}
+    # Las que de verdad duelen: el expediente y lo que la LOPDP obliga a
+    # conservar.
+    for tabla in ("requests", "vacation_periods", "vacaciones_historicas",
+                  "data_consents", "signatures"):
+        assert tabla in nombres, (
+            f"«{tabla}» ya no se borra en cascada con la persona. "
+            "El manual dice que sí: actualícelo.")
+
+
+async def test_el_saldo_lo_recalcula_un_disparador(cliente):
+    """La razón por la que el manual prohíbe editar `dias_vacaciones` a mano."""
+    fila = await obtener_uno("""
+        select count(*) as n from information_schema.triggers
+         where trigger_schema = database()
+           and event_object_table = 'vacation_periods'
+           and trigger_name in ('vacation_periods_ai_saldo', 'vacation_periods_au_saldo',
+                                'vacation_periods_ad_saldo')""")
+    assert fila["n"] == 3, (
+        "desapareció el disparador que recalcula el saldo; el manual dice que "
+        "existe y que por eso no se edita `users.dias_vacaciones` a mano")
+
+
+async def test_las_funciones_que_el_manual_manda_ejecutar_existen(cliente):
+    """Nombres que la persona va a teclear en DBeaver tal como están escritos."""
+    for nombre in ("es_cedula_valida", "anios_cumplidos"):
+        fila = await obtener_uno(
+            """select count(*) as n from information_schema.routines
+                where routine_schema = database() and routine_name = %s""",
+            (nombre,))
+        assert fila["n"] >= 1, f"el manual manda ejecutar «{nombre}» y no existe"
+
+
+def test_las_ordenes_de_saldos_que_cita_el_manual_existen():
+    """En MySQL recalcular, regenerar y cargar saldos van por mysql/saldos.py."""
+    herramienta = (CARPETA.parent / "saldos.py").read_text(encoding="utf-8")
+    manual = "".join(a.read_text(encoding="utf-8") for a in CARPETA.glob("*.sql"))
+    for orden in ("recalcular", "regenerar", "cargar", "explicar"):
+        assert f"mysql/saldos.py {orden}" in manual, f"el manual ya no cita «{orden}»"
+        assert f'add_parser("{orden}"' in herramienta, f"saldos.py perdió la orden «{orden}»"
+
+
+async def test_las_vistas_que_usa_el_manual_existen(cliente):
+    for vista in ("v_sin_entrada", "v_fines_semana"):
+        fila = await obtener_uno(
+            """select count(*) as n from information_schema.views
+                where table_schema = database() and table_name = %s""", (vista,))
+        assert fila["n"] == 1, f"el manual consulta «{vista}» y no existe"

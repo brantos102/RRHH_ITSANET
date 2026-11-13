@@ -1,0 +1,138 @@
+-- ===========================================================================
+-- DEPURAR LA BASE DESDE DBEAVER — LO QUE HAY QUE SABER ANTES DE ESCRIBIR NADA
+--
+-- Este archivo no se ejecuta. Se lee. Los otros tres traen las consultas.
+--
+--   01_revisar.sql      Mirar sin tocar. Empiece siempre por aquí.
+--   02_corregir.sql     Cambiar datos, de uno o en bloque.
+--   03_eliminar.sql     Borrar filas, y qué se lleva por delante cada borrado.
+--
+-- ===========================================================================
+-- 1. CON QUÉ USUARIO SE CONECTA, PORQUE CAMBIA TODO
+-- ===========================================================================
+--
+-- El sistema tiene tres protecciones puestas en la base:
+--
+--   · Las bitácoras (audit_logs, access_logs) no se pueden modificar ni
+--     borrar. Son la prueba de quién hizo qué.
+--   · Nadie que no sea Talento Humano puede cambiar el rol, la cédula, el
+--     saldo de vacaciones o la fecha de ingreso de otra persona.
+--   · Cada quien ve solo las filas que le corresponden (seguridad por fila).
+--
+-- LAS TRES SE APAGAN SI SE CONECTA COMO `postgres` O `supabase_admin`.
+-- Está escrito así a propósito —el mantenimiento tiene que poder hacer su
+-- trabajo—, pero significa que en DBeaver, con el usuario administrador, la
+-- base no lo va a detener ante nada. Ni ante un DELETE sin WHERE.
+--
+-- Conéctese como `postgres` solo para lo que de verdad lo necesite, y
+-- sabiendo que ahí no hay red debajo.
+--
+-- ===========================================================================
+-- 2. TODO DENTRO DE UNA TRANSACCIÓN. SIN EXCEPCIONES.
+-- ===========================================================================
+--
+--   begin;
+--     select ... ;          -- 1. ver qué filas va a tocar
+--     update ... ;          -- 2. tocarlas
+--     select ... ;          -- 3. ver cómo quedaron
+--   commit;                 -- 4. si está bien.  Si no: rollback;
+--
+-- En DBeaver: desactive el «auto-commit» (el botón arriba a la derecha de la
+-- ventana de SQL). Con auto-commit encendido, cada sentencia se guarda sola y
+-- `rollback` ya no sirve de nada.
+--
+-- Y antes de cualquier cosa masiva, una copia:
+--
+--   pg_dump -Fc -h SERVIDOR -U USUARIO -d BASE -f respaldo.dump
+--
+-- Supabase guarda respaldos automáticos, pero el de anoche no le devuelve lo
+-- que cargó esta mañana.
+--
+-- ===========================================================================
+-- 3. TRES COSAS QUE EL SISTEMA RECALCULA SOLO
+-- ===========================================================================
+--
+-- a) `users.dias_vacaciones` NO SE EDITA A MANO.
+--
+--    Un disparador lo recalcula sumando los saldos de `vacation_periods`
+--    cada vez que esa tabla cambia. Si usted lo actualiza directamente, el
+--    número aguanta hasta el siguiente movimiento de vacaciones de esa
+--    persona y entonces vuelve al anterior, sin avisar. Para corregir un
+--    saldo se corrige el período; hay receta en 02_corregir.sql.
+--
+-- b) `vacation_periods.dias_saldo` es una columna calculada.
+--
+--    Vale siempre `dias_asignados - dias_consumidos`. No admite UPDATE.
+--
+-- c) `users.region` se deduce de `users.ciudad`.
+--
+--    Hay un disparador que la fija al insertar y al actualizar. Cambie la
+--    ciudad y la región se acomoda sola; al revés no funciona.
+--
+-- ===========================================================================
+-- 4. LO MÁS PELIGROSO DE TODA LA BASE
+-- ===========================================================================
+--
+--    delete from public.users where ...
+--
+-- Borrar UNA persona borra en cascada, sin preguntar y sin dejar rastro:
+--
+--    sus solicitudes            (requests, y con ellas adjuntos, firmas
+--                                y ajustes)
+--    sus períodos de vacaciones (vacation_periods)
+--    sus movimientos de saldo   (vacation_movements)
+--    su historial de la hoja    (vacaciones_historicas)
+--    sus firmas                 (signatures)
+--    sus familiares y contactos (family_members, emergency_contacts)
+--    sus conversaciones         (conversaciones, mensajes)
+--    sus avisos                 (notifications)
+--    sus consentimientos        (data_consents, data_subject_requests)
+--    sus códigos de acceso      (auth_otp, altas_pendientes,
+--                                confirmaciones_correo)
+--    sus cambios de ficha       (cambios_ficha)
+--
+-- Diecisiete tablas directamente, y diecinueve contando lo que a su vez
+-- arrastran las solicitudes. Un expediente laboral entero por una línea
+-- de SQL.
+--
+-- Y los consentimientos de protección de datos también se van, que es
+-- precisamente lo que la LOPDP obliga a poder demostrar.
+--
+-- PARA DAR DE BAJA A ALGUIEN NO SE BORRA:
+--
+--    update public.users set activo = false, fecha_salida = '2026-09-30'
+--     where cedula = '0000000000';
+--
+-- Deja de aparecer en listados, calendarios y buscadores, no puede entrar, y
+-- su expediente queda entero por si mañana hay que consultarlo.
+--
+-- ===========================================================================
+-- 5. QUÉ PASA AL BORRAR EN CADA TABLA
+-- ===========================================================================
+--
+-- Tres comportamientos, y conviene saber cuál aplica antes de escribir el
+-- DELETE:
+--
+--   CASCADE   La fila hija se borra también. Silencioso.
+--   SET NULL  La fila hija se queda y pierde la referencia. Una solicitud
+--             aprobada por alguien que se borró queda «aprobada por nadie».
+--   BLOQUEA   PostgreSQL se niega. Es la protección que uno agradece.
+--
+-- El detalle completo está en 03_eliminar.sql y en el PDF que acompaña a
+-- este manual.
+--
+-- ===========================================================================
+-- 6. DESPUÉS DE TOCAR DATOS, RECALCULE
+-- ===========================================================================
+--
+--   select public.recalcular_saldos();            -- toda la planilla
+--   select public.recalcular_saldos('UUID');      -- una persona
+--
+-- Y si cambió una fecha de ingreso:
+--
+--   select public.generar_periodos_vacaciones('UUID');
+--
+-- La fecha de ingreso decide cuántos años de servicio hay y de cuántos días
+-- es cada uno. Cambiarla sin regenerar deja los períodos viejos y el saldo
+-- calculado sobre una antigüedad que ya no es.
+-- ===========================================================================

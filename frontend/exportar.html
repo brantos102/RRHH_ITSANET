@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#06122B">
+<title>Exportar datos</title>
+<link rel="icon" type="image/png" href="img/icono.png">
+<link rel="stylesheet" href="vendor/tailwind.css">
+<script src="config.js"></script>
+<script src="config.local.js"></script>
+</head>
+
+<body class="min-h-dvh bg-slate-100 text-slate-900 antialiased">
+<div id="barra"></div>
+
+<main class="mx-auto max-w-6xl px-4 py-5 pb-24">
+  <!-- Cada archivo que sale del sistema lleva folio, motivo, quién y cuándo,
+       y su huella queda registrada (LOPDP). -->
+  <header class="mb-4 flex flex-wrap items-center gap-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <img src="img/logo.png" alt="ITSANET" class="h-10 w-auto">
+    <div class="min-w-0 flex-1">
+      <h1 class="text-xl font-semibold tracking-tight">Exportar datos</h1>
+      <p class="text-sm text-slate-600">Elija qué, de quién y para qué. Cada archivo lleva un folio y queda registrado.</p>
+    </div>
+  </header>
+
+  <div class="grid gap-4 lg:grid-cols-[1fr_22rem] lg:items-start">
+    <div class="space-y-4">
+      <!-- 1. Qué -->
+      <section class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+        <h2 class="font-medium"><span class="mr-1 rounded-full bg-[#1c58d7] px-2 py-0.5 text-xs text-white">1</span> Qué exportar</h2>
+        <div id="ex-tipos" class="mt-3 grid gap-2 sm:grid-cols-2"></div>
+      </section>
+
+      <!-- 2. De quién -->
+      <section class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+        <h2 class="font-medium"><span class="mr-1 rounded-full bg-[#1c58d7] px-2 py-0.5 text-xs text-white">2</span> De quién</h2>
+        <p class="mt-0.5 text-sm text-slate-500">Sin filtros, sale todo el personal activo. Los filtros se suman.</p>
+        <div class="mt-3 grid gap-4 sm:grid-cols-2">
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-medium uppercase tracking-wide text-slate-500" for="ex-persona">Personas (una o varias)</label>
+            <div class="relative">
+              <input id="ex-persona" type="search" autocomplete="off" placeholder="Nombre o cédula…"
+                     class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-[#1c58d7]">
+              <div id="ex-persona-res" class="absolute inset-x-0 top-full z-20 mt-1 hidden max-h-64 overflow-y-auto rounded-xl bg-white py-1 shadow-xl ring-1 ring-slate-200"></div>
+            </div>
+            <div data-chips="personas" class="mt-2 flex flex-wrap gap-1.5"></div>
+          </div>
+          <div data-multi="areas" data-titulo="Áreas"></div>
+          <div data-multi="cargos" data-titulo="Cargos"></div>
+          <div data-multi="ciudades" data-titulo="Ciudades"></div>
+          <div>
+            <label class="block text-xs font-medium uppercase tracking-wide text-slate-500" for="ex-jefe">Equipo de</label>
+            <select id="ex-jefe" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300">
+              <option value="">Cualquier jefe</option></select>
+          </div>
+          <fieldset>
+            <legend class="text-xs font-medium uppercase tracking-wide text-slate-500">Sedes</legend>
+            <div id="ex-sedes" class="mt-1 flex flex-wrap gap-3 text-sm"></div>
+          </fieldset>
+          <fieldset>
+            <legend class="text-xs font-medium uppercase tracking-wide text-slate-500">Tipo de contrato</legend>
+            <div id="ex-contratos" class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm"></div>
+          </fieldset>
+          <div>
+            <label class="block text-xs font-medium uppercase tracking-wide text-slate-500" for="ex-estado">Personal</label>
+            <select id="ex-estado" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300">
+              <option value="activos">Activos</option><option value="inactivos">Inactivos (salidas)</option><option value="todos">Todos</option></select>
+          </div>
+          <div id="ex-periodo" class="grid grid-cols-2 gap-2">
+            <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Desde</span>
+              <input id="ex-desde" type="date" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300"></label>
+            <label><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Hasta</span>
+              <input id="ex-hasta" type="date" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300"></label>
+          </div>
+        </div>
+      </section>
+
+      <!-- Vista previa -->
+      <section class="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+        <header class="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+          <h2 class="font-medium">Vista previa</h2>
+          <p id="ex-cuenta" class="text-sm font-medium text-[#1c58d7]"></p>
+        </header>
+        <div id="ex-previa" class="overflow-x-auto"></div>
+      </section>
+    </div>
+
+    <!-- 3. Para qué y en qué formato -->
+    <aside class="space-y-4 lg:sticky lg:top-4">
+      <section class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+        <h2 class="font-medium"><span class="mr-1 rounded-full bg-[#1c58d7] px-2 py-0.5 text-xs text-white">3</span> Para qué y cómo</h2>
+        <form id="ex-form" class="mt-3 space-y-3">
+          <fieldset class="flex gap-2 text-sm">
+            <label class="flex-1"><input type="radio" name="formato" value="xlsx" checked class="peer sr-only">
+              <span class="block cursor-pointer rounded-xl px-3 py-2 text-center ring-1 ring-slate-300 peer-checked:bg-[#1c58d7] peer-checked:text-white">Excel</span></label>
+            <label class="flex-1"><input type="radio" name="formato" value="pdf" class="peer sr-only">
+              <span class="block cursor-pointer rounded-xl px-3 py-2 text-center ring-1 ring-slate-300 peer-checked:bg-[#1c58d7] peer-checked:text-white">PDF</span></label>
+            <label class="flex-1"><input type="radio" name="formato" value="csv" class="peer sr-only">
+              <span class="block cursor-pointer rounded-xl px-3 py-2 text-center ring-1 ring-slate-300 peer-checked:bg-[#1c58d7] peer-checked:text-white">CSV</span></label>
+          </fieldset>
+          <label class="block"><span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Motivo (obligatorio)</span>
+            <textarea id="ex-motivo" rows="3" maxlength="300" required minlength="10"
+                      placeholder="Ej.: Pasivo de vacaciones para cierre contable de noviembre"
+                      class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-[#1c58d7]"></textarea></label>
+          <p class="text-xs leading-relaxed text-slate-500">El archivo lleva el logo, un folio, el motivo, quién y cuándo lo generó.
+            Contiene datos personales: guárdelo solo en equipos de la empresa (LOPDP).</p>
+          <button class="w-full rounded-xl bg-[#1c58d7] px-4 py-2.5 font-medium text-white hover:bg-[#1747b0]">Generar y descargar</button>
+          <p id="ex-resultado" class="hidden rounded-xl bg-emerald-50 p-3 text-xs text-emerald-900 ring-1 ring-emerald-200"></p>
+        </form>
+      </section>
+    </aside>
+  </div>
+
+  <!-- Trazabilidad -->
+  <section class="mt-6 overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+    <header class="border-b border-slate-200 px-5 py-3">
+      <h2 class="font-medium">Exportaciones realizadas</h2>
+      <p class="text-sm text-slate-500">Quién se llevó qué datos, cuándo y para qué. No se puede borrar.</p>
+    </header>
+    <div class="overflow-x-auto"><table class="w-full text-left text-sm">
+      <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+        <tr><th class="px-3 py-2">Folio</th><th class="px-3 py-2">Cuándo</th><th class="px-3 py-2">Quién</th>
+            <th class="px-3 py-2">Qué</th><th class="px-3 py-2 text-right">Filas</th><th class="px-3 py-2">Motivo</th>
+            <th class="px-3 py-2">Huella</th></tr></thead>
+      <tbody id="ex-historial" class="divide-y divide-slate-100"></tbody>
+    </table></div>
+  </section>
+</main>
+
+<div id="aviso" class="pointer-events-none fixed inset-x-0 bottom-6 z-50 hidden px-4">
+  <p id="aviso-texto" class="mx-auto max-w-md rounded-2xl bg-slate-900 px-4 py-3 text-center text-sm text-white shadow-lg"></p>
+</div>
+
+<script type="module" src="js/exportar.js"></script>
+</body>
+</html>

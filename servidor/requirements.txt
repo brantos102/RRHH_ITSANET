@@ -1,0 +1,26 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+# MySQL 8.0. aiomysql es el cliente asíncrono; PyMySQL, el que usa por
+# debajo y el que usan los scripts de migración y traslado.
+aiomysql==0.2.0
+PyMySQL==1.2.3
+pydantic==2.10.4
+pydantic-settings==2.7.0
+email-validator==2.2.0
+PyJWT==2.10.1
+aiosmtplib==3.0.2
+python-multipart==0.0.20
+qrcode==8.0
+pillow==11.0.0
+
+# Descarga de informes: Excel y PDF. El CSV no necesita nada.
+openpyxl==3.1.5
+reportlab==4.2.5
+
+# desarrollo
+pytest==8.3.4
+pytest-asyncio==0.25.0
+# Lee el PDF generado para comprobar que dice lo que debe decir.
+pypdf==5.1.0
+# Cliente HTTP que usa TestClient en las pruebas.
+httpx==0.28.1
