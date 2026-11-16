@@ -131,6 +131,17 @@ async def avisar_al_jefe(jefe: dict, solicitud: dict) -> None:
         + f"\n\nRevise y decida aquí:\n{url}\n"
     )
     await correo.enviar(jefe["email"], titulo, texto, _marco(titulo, cuerpo, ("Revisar solicitud", url)))
+    # Constancia de que el correo salió: Talento Humano la ve al hacer el
+    # seguimiento («¿al jefe le llegó el aviso?»). No puede tumbar el envío.
+    try:
+        from .db import ejecutar
+        await ejecutar(
+            """UPDATE notifications n JOIN users u ON u.id = n.user_id
+                  SET n.email_enviado_en = NOW(6)
+                WHERE n.entidad_id = %s AND u.email = %s AND n.tipo = 'solicitud_pendiente'
+                  AND n.email_enviado_en IS NULL""", (str(solicitud["id"]), jefe["email"]))
+    except Exception:  # noqa: BLE001
+        log.exception("No se pudo anotar el envío del correo al jefe")
 
 
 async def avisar_a_rrhh(destinatarios: list[dict], solicitud: dict, jefe: str,

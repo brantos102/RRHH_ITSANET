@@ -58,3 +58,52 @@ async def test_el_colaborador_no_recibe_respuestas_de_gestion(cliente, auth):
     r = (await cliente.post("/asistente/preguntar", headers=auth,
                             json={"texto": "¿Dónde cambio un parámetro?"})).json()
     assert "Parámetros" not in r["texto"]
+
+
+# ------------------------------------------------ seguimiento de una solicitud
+async def test_seguimiento_de_una_solicitud_y_recordatorio_al_jefe(cliente, auth, jefe_auth, rrhh_auth):
+    from datetime import timedelta
+    from app.db import obtener_uno
+    from tests.test_reglas_nuevas import lunes_sin_feriados
+    lunes = await lunes_sin_feriados(12)
+    r = await cliente.post("/solicitudes", headers=auth, json={
+        "tipo": "vacacion", "fecha_inicio": str(lunes), "fecha_fin": str(lunes + timedelta(days=7)),
+        "descripcion": "Ocho dias con la familia", "firmar": False})
+    assert r.status_code == 201, r.text
+    folio, sid = r.json()["folio"], r.json()["id"]
+
+    r = (await cliente.post("/asistente/preguntar", headers=rrhh_auth,
+                            json={"texto": f"¿En qué va la solicitud Nº {folio}?"})).json()
+    assert "espera la decisión del jefe" in r["texto"]
+    assert any(d.startswith("Aviso al jefe en el sistema") for d in r["detalles"])
+    assert any(a.get("accion") == "recordar" and a["id"] == sid for a in r["acciones"])
+
+    # El jefe ve las de su equipo; el colaborador no recibe seguimiento ajeno.
+    r = (await cliente.post("/asistente/preguntar", headers=jefe_auth,
+                            json={"texto": f"solicitud {folio}"})).json()
+    assert "espera la decisión del jefe" in r["texto"]
+    r = (await cliente.post("/asistente/preguntar", headers=rrhh_auth,
+                            json={"texto": "¿Qué solicitudes esperan al jefe?"})).json()
+    assert any(f"Nº {folio}" in d for d in r["detalles"])
+
+    assert (await cliente.post(f"/aprobaciones/{sid}/recordar-al-jefe", headers=auth)).status_code == 403
+    r = await cliente.post(f"/aprobaciones/{sid}/recordar-al-jefe", headers=rrhh_auth)
+    assert r.status_code == 200, r.text
+    assert (await cliente.post(f"/aprobaciones/{sid}/recordar-al-jefe", headers=rrhh_auth)).status_code == 429
+    assert await obtener_uno(
+        "SELECT 1 AS x FROM notifications WHERE entidad_id = %s AND titulo LIKE %s", (sid, "Recordatorio%"))
+
+    # Después de que el jefe decide, el seguimiento lo cuenta.
+    await cliente.post(f"/aprobaciones/{sid}/decidir", headers=jefe_auth,
+                       json={"accion": "rechazar", "motivo": "Fechas de cierre de mes"})
+    r = (await cliente.post("/asistente/preguntar", headers=rrhh_auth,
+                            json={"texto": f"Nº {folio}"})).json()
+    assert "rechazada" in r["texto"]
+    assert any("Fechas de cierre de mes" in d for d in r["detalles"])
+    assert any("Recordatorio al jefe" in d for d in r["detalles"])
+
+
+async def test_sin_numero_explica_como_preguntar(cliente, rrhh_auth):
+    r = (await cliente.post("/asistente/preguntar", headers=rrhh_auth,
+                            json={"texto": "¿En qué va la solicitud Nº …?"})).json()
+    assert "número" in r["texto"]

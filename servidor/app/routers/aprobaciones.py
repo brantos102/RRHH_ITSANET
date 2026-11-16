@@ -556,6 +556,48 @@ async def corregir_rechazo(
     return {**resultado, "mensaje": "Decisión corregida. " + resultado["mensaje"]}
 
 
+# ---------------------------------------------- recordar al jefe que decida
+@router.post("/aprobaciones/{solicitud_id}/recordar-al-jefe")
+async def recordar_al_jefe(
+    solicitud_id: uuid.UUID,
+    request: Request,
+    tareas: BackgroundTasks,
+    usuario: Annotated[dict, Depends(exigir_rol("rrhh", "admin"))],
+) -> dict:
+    """Talento Humano le recuerda al jefe una solicitud que espera su decisión:
+    aviso en el sistema y correo con el enlace para decidir. Una vez por hora."""
+    solicitud = await obtener_uno(SQL_SOLICITUD, (str(solicitud_id),))
+    if solicitud is None:
+        raise HTTPException(status_code=404, detail={"mensaje": "Solicitud no encontrada."})
+    if solicitud["estado"] != "pendiente_jefe":
+        raise HTTPException(status_code=409, detail={"mensaje": "Esta solicitud no está esperando al jefe."})
+    jefe = await obtener_uno("SELECT id, email, nombre FROM users WHERE id = %s AND activo",
+                             (solicitud["jefe_id"],)) if solicitud["jefe_id"] else None
+    if jefe is None:
+        raise HTTPException(status_code=409, detail={
+            "mensaje": "No tiene jefe asignado: la decide Talento Humano en Por autorizar."})
+    reciente = await obtener_uno(
+        """SELECT 1 AS x FROM audit_logs WHERE accion = 'recordatorio_al_jefe' AND entidad_id = %s
+              AND created_at > NOW(6) - INTERVAL 1 HOUR""", (str(solicitud_id),))
+    if reciente:
+        raise HTTPException(status_code=429, detail={
+            "mensaje": "Ya se le recordó en la última hora. Espere un poco antes de insistir."})
+    await ejecutar(
+        """INSERT INTO notifications (user_id, tipo, severidad, titulo, mensaje, entidad, entidad_id, accion_url)
+           VALUES (%s, 'solicitud_pendiente', 'advertencia', %s, %s, 'requests', %s, '/dashboard.html#aprobaciones')""",
+        (str(jefe["id"]), f"Recordatorio: la solicitud Nº {solicitud['folio']} espera su decisión",
+         f"{solicitud['empleado']} espera su respuesta. Talento Humano le recuerda revisarla.",
+         str(solicitud_id)))
+    if jefe["email"]:
+        tareas.add_task(notificaciones.avisar_al_jefe, {"email": jefe["email"], "nombre": jefe["nombre"]},
+                        solicitud)
+    await registrar(request, "recordatorio_al_jefe", user_id=str(usuario["id"]), cedula=usuario["cedula"],
+                    entidad="requests", entidad_id=str(solicitud_id), detalle={"jefe": jefe["nombre"]})
+    return {"mensaje": f"Se le recordó a {jefe['nombre']}"
+            + (" en el sistema y por correo." if jefe["email"] else
+               " en el sistema. No tiene correo registrado: no recibe el correo.")}
+
+
 # ------------------------------------------- camino 2: enlace del correo
 async def _por_token(token: uuid.UUID, rol: str) -> dict:
     if rol not in ("jefe", "rrhh"):

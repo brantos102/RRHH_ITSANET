@@ -11,6 +11,7 @@ nada sale a un servicio externo y no se inventa nada.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from ..db import obtener_todos, obtener_uno
@@ -48,12 +49,18 @@ TEMAS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "jefaturas": (("jefatura", "jefaturas", "asignar jefe", "cambiar jefe", "asignar equipo"), TH),
     "anulaciones": (("anulacion", "anulaciones", "anular"), TH),
     "emergentes": (("emergente", "emergentes", "menos de 7", "menos dias"), TH),
+    "seguimiento_ayuda": (("en que va la solicitud", "solicitud n", "buscar una solicitud",
+                           "seguimiento de una solicitud", "estado de una solicitud"), GESTIONA),
+    "esperan_jefe": (("esperan al jefe", "esperando al jefe", "espera a su jefe", "demoradas", "atrasadas",
+                      "seguimiento", "no responde", "no ha respondido", "sin respuesta", "estancadas",
+                      "que esperan"), TH),
     "asistente_admin": (("ensenar al asistente", "respuesta del asistente", "agregar respuesta",
                          "preguntas sin respuesta"), TH),
 }
 
-SUGERENCIAS_TH = ["¿Qué tengo pendiente?", "Rechacé una solicitud por error", "¿Dónde cambio un parámetro?",
-                  "Registrar personas nuevas", "Dar de baja a alguien", "Exportar datos"]
+SUGERENCIAS_TH = ["¿Qué tengo pendiente?", "¿Qué solicitudes esperan al jefe?", "¿En qué va la solicitud Nº …?",
+                  "Rechacé una solicitud por error", "¿Dónde cambio un parámetro?", "Registrar personas nuevas",
+                  "Dar de baja a alguien", "Exportar datos"]
 SUGERENCIAS_JEFE = ["¿Qué tengo por aprobar?", "Rechacé una solicitud por error", "Calendario del equipo",
                     "¿Cuántos días de vacaciones tengo?", "¿En qué va mi solicitud?"]
 
@@ -113,6 +120,13 @@ async def _pendientes(u: dict) -> dict:
               (conteo.get("firma", 0), "documento(s) por firmar o escanear"),
               (anulaciones, "pedido(s) de anulación")]
     hay = [f"{n} {que}" for n, que in partes if n]
+    espera = await obtener_uno(
+        """SELECT COUNT(*) AS n, MIN(created_at) AS desde,
+                  TIMESTAMPDIFF(DAY, MIN(created_at), NOW(6)) AS dias
+             FROM requests WHERE estado = 'pendiente_jefe' AND jefe_id IS NOT NULL""")
+    if _n(espera["n"]):
+        hay.append(f"{_n(espera['n'])} esperan la decisión de su jefe (la más antigua, desde hace "
+                   f"{_n(espera['dias'])} día(s))")
     if del_jefe:
         hay.append(f"{del_jefe} de su propio equipo, como jefe")
     texto = ("En su sede tiene: " + "; ".join(hay) + ".") if hay else "No tiene nada pendiente en su sede. 🎉"
@@ -288,12 +302,159 @@ def _asistente_admin(u: dict) -> dict:
     ], [{"texto": "Asistente", "url": "administracion.html#asistente"}])
 
 
+# ------------------------------------------------- seguimiento de solicitudes
+FOLIO = re.compile(r"(?:\bn\s*[º°o.]{0,2}\s*|\bsolicitud\s+(?:n\s*[º°o.]{0,2}\s*)?|\bfolio\s+|#\s*)(\d{1,7})\b", re.I)
+ESTADO = {"pendiente_jefe": "espera la decisión del jefe", "pendiente_rrhh": "espera a Talento Humano",
+          "pendiente_anulacion": "tiene una anulación en trámite", "aprobado": "aprobada",
+          "rechazado": "rechazada", "cancelado": "cancelada"}
+
+
+def folio_en(texto: str) -> int | None:
+    m = FOLIO.search(texto or "")
+    return int(m.group(1)) if m else None
+
+
+def _cuando(v) -> str:
+    return v.strftime("%d/%m/%Y %H:%M") if v else "—"
+
+
+def _hace(horas: Any) -> str:
+    h = _n(horas)
+    if h < 1:
+        return "menos de una hora"
+    return f"{h} hora(s)" if h < 48 else f"{h // 24} día(s)"
+
+
+async def seguimiento(folio: int, u: dict) -> dict:
+    """Todo lo que pasó con una solicitud, para saber dónde está y por qué."""
+    rol = u["rol"]
+    r = await obtener_uno(
+        """SELECT r.id, r.folio, r.tipo, r.estado, r.fecha_inicio, r.fecha_fin, r.dias_solicitados,
+                  r.created_at, r.jefe_id, r.jefe_aprobado_en, r.rrhh_aprobado_en, r.rechazado_en,
+                  r.rechazado_en_etapa, r.motivo_rechazo, r.ruta_aprobacion, r.bloque_menor_justificado,
+                  r.user_id, u.nombre AS persona, j.nombre AS jefe, j.email AS jefe_email, j.activo AS jefe_activo,
+                  q.nombre AS rechazo_por, ja.nombre AS aprobo_jefe, ra.nombre AS aprobo_rrhh,
+                  TIMESTAMPDIFF(HOUR, COALESCE(
+                      CASE WHEN r.estado = 'pendiente_jefe' AND r.ruta_aprobacion = 'rrhh_primero'
+                           THEN r.rrhh_aprobado_en END,
+                      CASE WHEN r.estado = 'pendiente_rrhh' THEN r.jefe_aprobado_en END,
+                      r.created_at), NOW(6)) AS horas_esperando
+             FROM requests r JOIN users u ON u.id = r.user_id
+             LEFT JOIN users j ON j.id = r.jefe_id
+             LEFT JOIN users q ON q.id = r.rechazado_por
+             LEFT JOIN users ja ON ja.id = r.jefe_aprobado_por
+             LEFT JOIN users ra ON ra.id = r.rrhh_aprobado_por
+            WHERE r.folio = %s""", (folio,))
+    if r is None:
+        return _r(rol, f"No encuentro la solicitud Nº {folio}.")
+    if rol == "jefe" and str(r["jefe_id"]) != str(u["id"]):
+        return _r(rol, f"La solicitud Nº {folio} no es de su equipo.")
+
+    que = "Vacaciones" if r["tipo"] == "vacacion" else "Permiso"
+    rango = (f"del {r['fecha_inicio']:%d/%m/%Y}" if r["fecha_inicio"] == r["fecha_fin"]
+             else f"del {r['fecha_inicio']:%d/%m/%Y} al {r['fecha_fin']:%d/%m/%Y}")
+    texto = (f"Nº {r['folio']} · {que} de {r['persona']} {rango} ({float(r['dias_solicitados']):g} día(s)): "
+             f"{ESTADO.get(r['estado'], r['estado'])}")
+    if r["estado"] == "pendiente_jefe":
+        texto += f" ({r['jefe'] or 'sin jefe asignado'}) desde hace {_hace(r['horas_esperando'])}."
+    elif r["estado"] == "pendiente_rrhh":
+        texto += f" desde hace {_hace(r['horas_esperando'])}."
+    else:
+        texto += "."
+
+    d = [f"Pedida el {_cuando(r['created_at'])}."]
+    if r["bloque_menor_justificado"]:
+        d.append("Vacaciones emergentes (menos días que el bloque mínimo): primero Talento Humano, después el jefe.")
+    # El aviso al jefe: si existe, si se abrió, si salió el correo.
+    if r["jefe_id"]:
+        aviso = await obtener_uno(
+            """SELECT MIN(created_at) AS creado, MAX(leida_en) AS leida, MAX(email_enviado_en) AS correo
+                 FROM notifications WHERE entidad_id = %s AND user_id = %s AND tipo = 'solicitud_pendiente'""",
+            (str(r["id"]), str(r["jefe_id"])))
+        if aviso and aviso["creado"]:
+            d.append(f"Aviso al jefe en el sistema: {_cuando(aviso['creado'])} · "
+                     + (f"lo abrió el {_cuando(aviso['leida'])}." if aviso["leida"] else "todavía no lo abre."))
+        if not r["jefe_email"]:
+            d.append("El jefe no tiene correo registrado: no recibe los avisos por correo.")
+        elif aviso and aviso["correo"]:
+            d.append(f"Correo al jefe enviado el {_cuando(aviso['correo'])}.")
+        if r["estado"] == "pendiente_jefe":
+            ses = await obtener_uno("SELECT MAX(ultimo_uso) AS u FROM sesiones WHERE user_id = %s",
+                                    (str(r["jefe_id"]),))
+            if ses and ses["u"]:
+                d.append(f"Último ingreso del jefe al sistema: {_cuando(ses['u'])}"
+                         + (" (no ha entrado desde que se pidió)." if ses["u"] < r["created_at"] else "."))
+            else:
+                d.append("El jefe todavía no ha entrado nunca al sistema.")
+            if not r["jefe_activo"]:
+                d.append("Atención: el jefe asignado ya no está activo. Asígnele otro en su ficha.")
+    else:
+        d.append("Sin jefe asignado: la etapa del jefe la decide Talento Humano en Por autorizar.")
+    if r["rrhh_aprobado_en"] and r["ruta_aprobacion"] == "rrhh_primero":
+        d.append(f"Talento Humano la autorizó el {_cuando(r['rrhh_aprobado_en'])} ({r['aprobo_rrhh'] or '—'}).")
+    if r["jefe_aprobado_en"]:
+        d.append(f"El jefe la aprobó el {_cuando(r['jefe_aprobado_en'])} ({r['aprobo_jefe'] or '—'}).")
+    if r["rrhh_aprobado_en"] and r["ruta_aprobacion"] != "rrhh_primero":
+        d.append(f"Talento Humano la aprobó el {_cuando(r['rrhh_aprobado_en'])} ({r['aprobo_rrhh'] or '—'}).")
+    if r["estado"] == "rechazado":
+        d.append(f"Rechazada el {_cuando(r['rechazado_en'])} por {r['rechazo_por'] or '—'} "
+                 f"(etapa {r['rechazado_en_etapa'] or '—'}): {r['motivo_rechazo'] or 'sin motivo'}.")
+    for c in await obtener_todos(
+            """SELECT accion, created_at FROM audit_logs WHERE entidad_id = %s
+                  AND accion IN ('rechazo_corregido', 'recordatorio_al_jefe') ORDER BY created_at""",
+            (str(r["id"]),)):
+        d.append(("Rechazo corregido" if c["accion"] == "rechazo_corregido" else "Recordatorio al jefe")
+                 + f" el {_cuando(c['created_at'])}.")
+
+    acciones: list[dict] = []
+    if rol in TH and r["estado"] == "pendiente_jefe" and r["jefe_id"]:
+        acciones.append({"texto": "Recordar al jefe", "accion": "recordar", "id": str(r["id"])})
+    if r["estado"] in ("pendiente_rrhh",) or (r["estado"] == "pendiente_jefe" and not r["jefe_id"]):
+        acciones.append({"texto": "Ir a Por autorizar", "url": "dashboard.html#aprobaciones"})
+    if r["estado"] == "rechazado":
+        acciones.append({"texto": "Corregir el rechazo", "url": "dashboard.html#aprobaciones"})
+    if rol in TH:
+        acciones.append({"texto": "Ver la ficha", "url": f"persona.html?id={r['user_id']}"})
+    return _r(rol, texto, d, acciones)
+
+
+async def _esperan_jefe(u: dict) -> dict:
+    filas = await obtener_todos(
+        """SELECT r.folio, u.nombre AS persona, j.nombre AS jefe, j.email AS jefe_email,
+                  TIMESTAMPDIFF(HOUR, COALESCE(IF(r.ruta_aprobacion = 'rrhh_primero', r.rrhh_aprobado_en, NULL),
+                                              r.created_at), NOW(6)) AS horas,
+                  (SELECT MAX(leida_en) FROM notifications n WHERE n.entidad_id = r.id AND n.user_id = r.jefe_id
+                      AND n.tipo = 'solicitud_pendiente') AS leida
+             FROM requests r JOIN users u ON u.id = r.user_id JOIN users j ON j.id = r.jefe_id
+            WHERE r.estado = 'pendiente_jefe'
+            ORDER BY r.created_at LIMIT 8""")
+    total = _n((await obtener_uno(
+        "SELECT COUNT(*) AS n FROM requests WHERE estado = 'pendiente_jefe' AND jefe_id IS NOT NULL"))["n"])
+    if not total:
+        return _r(u["rol"], "Ninguna solicitud está esperando a un jefe.")
+    d = [f"Nº {f['folio']} · {f['persona']} → {f['jefe']}: hace {_hace(f['horas'])}"
+         + ("" if f["jefe_email"] else " · el jefe no tiene correo")
+         + (" · aviso sin abrir" if not f["leida"] else "") for f in filas]
+    d.append("Pregunte «¿En qué va la solicitud Nº …?» para ver el detalle y recordárselo al jefe.")
+    return _r(u["rol"], f"Esperan la decisión de su jefe: {total} (las más antiguas primero).", d,
+              [{"texto": "Informes › Solicitudes", "url": "informes.html"}])
+
+
+def _seguimiento_ayuda(u: dict) -> dict:
+    return _r(u["rol"], "Escríbame el número de la solicitud, por ejemplo: «¿En qué va la solicitud Nº 4?».", [
+        "Le digo en qué estado está, quién la tiene y desde cuándo, si el jefe abrió el aviso, cuándo entró "
+        "por última vez y todo lo que pasó con ella.",
+        "El número aparece en la ficha de la persona, en Informes › Solicitudes y en los correos.",
+    ])
+
+
 RESPUESTAS = {
     "pendientes": _pendientes, "corregir_rechazo": _corregir_rechazo, "equipo": _equipo,
     "parametros": _parametros, "tipos_permiso": _tipos_permiso, "registrar_persona": _registrar_persona,
     "masivo": _masivo, "catalogo": _catalogo, "baja": _baja, "acceso": _acceso, "firmas": _firmas,
     "exportar": _exportar, "tableros": _tableros, "jefaturas": _jefaturas, "anulaciones": _anulaciones,
-    "emergentes": _emergentes, "asistente_admin": _asistente_admin,
+    "emergentes": _emergentes, "asistente_admin": _asistente_admin, "esperan_jefe": _esperan_jefe,
+    "seguimiento_ayuda": _seguimiento_ayuda,
 }
 
 

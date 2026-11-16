@@ -352,6 +352,11 @@ async def _preguntar(datos: Pregunta, usuario: Usuario) -> dict:
     # Quien gestiona (jefe, Talento Humano, administración) pregunta además
     # por su trabajo: gana el tema de gestión si coincide al menos igual.
     if usuario.get("rol") in gestion.GESTIONA:
+        # «¿En qué va la solicitud Nº 4?»: el seguimiento completo de esa.
+        folio = gestion.folio_en(texto)
+        if folio is not None:
+            await _guardar("gestion:seguimiento", True, None, region)
+            return await gestion.seguimiento(folio, usuario)
         tema_g, puntos_g = gestion.tema(normal(texto), usuario["rol"])
         if tema_g and puntos_g >= puntos:
             await _guardar(f"gestion:{tema_g}", True, None, region)

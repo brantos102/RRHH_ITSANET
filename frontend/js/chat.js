@@ -199,7 +199,9 @@ function cambiarModo(modo, cargarAhora = true) {
 function burbujaAsistente(r) {
   const acciones = (r.acciones || []).map((a) => a.url
     ? `<a href="${esc(a.url)}" class="inline-block rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-sky-700 ring-1 ring-sky-200 hover:bg-sky-50">${esc(a.texto)}</a>`
-    : `<button type="button" data-hablar class="rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-medium text-white">${esc(a.texto)}</button>`).join(" ");
+    : a.accion === "recordar"
+      ? `<button type="button" data-recordar="${esc(a.id)}" class="rounded-lg bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700">${esc(a.texto)}</button>`
+      : `<button type="button" data-hablar class="rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-medium text-white">${esc(a.texto)}</button>`).join(" ");
   return `<div class="max-w-[90%] rounded-2xl rounded-bl-sm bg-white px-3 py-2 text-sm shadow-sm ring-1 ring-slate-200">
     <p>${esc(r.texto)}</p>
     ${r.detalles?.length ? `<ul class="mt-1.5 list-disc space-y-0.5 pl-4 text-slate-700">${
@@ -213,6 +215,19 @@ function agregarAsistente(html) {
   caja.insertAdjacentHTML("beforeend", html);
   caja.querySelectorAll("[data-hablar]").forEach((b) => {
     b.onclick = () => (ES_RRHH ? modoBandeja("bandeja") : cambiarModo("humano"));
+  });
+  // Talento Humano le recuerda al jefe una solicitud que espera su decisión.
+  caja.querySelectorAll("[data-recordar]").forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const r = await api.recordarAlJefe(b.dataset.recordar);
+        agregarAsistente(burbujaAsistente({ texto: r.mensaje }));
+      } catch (err) {
+        agregarAsistente(burbujaAsistente({ texto: err.message }));
+        b.disabled = false;
+      }
+    };
   });
   caja.scrollTop = caja.scrollHeight;
 }
