@@ -29,7 +29,7 @@ const MODULOS = [
     id: "rrhh", texto: "Talento Humano", roles: ["rrhh", "admin"],
     opciones: [
       { texto: "Pendientes por sede", href: "administracion.html#pendientes" },
-      { texto: "Por autorizar", href: "dashboard.html#aprobaciones", contador: "pendientes" },
+      { texto: "Solicitudes", href: "dashboard.html#aprobaciones", contador: "pendientes" },
       { texto: "Anulaciones por resolver", href: "dashboard.html#anulaciones", contador: "anulaciones" },
       { texto: "Colaboradores", href: "colaboradores.html" },
       { texto: "Mensajes", href: "mensajes.html" },

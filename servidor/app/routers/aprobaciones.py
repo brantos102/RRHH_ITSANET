@@ -556,46 +556,210 @@ async def corregir_rechazo(
     return {**resultado, "mensaje": "Decisión corregida. " + resultado["mensaje"]}
 
 
-# ---------------------------------------------- recordar al jefe que decida
+# ------------------------------------- seguimiento de TODAS las solicitudes
+TH = Annotated[dict, Depends(exigir_rol("rrhh", "admin"))]
+
+
+@router.get("/aprobaciones/seguimiento")
+async def seguimiento(usuario: TH, sede: str = "todas", dias: int = 30) -> dict:
+    """Todas las solicitudes en trámite —esperen al jefe, a Talento Humano o
+    una anulación— y las decididas en los últimos `dias`, de vacaciones y de
+    permisos. Talento Humano ve la gestión completa, no solo lo que le toca
+    decidir: quién la tiene, desde cuándo, si el jefe abrió el aviso."""
+    from ..reglas import sedes as reglas_sedes
+    sedes = await reglas_sedes.nombres()
+    dias = max(1, min(int(dias), 180))
+    if sede == "todas":
+        filtro, params = "TRUE", ()
+    elif sede in sedes:
+        filtro, params = "COALESCE(r.region, 'sierra') = %s", (sede,)
+    else:
+        filtro, params = "COALESCE(r.region, 'sierra') = %s", (usuario.get("region") or "sierra",)
+    filas = await obtener_todos(
+        f"""SELECT r.id, r.folio, r.tipo, r.estado, r.fecha_inicio, r.fecha_fin, r.hora_inicio, r.hora_fin,
+                   r.dias_solicitados, r.horas_solicitadas, r.created_at, r.user_id, r.jefe_id,
+                   r.bloque_menor_justificado, r.es_adelanto, r.ruta_aprobacion, r.motivo_rechazo,
+                   r.rechazado_en_etapa, COALESCE(r.region, 'sierra') AS region,
+                   u.nombre AS empleado, u.cedula, u.departamento,
+                   pt.nombre AS categoria,
+                   j.nombre AS jefe, (j.email IS NOT NULL AND NOT j.correo_pendiente) AS jefe_con_correo,
+                   j.activo AS jefe_activo,
+                   q.nombre AS rechazado_por, ra.nombre AS aprobado_por_rrhh, ja.nombre AS aprobado_por_jefe,
+                   COALESCE(r.rechazado_en, r.rrhh_aprobado_en, r.anulacion_resuelta_en, r.updated_at) AS decidido_en,
+                   TIMESTAMPDIFF(HOUR, CASE
+                       WHEN r.estado = 'pendiente_jefe' AND r.ruta_aprobacion = 'rrhh_primero'
+                            THEN COALESCE(r.rrhh_aprobado_en, r.created_at)
+                       WHEN r.estado = 'pendiente_rrhh' THEN COALESCE(r.jefe_aprobado_en, r.created_at)
+                       WHEN r.estado = 'pendiente_anulacion' THEN COALESCE(r.anulacion_solicitada_en, r.updated_at)
+                       ELSE r.created_at END, NOW(6)) AS horas_esperando,
+                   (SELECT MAX(n.leida_en) FROM notifications n WHERE n.entidad_id = r.id
+                       AND n.user_id = r.jefe_id AND n.tipo = 'solicitud_pendiente') AS jefe_abrio_aviso,
+                   (SELECT MAX(a.created_at) FROM audit_logs a WHERE a.entidad_id = r.id
+                       AND a.accion IN ('recordatorio_al_jefe', 'recordatorio_solicitud')) AS recordado_en
+              FROM requests r
+              JOIN users u ON u.id = r.user_id
+              LEFT JOIN permission_types pt ON pt.id = r.permission_type_id
+              LEFT JOIN users j ON j.id = r.jefe_id
+              LEFT JOIN users q ON q.id = r.rechazado_por
+              LEFT JOIN users ra ON ra.id = r.rrhh_aprobado_por
+              LEFT JOIN users ja ON ja.id = r.jefe_aprobado_por
+             WHERE {filtro}
+               AND (r.estado IN ('pendiente_jefe', 'pendiente_rrhh', 'pendiente_anulacion')
+                    OR r.updated_at >= NOW(6) - INTERVAL {dias} DAY)
+             ORDER BY r.created_at
+             LIMIT 1000""", params)
+    salida = []
+    for f in filas:
+        if f["estado"] == "pendiente_jefe":
+            quien = f["jefe"] or "Talento Humano (sin jefe asignado)"
+        elif f["estado"] in ("pendiente_rrhh", "pendiente_anulacion"):
+            quien = "Talento Humano"
+        elif f["estado"] == "rechazado":
+            quien = f["rechazado_por"]
+        elif f["estado"] == "aprobado":
+            quien = f["aprobado_por_rrhh"] or f["aprobado_por_jefe"]
+        else:
+            quien = None
+        salida.append({
+            "id": str(f["id"]), "folio": f["folio"], "tipo": f["tipo"], "estado": f["estado"],
+            "categoria": f["categoria"], "empleado": f["empleado"], "cedula": f["cedula"],
+            "user_id": str(f["user_id"]), "departamento": f["departamento"],
+            "sede": sedes.get(f["region"], f["region"]),
+            "fecha_inicio": f["fecha_inicio"], "fecha_fin": f["fecha_fin"],
+            "hora_inicio": str(f["hora_inicio"])[:5] if f["hora_inicio"] else None,
+            "hora_fin": str(f["hora_fin"])[:5] if f["hora_fin"] else None,
+            "dias": float(f["dias_solicitados"]),
+            "horas": float(f["horas_solicitadas"]) if f["horas_solicitadas"] else None,
+            "creada_en": f["created_at"], "decidido_en": f["decidido_en"],
+            "quien": quien, "jefe": f["jefe"], "tiene_jefe": f["jefe_id"] is not None,
+            "jefe_con_correo": bool(f["jefe_con_correo"]), "jefe_activo": bool(f["jefe_activo"]),
+            "horas_esperando": int(f["horas_esperando"] or 0),
+            "jefe_abrio_aviso": f["jefe_abrio_aviso"], "recordado_en": f["recordado_en"],
+            "emergente": bool(f["bloque_menor_justificado"]), "adelanto": bool(f["es_adelanto"]),
+            "motivo_rechazo": f["motivo_rechazo"],
+        })
+    return {"sede": sede, "dias": dias, "sedes": sedes, "solicitudes": salida}
+
+
+@router.get("/aprobaciones/aprobadores")
+async def aprobadores(usuario: TH) -> list[dict]:
+    """A quién se puede reasignar la decisión de una solicitud: jefes,
+    Talento Humano y administración activos."""
+    filas = await obtener_todos(
+        """SELECT id, nombre, cargo, departamento, rol, (email IS NOT NULL AND NOT correo_pendiente) AS con_correo
+             FROM users WHERE activo AND rol IN ('jefe', 'rrhh', 'admin') ORDER BY nombre""")
+    return [{**f, "id": str(f["id"]), "con_correo": bool(f["con_correo"])} for f in filas]
+
+
+async def _ya_recordada(solicitud_id) -> bool:
+    return bool(await obtener_uno(
+        """SELECT 1 AS x FROM audit_logs WHERE accion IN ('recordatorio_al_jefe', 'recordatorio_solicitud')
+              AND entidad_id = %s AND created_at > NOW(6) - INTERVAL 1 HOUR""", (str(solicitud_id),)))
+
+
+async def _avisar_aprobador(solicitud: dict, aprobador: dict, titulo: str, mensaje: str,
+                            tareas: BackgroundTasks) -> None:
+    await ejecutar(
+        """INSERT INTO notifications (user_id, tipo, severidad, titulo, mensaje, entidad, entidad_id, accion_url)
+           VALUES (%s, 'solicitud_pendiente', 'advertencia', %s, %s, 'requests', %s, '/dashboard.html#aprobaciones')""",
+        (str(aprobador["id"]), titulo, mensaje, str(solicitud["id"])))
+    if aprobador.get("email"):
+        tareas.add_task(notificaciones.avisar_al_jefe,
+                        {"email": aprobador["email"], "nombre": aprobador["nombre"]}, solicitud)
+
+
+@router.post("/aprobaciones/{solicitud_id}/recordar")
+async def recordar(solicitud_id: uuid.UUID, request: Request, tareas: BackgroundTasks, usuario: TH) -> dict:
+    """Recuerda una solicitud a quien la tiene: al jefe, o a Talento Humano de
+    la sede si espera a Talento Humano. Una vez por hora; queda en la bitácora."""
+    solicitud = await obtener_uno(SQL_SOLICITUD, (str(solicitud_id),))
+    if solicitud is None:
+        raise HTTPException(status_code=404, detail={"mensaje": "Solicitud no encontrada."})
+    if solicitud["estado"] not in ("pendiente_jefe", "pendiente_rrhh", "pendiente_anulacion"):
+        raise HTTPException(status_code=409, detail={"mensaje": "Esta solicitud ya está decidida."})
+    if await _ya_recordada(solicitud_id):
+        raise HTTPException(status_code=429, detail={
+            "mensaje": "Ya se recordó en la última hora. Espere un poco antes de insistir."})
+
+    titulo = f"Recordatorio: la solicitud Nº {solicitud['folio']} espera su decisión"
+    mensaje = f"{solicitud['empleado']} espera su respuesta. Talento Humano le recuerda revisarla."
+    if solicitud["estado"] == "pendiente_jefe" and solicitud["jefe_id"]:
+        jefe = await obtener_uno("SELECT id, email, nombre FROM users WHERE id = %s AND activo",
+                                 (solicitud["jefe_id"],))
+        if jefe is None:
+            raise HTTPException(status_code=409, detail={
+                "mensaje": "El jefe asignado ya no está activo: reasigne la solicitud a otra persona."})
+        await _avisar_aprobador(solicitud, jefe, titulo, mensaje, tareas)
+        destino, accion = jefe["nombre"] + (" (sin correo: solo aviso en el sistema)" if not jefe["email"] else ""), \
+            "recordatorio_al_jefe"
+    else:
+        equipo = await personal.rrhh_de_region(solicitud.get("region"))
+        for p in equipo:
+            await ejecutar(
+                """INSERT INTO notifications (user_id, tipo, severidad, titulo, mensaje, entidad, entidad_id,
+                                              accion_url)
+                   VALUES (%s, 'solicitud_pendiente', 'advertencia', %s, %s, 'requests', %s,
+                           '/dashboard.html#aprobaciones')""",
+                (str(p["id"]), titulo, mensaje, str(solicitud_id)))
+        if solicitud["estado"] == "pendiente_rrhh":
+            tareas.add_task(notificaciones.avisar_a_rrhh,
+                            [{"email": p["email"], "nombre": p["nombre"]} for p in equipo],
+                            solicitud, solicitud.get("jefe_nombre") or "el jefe", [])
+        destino, accion = f"Talento Humano de la sede ({len(equipo)} persona(s))", "recordatorio_solicitud"
+    await registrar(request, accion, user_id=str(usuario["id"]), cedula=usuario["cedula"],
+                    entidad="requests", entidad_id=str(solicitud_id), detalle={"a": destino})
+    return {"mensaje": f"Se le recordó a {destino}."}
+
+
+# Se conserva la ruta anterior (la usa el asistente).
 @router.post("/aprobaciones/{solicitud_id}/recordar-al-jefe")
-async def recordar_al_jefe(
-    solicitud_id: uuid.UUID,
-    request: Request,
-    tareas: BackgroundTasks,
-    usuario: Annotated[dict, Depends(exigir_rol("rrhh", "admin"))],
-) -> dict:
-    """Talento Humano le recuerda al jefe una solicitud que espera su decisión:
-    aviso en el sistema y correo con el enlace para decidir. Una vez por hora."""
+async def recordar_al_jefe(solicitud_id: uuid.UUID, request: Request, tareas: BackgroundTasks,
+                           usuario: TH) -> dict:
+    solicitud = await obtener_uno("SELECT estado FROM requests WHERE id = %s", (str(solicitud_id),))
+    if solicitud and solicitud["estado"] != "pendiente_jefe":
+        raise HTTPException(status_code=409, detail={"mensaje": "Esta solicitud no está esperando al jefe."})
+    return await recordar(solicitud_id, request, tareas, usuario)
+
+
+class Reasignacion(BaseModel):
+    aprobador_id: uuid.UUID
+    motivo: str = Field(..., min_length=10, max_length=300)
+
+
+@router.post("/aprobaciones/{solicitud_id}/reasignar")
+async def reasignar(solicitud_id: uuid.UUID, datos: Reasignacion, request: Request,
+                    tareas: BackgroundTasks, usuario: TH) -> dict:
+    """Pasa la decisión del jefe a otra persona (el jefe está de vacaciones,
+    salió de la empresa, no corresponde). Solo esta solicitud: el jefe de la
+    persona no cambia. El enlace del correo anterior deja de servir."""
     solicitud = await obtener_uno(SQL_SOLICITUD, (str(solicitud_id),))
     if solicitud is None:
         raise HTTPException(status_code=404, detail={"mensaje": "Solicitud no encontrada."})
     if solicitud["estado"] != "pendiente_jefe":
-        raise HTTPException(status_code=409, detail={"mensaje": "Esta solicitud no está esperando al jefe."})
-    jefe = await obtener_uno("SELECT id, email, nombre FROM users WHERE id = %s AND activo",
-                             (solicitud["jefe_id"],)) if solicitud["jefe_id"] else None
-    if jefe is None:
         raise HTTPException(status_code=409, detail={
-            "mensaje": "No tiene jefe asignado: la decide Talento Humano en Por autorizar."})
-    reciente = await obtener_uno(
-        """SELECT 1 AS x FROM audit_logs WHERE accion = 'recordatorio_al_jefe' AND entidad_id = %s
-              AND created_at > NOW(6) - INTERVAL 1 HOUR""", (str(solicitud_id),))
-    if reciente:
-        raise HTTPException(status_code=429, detail={
-            "mensaje": "Ya se le recordó en la última hora. Espere un poco antes de insistir."})
-    await ejecutar(
-        """INSERT INTO notifications (user_id, tipo, severidad, titulo, mensaje, entidad, entidad_id, accion_url)
-           VALUES (%s, 'solicitud_pendiente', 'advertencia', %s, %s, 'requests', %s, '/dashboard.html#aprobaciones')""",
-        (str(jefe["id"]), f"Recordatorio: la solicitud Nº {solicitud['folio']} espera su decisión",
-         f"{solicitud['empleado']} espera su respuesta. Talento Humano le recuerda revisarla.",
-         str(solicitud_id)))
-    if jefe["email"]:
-        tareas.add_task(notificaciones.avisar_al_jefe, {"email": jefe["email"], "nombre": jefe["nombre"]},
-                        solicitud)
-    await registrar(request, "recordatorio_al_jefe", user_id=str(usuario["id"]), cedula=usuario["cedula"],
-                    entidad="requests", entidad_id=str(solicitud_id), detalle={"jefe": jefe["nombre"]})
-    return {"mensaje": f"Se le recordó a {jefe['nombre']}"
-            + (" en el sistema y por correo." if jefe["email"] else
-               " en el sistema. No tiene correo registrado: no recibe el correo.")}
+            "mensaje": "Solo se reasigna una solicitud que espera la decisión del jefe."})
+    nuevo = await obtener_uno(
+        "SELECT id, nombre, email, rol FROM users WHERE id = %s AND activo AND rol IN ('jefe', 'rrhh', 'admin')",
+        (str(datos.aprobador_id),))
+    if nuevo is None:
+        raise HTTPException(status_code=422, detail={
+            "mensaje": "Elija a un jefe, a alguien de Talento Humano o a un administrador activo."})
+    if str(nuevo["id"]) == str(solicitud["user_id"]):
+        raise HTTPException(status_code=422, detail={"mensaje": "Nadie decide su propia solicitud."})
+    if solicitud["jefe_id"] and str(nuevo["id"]) == str(solicitud["jefe_id"]):
+        raise HTTPException(status_code=422, detail={"mensaje": "Ya la tiene esa persona."})
+    anterior = solicitud["jefe_nombre"]
+    await ejecutar("UPDATE requests SET jefe_id = %s, jefe_token = UUID() WHERE id = %s AND estado = 'pendiente_jefe'",
+                   (str(nuevo["id"]), str(solicitud_id)))
+    actual = await obtener_uno(SQL_SOLICITUD, (str(solicitud_id),))
+    await _avisar_aprobador(actual, nuevo, f"Solicitud Nº {actual['folio']} reasignada a usted",
+                            f"Talento Humano le pidió decidir la solicitud de {actual['empleado']}. "
+                            f"Motivo: {datos.motivo.strip()}", tareas)
+    await registrar(request, "aprobador_reasignado", user_id=str(usuario["id"]), cedula=usuario["cedula"],
+                    entidad="requests", entidad_id=str(solicitud_id),
+                    detalle={"de": anterior, "a": nuevo["nombre"], "motivo": datos.motivo.strip()})
+    return {"mensaje": f"Ahora la decide {nuevo['nombre']}"
+            + ("." if nuevo["email"] else " (no tiene correo: solo verá el aviso en el sistema).")}
 
 
 # ------------------------------------------- camino 2: enlace del correo

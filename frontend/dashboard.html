@@ -252,8 +252,60 @@
 
 <!-- ================= Bandeja de aprobaciones ================= -->
 <div id="vista-aprobaciones" class="hidden space-y-3"></div>
+
+<!-- Talento Humano: la gestión completa, no solo lo que le toca decidir.
+     Todas las vacaciones y permisos en trámite (esperen al jefe, a Talento
+     Humano o una anulación) y lo decidido hace poco, con quién la tiene y
+     desde cuándo. Se pinta aparte para que refrescar lo de arriba no borre
+     los filtros. -->
+<section id="vista-seguimiento" class="mt-6 hidden space-y-4">
+  <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <div class="min-w-0">
+        <h2 class="font-semibold">Todas las solicitudes</h2>
+        <p class="text-sm text-slate-500">Vacaciones y permisos en trámite, estén con el jefe o con Talento Humano,
+          y lo decidido en los últimos 30 días.</p>
+      </div>
+      <div class="flex flex-wrap items-end gap-2">
+        <label class="text-xs text-slate-500">Sede
+          <select id="seg-sede" class="mt-0.5 block rounded-lg border-0 bg-slate-50 px-2 py-1.5 text-sm text-slate-900 ring-1 ring-slate-300">
+            <option value="todas">Todas</option><option value="mia">Mi sede</option></select></label>
+        <label class="text-xs text-slate-500">Buscar
+          <input id="seg-buscar" type="search" placeholder="Persona, cédula o Nº"
+                 class="mt-0.5 block w-48 rounded-lg border-0 bg-slate-50 px-2 py-1.5 text-sm text-slate-900 ring-1 ring-slate-300"></label>
+        <label class="flex items-center gap-1.5 pb-1.5 text-sm text-slate-700">
+          <input id="seg-decididas" type="checkbox" class="h-4 w-4 rounded border-slate-300"> Ver decididas</label>
+        <button type="button" id="seg-actualizar" class="rounded-lg bg-slate-100 px-3 py-1.5 text-sm font-medium hover:bg-slate-200">Actualizar</button>
+      </div>
+    </div>
+    <div id="seg-resumen" class="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4"></div>
+  </div>
+  <div id="seg-vacaciones"></div>
+  <div id="seg-permisos"></div>
+</section>
 <div id="vista-anulaciones" class="hidden space-y-3"></div>
 </main>
+
+<!-- ============ Modal: reasignar la decisión del jefe ============ -->
+<dialog id="modal-reasignar" class="w-[min(100vw-1.5rem,30rem)] rounded-2xl p-0 backdrop:backdrop-blur-sm">
+  <form id="form-reasignar" method="dialog" class="space-y-4 p-5">
+    <div>
+      <h2 class="font-semibold">Reasignar la decisión</h2>
+      <p id="reasignar-que" class="mt-0.5 text-sm text-slate-600"></p>
+    </div>
+    <label class="block text-sm font-medium">Quién la decide ahora
+      <select id="reasignar-a" required class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm ring-1 ring-slate-300"></select></label>
+    <label class="block text-sm font-medium">Motivo <span class="font-normal text-slate-500">(queda en la bitácora)</span>
+      <input id="reasignar-motivo" required minlength="10" maxlength="300" placeholder="El jefe está de vacaciones hasta el lunes"
+             class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm ring-1 ring-slate-300"></label>
+    <p class="text-xs text-slate-500">Solo esta solicitud: el jefe de la persona no cambia. La nueva persona recibe
+      el aviso y el correo; el enlace del correo anterior deja de servir.</p>
+    <div class="flex gap-2">
+      <button type="button" data-cerrar class="flex-1 rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-medium hover:bg-slate-200">Cancelar</button>
+      <button class="flex-1 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800">Reasignar</button>
+    </div>
+  </form>
+</dialog>
 
 <!-- ================= Modal: nueva solicitud ================= -->
 <dialog id="modal-solicitud"

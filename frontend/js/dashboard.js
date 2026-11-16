@@ -100,6 +100,12 @@ async function cargar() {
   pintarCalendario();
   pintarPendientes();
   pintarAnulaciones();
+  if (resuelveAnulaciones) {
+    // Para Talento Humano la pestaña es la gestión completa, no solo «por aprobar».
+    $("pestanas").querySelector('[data-pestana="aprobaciones"]').firstChild.textContent = "Solicitudes ";
+    $("vista-seguimiento").classList.toggle("hidden", !location.hash.startsWith("#aprobaciones"));
+    cargarSeguimiento().catch(() => {});
+  }
   // No se espera: el panel no puede quedarse en blanco porque la lista de
   // documentos tarde. Enciende su propia sección cuando llega.
   cargarPapeles();
@@ -122,6 +128,7 @@ function mostrarPestana(cual) {
   });
   $("vista-panel").classList.toggle("hidden", cual !== "panel");
   $("vista-aprobaciones").classList.toggle("hidden", cual !== "aprobaciones");
+  $("vista-seguimiento").classList.toggle("hidden", cual !== "aprobaciones" || !esTH());
   $("vista-anulaciones").classList.toggle("hidden", cual !== "anulaciones");
   location.hash = cual === "panel" ? "" : `#${cual}`;
 }
@@ -623,6 +630,157 @@ function textoReemplazo(s) {
   return `${esc(s.reemplazo)}<span class="block text-xs font-normal text-slate-500">${origen}</span>`;
 }
 
+/* ------------------------------------- Talento Humano: todas las solicitudes */
+function esTH() { return ["rrhh", "admin"].includes(sesion.perfil?.rol); }
+const seg = { datos: null, sede: "todas", buscar: "", decididas: false, aprobadores: null };
+
+async function cargarSeguimiento() {
+  if (!esTH()) return;
+  seg.datos = await api.seguimiento(seg.sede);
+  const sel = $("seg-sede");
+  if (sel.options.length <= 2) {
+    sel.insertAdjacentHTML("beforeend", Object.entries(seg.datos.sedes || {})
+      .map(([c, n]) => `<option value="${esc(c)}">${esc(n)}</option>`).join(""));
+    sel.value = seg.sede;
+  }
+  pintarSeguimiento();
+}
+
+function hace(h) {
+  if (h < 1) return "menos de 1 h";
+  return h < 48 ? `${h} h` : `${Math.floor(h / 24)} días`;
+}
+const plano = (t) => String(t ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+const GRUPOS = [
+  ["pendiente_jefe", "Esperan al jefe", "bg-amber-50 text-amber-900 ring-amber-200"],
+  ["pendiente_rrhh", "Esperan a Talento Humano", "bg-sky-50 text-sky-900 ring-sky-200"],
+  ["pendiente_anulacion", "Anulación en trámite", "bg-orange-50 text-orange-900 ring-orange-200"],
+];
+const DECIDIDAS = { aprobado: ["Aprobada", "bg-emerald-100 text-emerald-800"],
+                    rechazado: ["Rechazada", "bg-rose-100 text-rose-800"],
+                    cancelado: ["Cancelada", "bg-slate-100 text-slate-700"] };
+
+function filaSeguimiento(s) {
+  const rango = s.fecha_inicio === s.fecha_fin
+    ? fecha(s.fecha_inicio) : `${fecha(s.fecha_inicio, false)} – ${fecha(s.fecha_fin)}`;
+  const cuanto = s.horas ? `${s.hora_inicio}–${s.hora_fin} (${s.horas} h)` : `${s.dias} día(s)`;
+  const pendiente = s.estado.startsWith("pendiente");
+  const marcas = [];
+  if (s.emergente) marcas.push(["amber", "Vacaciones emergentes"]);
+  if (s.adelanto) marcas.push(["amber", "Días adelantados"]);
+  if (s.estado === "pendiente_jefe" && s.tiene_jefe && !s.jefe_abrio_aviso) marcas.push(["rose", "El jefe no abrió el aviso"]);
+  if (s.estado === "pendiente_jefe" && s.tiene_jefe && !s.jefe_con_correo) marcas.push(["rose", "El jefe no tiene correo"]);
+  if (s.estado === "pendiente_jefe" && s.tiene_jefe && !s.jefe_activo) marcas.push(["rose", "Jefe inactivo"]);
+  if (s.recordado_en) marcas.push(["slate", `Recordada el ${fechaHora(s.recordado_en)}`]);
+  const color = { amber: "bg-amber-100 text-amber-800", rose: "bg-rose-100 text-rose-800", slate: "bg-slate-100 text-slate-700" };
+  const demora = pendiente && s.horas_esperando >= 48;
+  const botones = [];
+  if (pendiente) botones.push(`<button type="button" data-seg-recordar="${s.id}" class="rounded-lg bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700">Recordar</button>`);
+  if (s.estado === "pendiente_jefe") botones.push(`<button type="button" data-seg-reasignar="${s.id}" data-folio="${s.folio}" data-empleado="${esc(s.empleado)}" class="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium hover:bg-slate-200">Reasignar</button>`);
+  if (document.getElementById(`sol-${s.id}`)) botones.push(`<button type="button" data-seg-ir="sol-${s.id}" class="rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-medium text-white">Decidir</button>`);
+  if (s.estado === "rechazado") botones.push(`<button type="button" data-seg-ir="rechazadas" class="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white">Corregir</button>`);
+  botones.push(`<a href="persona.html?id=${s.user_id}" class="rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-sky-700 ring-1 ring-sky-200 hover:bg-sky-50">Ficha</a>`);
+  const decidida = DECIDIDAS[s.estado];
+  return `
+    <li class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-sm">
+      <div class="min-w-0 flex-1">
+        <p class="font-medium">
+          <span class="mr-1 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600">Nº ${s.folio}</span>
+          ${esc(s.empleado)} <span class="text-xs font-normal text-slate-500">${esc(s.cedula)}${s.departamento ? ` · ${esc(s.departamento)}` : ""} · ${esc(s.sede)}</span>
+        </p>
+        <p class="mt-0.5 text-xs text-slate-600">${s.tipo === "permiso" ? `${esc(s.categoria || "Permiso")} · ` : ""}${rango} · ${cuanto}</p>
+        <p class="mt-0.5 text-xs ${demora ? "font-medium text-rose-700" : "text-slate-600"}">
+          ${pendiente
+            ? `Con <b>${esc(s.quien || "—")}</b> desde hace ${hace(s.horas_esperando)}`
+            : `<span class="rounded-full px-2 py-0.5 font-medium ${decidida?.[1] || ""}">${decidida?.[0] || esc(s.estado)}</span>
+               ${s.quien ? `por ${esc(s.quien)}` : ""} · ${fechaHora(s.decidido_en)}
+               ${s.motivo_rechazo ? ` · <span class="text-rose-700">${esc(s.motivo_rechazo)}</span>` : ""}`}
+        </p>
+        ${marcas.length ? `<div class="mt-1 flex flex-wrap gap-1">${marcas.map(([c, t]) =>
+          `<span class="rounded-full px-2 py-0.5 text-[11px] font-medium ${color[c]}">${esc(t)}</span>`).join("")}</div>` : ""}
+      </div>
+      <div class="flex flex-wrap gap-1.5">${botones.join("")}</div>
+    </li>`;
+}
+
+function pintarSeguimiento() {
+  if (!seg.datos) return;
+  const q = plano(seg.buscar.trim());
+  const lista = seg.datos.solicitudes.filter((s) => !q || plano(
+    `${s.empleado} ${s.cedula} ${s.folio} ${s.departamento} ${s.categoria} ${s.quien}`).includes(q));
+  const cuenta = (tipo, estado) => lista.filter((s) => s.tipo === tipo && s.estado === estado).length;
+  $("seg-resumen").innerHTML = [...GRUPOS, ["decididas", "Decididas (30 días)", "bg-slate-50 text-slate-800 ring-slate-200"]]
+    .map(([estado, titulo, clase]) => {
+      const v = estado === "decididas" ? lista.filter((s) => s.tipo === "vacacion" && DECIDIDAS[s.estado]).length : cuenta("vacacion", estado);
+      const p = estado === "decididas" ? lista.filter((s) => s.tipo === "permiso" && DECIDIDAS[s.estado]).length : cuenta("permiso", estado);
+      return `<div class="rounded-xl px-3 py-2 ring-1 ${clase}">
+        <p class="text-xs font-medium">${titulo}</p>
+        <p class="mt-0.5 text-sm"><b class="text-lg">${v + p}</b> · ${v} vacaciones · ${p} permisos</p></div>`;
+    }).join("");
+
+  for (const [tipo, caja, titulo] of [["vacacion", "seg-vacaciones", "🏖️ Vacaciones"], ["permiso", "seg-permisos", "📄 Permisos"]]) {
+    const deTipo = lista.filter((s) => s.tipo === tipo);
+    const grupos = GRUPOS.map(([estado, nombre]) => [nombre, deTipo.filter((s) => s.estado === estado)]);
+    if (seg.decididas) {
+      grupos.push(["Decididas en los últimos 30 días",
+        deTipo.filter((s) => DECIDIDAS[s.estado]).sort((a, b) => String(b.decidido_en).localeCompare(String(a.decidido_en)))]);
+    }
+    const total = grupos.reduce((n, [, l]) => n + l.length, 0);
+    $(caja).innerHTML = `
+      <section class="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+        <h3 class="flex items-center justify-between border-b border-slate-200 px-5 py-3 font-semibold">
+          ${titulo} <span class="text-sm font-normal text-slate-500">${total} solicitud(es)</span></h3>
+        ${grupos.filter(([, l]) => l.length).map(([nombre, l]) => `
+          <div>
+            <p class="bg-slate-50 px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">${nombre} (${l.length})</p>
+            <ul class="divide-y divide-slate-100">${l.map(filaSeguimiento).join("")}</ul>
+          </div>`).join("") || `<p class="px-5 py-6 text-center text-sm text-slate-500">Nada ${seg.buscar ? "coincide con la búsqueda" : "en trámite"}.</p>`}
+      </section>`;
+  }
+}
+
+$("seg-sede").addEventListener("change", (e) => { seg.sede = e.target.value; cargarSeguimiento().catch((err) => avisar(err.message, "error")); });
+$("seg-buscar").addEventListener("input", (e) => { seg.buscar = e.target.value; pintarSeguimiento(); });
+$("seg-decididas").addEventListener("change", (e) => { seg.decididas = e.target.checked; pintarSeguimiento(); });
+$("seg-actualizar").addEventListener("click", () => cargarSeguimiento().catch((err) => avisar(err.message, "error")));
+
+$("vista-seguimiento").addEventListener("click", async (e) => {
+  const recordar = e.target.closest("[data-seg-recordar]");
+  const reasignar = e.target.closest("[data-seg-reasignar]");
+  const ir = e.target.closest("[data-seg-ir]");
+  if (recordar) {
+    recordar.disabled = true;
+    try {
+      avisar((await api.recordar(recordar.dataset.segRecordar)).mensaje);
+      await cargarSeguimiento();
+    } catch (err) { avisar(err.message, "error"); recordar.disabled = false; }
+  } else if (reasignar) {
+    seg.reasignando = reasignar.dataset.segReasignar;
+    $("reasignar-que").textContent = `Solicitud Nº ${reasignar.dataset.folio} de ${reasignar.dataset.empleado}.`;
+    $("form-reasignar").reset();
+    try {
+      seg.aprobadores = seg.aprobadores || await api.aprobadores();
+      $("reasignar-a").innerHTML = '<option value="">Elija a una persona…</option>' + seg.aprobadores.map((a) =>
+        `<option value="${a.id}">${esc(a.nombre)}${a.cargo ? ` · ${esc(a.cargo)}` : ""}${a.con_correo ? "" : " (sin correo)"}</option>`).join("");
+      abrir("modal-reasignar");
+    } catch (err) { avisar(err.message, "error"); }
+  } else if (ir) {
+    const destino = document.getElementById(ir.dataset.segIr);
+    if (destino?.tagName === "DETAILS") destino.open = true;
+    destino?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+});
+
+$("form-reasignar").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    avisar((await api.reasignar(seg.reasignando, $("reasignar-a").value, $("reasignar-motivo").value.trim())).mensaje);
+    $("modal-reasignar").close();
+    await cargar();
+  } catch (err) { avisar(err.message, "error"); }
+});
+
 /* Rechazadas en los últimos 30 días, por si alguna fue un error: plegado,
    para que no compita con lo que sí espera decisión. «Corregir y aprobar»
    la devuelve a la etapa en que se rechazó y la aprueba, con un motivo que
@@ -723,7 +881,7 @@ function pintarPendientes() {
     if (s.en_revision_por) banderas.unshift(["amber", `En revisión por ${s.en_revision_por}`]);
 
     return `
-    <article class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <article id="sol-${s.id}" class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
           <p class="font-semibold">

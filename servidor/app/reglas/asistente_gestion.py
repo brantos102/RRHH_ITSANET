@@ -138,10 +138,12 @@ async def _pendientes(u: dict) -> dict:
     return _r(rol, texto, [
         "Todo junto, por sede: Talento Humano › Pendientes por sede. «Tomar» avisa a sus compañeros "
         "que usted lo está revisando; «Atender» lo resuelve.",
-        "Las solicitudes que ya aprobó el jefe: Talento Humano › Por autorizar.",
+        "Talento Humano › Solicitudes: arriba lo que le toca decidir; abajo «Todas las solicitudes», "
+        "separadas en vacaciones y permisos, estén con el jefe o con Talento Humano, con «Recordar» y "
+        "«Reasignar».",
         "Las vacaciones de menos días que el bloque mínimo llegan con la etiqueta «Vacaciones emergentes».",
     ], [{"texto": "Pendientes por sede", "url": "administracion.html#pendientes"},
-        {"texto": "Por autorizar", "url": "dashboard.html#aprobaciones"},
+        {"texto": "Solicitudes", "url": "dashboard.html#aprobaciones"},
         *([{"texto": "Anulaciones", "url": "dashboard.html#anulaciones"}] if anulaciones else [])])
 
 
@@ -406,9 +408,12 @@ async def seguimiento(folio: int, u: dict) -> dict:
                  f"(etapa {r['rechazado_en_etapa'] or '—'}): {r['motivo_rechazo'] or 'sin motivo'}.")
     for c in await obtener_todos(
             """SELECT accion, created_at FROM audit_logs WHERE entidad_id = %s
-                  AND accion IN ('rechazo_corregido', 'recordatorio_al_jefe') ORDER BY created_at""",
+                  AND accion IN ('rechazo_corregido', 'recordatorio_al_jefe', 'recordatorio_solicitud',
+                                 'aprobador_reasignado') ORDER BY created_at""",
             (str(r["id"]),)):
-        d.append(("Rechazo corregido" if c["accion"] == "rechazo_corregido" else "Recordatorio al jefe")
+        d.append({"rechazo_corregido": "Rechazo corregido", "recordatorio_al_jefe": "Recordatorio al jefe",
+                  "recordatorio_solicitud": "Recordatorio a Talento Humano",
+                  "aprobador_reasignado": "Reasignada a otra persona"}[c["accion"]]
                  + f" el {_cuando(c['created_at'])}.")
 
     acciones: list[dict] = []
