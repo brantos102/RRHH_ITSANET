@@ -651,6 +651,11 @@ function pintarPendientes() {
         "Asígnele un jefe en su ficha para que las próximas no queden sueltas"]);
     }
     if (s.es_adelanto) banderas.push(["amber", "Supera su saldo: días adelantados"]);
+    // «Emergente» es para conocimiento de Talento Humano: el colaborador no
+    // la ve así, y el jefe tampoco necesita la etiqueta para confirmar.
+    if (s.bloque_menor_justificado && ["rrhh", "admin"].includes(sesion.perfil?.rol)) {
+      banderas.push(["amber", "Vacaciones emergentes: menos días que el bloque mínimo"]);
+    }
     if (s.tipo === "permiso" && !s.adjuntos) banderas.push(["rose", "Sin respaldo adjunto"]);
     if (!s.reemplazo) banderas.push(["slate", "Sin reemplazo asignado"]);
     // Otra persona de Talento Humano la tomó en «Pendientes»: no duplicar.
@@ -1300,6 +1305,31 @@ function pedirJustificacion(hace_falta) {
   $("justificacion").required = !!hace_falta;
 }
 
+/* Quien pide uno o dos días de vacaciones casi siempre tiene un asunto
+   puntual: le corresponde un permiso de día completo, que se registra
+   como permiso. Se cambia el formulario conservando las fechas y se deja
+   elegido «Permiso personal» y la modalidad de días completos. */
+function pasarAPermiso() {
+  const inicio = $("fecha-inicio").value, fin = $("fecha-fin").value;
+  $("modal-solicitud").close();
+  abrirFormulario("permiso");
+  $("fecha-inicio").value = inicio;
+  $("fecha-fin").value = fin;
+  const personal = (estado.catalogo?.pilares || []).find((p) => p.codigo === "permiso_personal");
+  if (personal) {
+    elegirPilar(personal.codigo);
+    const asunto = personal.subtipos.find((t) => t.codigo === "permiso_personal") || personal.subtipos[0];
+    if (asunto) {
+      $("tipo-permiso").value = String(asunto.id);
+      $("tipo-permiso").dispatchEvent(new Event("change"));
+      elegirModalidad("dias");
+      $("fecha-inicio").value = inicio;
+      $("fecha-fin").value = fin;
+      previsualizar();
+    }
+  }
+}
+
 function abrirFormulario(tipo) {
   const f = $("form-solicitud");
   f.reset();
@@ -1339,10 +1369,14 @@ function abrirFormulario(tipo) {
      Exigir un día de anticipación convertía justo esos casos —los más— en
      imposibles de registrar, y la ausencia terminaba arreglándose por
      teléfono, sin quedar en ninguna parte. */
+  /* La anticipación es una SUGERENCIA: la fecha que se propone sale de
+     ella, pero se pueden pedir vacaciones que empiecen mañana. */
   const aviso = tipo === "vacacion" ? Number(estado.reglas?.anticipacion || 10) : 0;
   const primera = new Date(Date.now() + aviso * 86400000).toISOString().slice(0, 10);
-  $("fecha-inicio").min = primera;
-  $("fecha-fin").min = primera;
+  const minima = tipo === "vacacion"
+    ? new Date(Date.now() + 86400000).toISOString().slice(0, 10) : primera;
+  $("fecha-inicio").min = minima;
+  $("fecha-fin").min = minima;
 
   if (tipo === "vacacion") {
     // Se propone el período completo: la regla general es tomarlo entero,
@@ -1595,10 +1629,9 @@ async function previsualizar() {
       ? "bg-amber-50 text-amber-900 ring-1 ring-amber-200" : tono}`;
     caja.innerHTML =
       (esExcepcion
-        ? `<p><strong>${plural(diasEnRango, "día", "días")}: por debajo del bloque de ${minimo}</strong></p>
-           <p class="mt-1">Esto no se tramita como vacaciones ordinarias. Es una
-           <strong>excepción</strong> que autoriza Talento Humano, y solo si la aprueba se
-           descuentan los días y queda registrada como <strong>vacaciones emergentes</strong>.</p>`
+        ? `<p><strong>${plural(diasEnRango, "día", "días")}: menos que el bloque de ${minimo}</strong></p>
+           <p class="mt-1">Esta solicitud la revisa primero Talento Humano: cuénteles el motivo.
+           Si es un asunto puntual, también puede pedirlo como <strong>permiso de día completo</strong>.</p>`
         : `<p><strong>${plural(diasEnteros(p.dias), "día a descontar", "días a descontar")}</strong>` +
           ` · le quedarían <strong>${diasEnteros(p.saldo_despues)}</strong></p>`) +
       `<p class="mt-1 text-xs opacity-75">${esc(lineas.join(" · "))}</p>` +
@@ -1624,10 +1657,16 @@ async function previsualizar() {
            </button>`
         : "") +
       (esExcepcion
-        ? `<button type="button" id="btn-pedir-excepcion"
-                   class="mt-2.5 rounded-lg bg-amber-900 px-3 py-1.5 text-xs font-medium text-white">
-             Solicitar a Talento Humano
-           </button>`
+        ? `<div class="mt-2.5 flex flex-wrap gap-2">
+             <button type="button" id="btn-pedir-excepcion"
+                     class="rounded-lg bg-amber-900 px-3 py-1.5 text-xs font-medium text-white">
+               Enviar a Talento Humano
+             </button>
+             <button type="button" id="btn-como-permiso"
+                     class="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-amber-900 ring-1 ring-amber-300">
+               Pedirlo como permiso
+             </button>
+           </div>`
         : "");
     caja.classList.remove("hidden");
 
@@ -1638,6 +1677,7 @@ async function previsualizar() {
       estado.bloqueMinimo = minimo;
       abrirExcepcion(diasEnRango, minimo);
     });
+    $("btn-como-permiso")?.addEventListener("click", () => pasarAPermiso());
 
     $("btn-corregir")?.addEventListener("click", () => {
       $("fecha-inicio").value = p.rango_sugerido.inicio;
@@ -1679,7 +1719,7 @@ async function abrirExcepcion(dias, minimo) {
   $("excepcion-error").classList.add("hidden");
 
   $("excepcion-encabezado").textContent =
-    `Pide ${plural(dias, "día", "días")} y la política fija bloques de ${minimo}.`;
+    `Pide ${plural(dias, "día", "días")}; el bloque habitual es de ${minimo}.`;
   $("excepcion-desde").textContent = fecha($("fecha-inicio").value);
   $("excepcion-hasta").textContent = fecha($("fecha-fin").value);
   $("excepcion-dias").textContent = plural(dias, "día", "días");
@@ -1723,22 +1763,13 @@ $("form-excepcion").addEventListener("submit", async (e) => {
   error.classList.add("hidden");
 
   const motivo = $("excepcion-motivo").value.trim();
-  if (motivo.length < 30) {
+  if (motivo.length < 15) {
     error.textContent =
-      "Explique el motivo en al menos 30 caracteres: quien autoriza la excepción " +
-      "necesita entender por qué su caso se aparta de la política.";
+      "Cuéntele a Talento Humano el motivo en al menos 15 caracteres: es lo único con lo que puede decidir.";
     error.classList.remove("hidden");
     return;
   }
-  // El respaldo lo exige la base, y sin este aviso el rechazo llegaba después
-  // de subir el formulario entero, sin decir a tiempo que faltaba un archivo.
-  if (!excepcion.adjuntos.length) {
-    error.textContent =
-      "Adjunte el documento que respalda el caso: el certificado, la cita o la citación. " +
-      "Sin respaldo la solicitud no se puede registrar.";
-    error.classList.remove("hidden");
-    return;
-  }
+  // El respaldo es opcional: si lo tiene, ayuda; si no, se envía igual.
 
   boton.disabled = true;
   boton.textContent = "Enviando…";
@@ -1839,8 +1870,8 @@ $("form-solicitud").addEventListener("submit", async (e) => {
          como excepción, que es un camino distinto y más lento. */
       estado.bloqueMinimo = Number(err.detalle.bloque_minimo);
       $("texto-excepcion").textContent =
-        `Menos de ${estado.bloqueMinimo} días exige explicar el motivo y adjuntar el ` +
-        `respaldo. La autoriza Talento Humano y después su jefe, así que demora más.`;
+        `Menos de ${estado.bloqueMinimo} días: cuente el motivo (el respaldo es opcional). ` +
+        `La revisa primero Talento Humano y después su jefe.`;
       $("campo-excepcion").classList.remove("hidden");
       pedirJustificacion(true);
       $("campo-adjuntos").classList.remove("hidden");

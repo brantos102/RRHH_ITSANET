@@ -22,6 +22,32 @@ from app.db import obtener_todos, obtener_uno
 from app.reglas import solicitudes
 from tests.diferencial import json_normal, muestra, y_deshacer  # noqa: F401
 
+def _regla_cambiada(pg, caso, hoy) -> bool:
+    """Casos donde la regla cambió A PROPÓSITO respecto de la versión en
+    PostgreSQL (nota 2026-11-16_02), y que por eso no se comparan aquí:
+
+      · vacaciones que empiezan antes de la anticipación: antes se
+        rechazaban; ahora la anticipación es una sugerencia y se pueden
+        pedir desde mañana;
+      · vacaciones de menos días que el bloque mínimo: el mensaje ofrece
+        ahora pedirlo como permiso, y la excepción exige 15 caracteres (antes
+        30) con adjunto opcional (antes obligatorio).
+
+    Las reglas nuevas tienen sus propias pruebas (test_saldo_y_excepcion.py).
+    """
+    if caso.get("tipo") != "vacacion":
+        return False
+    cfg = {f["clave"]: f["valor"] for f in pg.execute(
+        """select clave, valor from app_config
+            where clave in ('vacaciones_anticipacion_dias', 'vacaciones_bloque_minimo')""").fetchall()}
+    antic = int(float(cfg.get("vacaciones_anticipacion_dias") or 0))
+    minimo = int(float(cfg.get("vacaciones_bloque_minimo") or 0))
+    if (caso["fecha_inicio"] - hoy).days < antic:
+        return True
+    calendario = (caso["fecha_fin"] - caso["fecha_inicio"]).days + 1
+    return calendario < minimo
+
+
 CALCULADAS = ["dias_solicitados", "saldo_al_solicitar", "jefe_id", "estado", "fines_semana",
               "horas_solicitadas", "es_adelanto", "ruta_aprobacion", "bloque_menor_justificado", "region"]
 
@@ -144,7 +170,11 @@ async def _en_my(caso) -> tuple[dict | None, tuple | None]:
 
 async def test_cada_intento_termina_igual_en_las_dos_bases(muestra):
     desenlaces: Counter = Counter()
+    hoy = muestra.execute("select current_date as d").fetchone()["d"]
     for caso in _intentos(muestra, 350):
+        if _regla_cambiada(muestra, caso, hoy):
+            desenlaces["(regla cambiada: no se compara)"] += 1
+            continue
         foto_pg, err_pg = _en_pg(muestra, caso)
         foto_my, err_my = await _en_my(caso)
         if err_pg is not None:
@@ -168,7 +198,10 @@ async def test_cada_intento_termina_igual_en_las_dos_bases(muestra):
 @pytest.mark.parametrize("tipo", ["vacacion", "permiso"])
 async def test_previsualizar_igual(muestra, tipo):
     tipos = [f["id"] for f in muestra.execute("select id from permission_types order by id").fetchall()]
+    hoy = muestra.execute("select current_date as d").fetchone()["d"]
     for caso in list(_intentos(muestra, 120, semilla=11)):
+        if tipo == "vacacion" and _regla_cambiada(muestra, {**caso, "tipo": tipo}, hoy):
+            continue
         pt = caso.get("permission_type_id") or (tipos[0] if tipo == "permiso" else None)
         en_pg = muestra.execute("select previsualizar_solicitud(%s, %s, %s, %s, %s) as p",
                                 (caso["user_id"], tipo, caso["fecha_inicio"], caso["fecha_fin"], pt)).fetchone()["p"]

@@ -166,9 +166,11 @@ async def _pedir_vacaciones(u: dict) -> dict:
     c = await obtener_uno("""SELECT cfg_int('vacaciones_anticipacion_dias') AS antic,
                                     cfg_int('vacaciones_bloque_minimo') AS bloque""")
     return _r("Para pedir vacaciones:", detalles=[
-        "En «Mi panel», pulse «Nueva solicitud» y elija Vacaciones.",
-        f"Pídalas con al menos {c['antic']} días de anticipación.",
-        f"Se recomienda tomarlas en bloques de {c['bloque']} días o más.",
+        "En «Mi panel», pulse «Solicitar vacaciones».",
+        f"Puede pedirlas desde mañana; se sugiere hacerlo con {c['antic']} días de anticipación.",
+        f"Se toman en bloques de al menos {c['bloque']} días seguidos. Si necesita menos, "
+        "envíelas contando el motivo: las revisa Talento Humano.",
+        "Para un asunto puntual de un día, pida un permiso de día completo.",
         "Al elegir las fechas el sistema le muestra cuántos días descuenta y su saldo.",
         "La aprueba su jefe inmediato y luego Talento Humano; recibirá un correo en cada paso.",
     ], acciones=[{"texto": "Ir a Mi panel", "url": "dashboard.html"}])

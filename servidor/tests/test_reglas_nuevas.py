@@ -93,7 +93,9 @@ async def test_el_bloque_completo_pasa_sin_objeciones(cliente, auth):
     assert r.json()["estado"] == "pendiente_jefe"
 
 
-async def test_la_excepcion_exige_justificacion_de_verdad(cliente, auth):
+async def test_la_excepcion_exige_un_motivo(cliente, auth):
+    """Menos del bloque mínimo: el motivo es lo único con lo que decide
+    Talento Humano. Basta uno breve (15 caracteres); el adjunto es opcional."""
     lunes = await lunes_sin_feriados()
     r = await cliente.post("/solicitudes", headers=auth, json={
         "tipo": "vacacion", "fecha_inicio": str(lunes), "fecha_fin": str(lunes + timedelta(days=3)),
@@ -101,7 +103,14 @@ async def test_la_excepcion_exige_justificacion_de_verdad(cliente, auth):
         "justificacion": "urgente", "firmar": False,
     })
     assert r.status_code == 422
-    assert "30 caracteres" in r.json()["detail"]["mensaje"]
+    assert "15 caracteres" in r.json()["detail"]["mensaje"]
+    r = await cliente.post("/solicitudes", headers=auth, json={
+        "tipo": "vacacion", "fecha_inicio": str(lunes), "fecha_fin": str(lunes + timedelta(days=3)),
+        "descripcion": "Cuatro dias", "bloque_menor_justificado": True,
+        "justificacion": "Viaje familiar corto", "firmar": False,
+    })
+    assert r.status_code == 201, r.text
+    assert r.json()["estado"] == "pendiente_rrhh"
 
 
 async def test_la_excepcion_la_decide_talento_humano_antes_que_el_jefe(

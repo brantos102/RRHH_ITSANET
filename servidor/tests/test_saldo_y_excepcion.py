@@ -153,13 +153,14 @@ async def test_un_bloque_menor_avisa_a_talento_humano_y_no_al_jefe(
     assert r.status_code == 201, r.text
     cuerpo = r.json()
     assert cuerpo["estado"] == "pendiente_rrhh"
-    assert cuerpo["emergente"] is True
     assert "Talento Humano" in cuerpo["mensaje"]
-    assert "emergentes" in cuerpo["mensaje"]
+    # «Emergente» es una marca para Talento Humano: el colaborador no la ve.
+    assert "emergente" not in cuerpo
+    assert "emergente" not in cuerpo["mensaje"].lower()
 
     assert "rrhh" in avisados, "Talento Humano debía recibir el aviso"
     assert "jefe" not in avisados, "el jefe no decide en esta etapa: no debe recibirlo"
-    assert avisados["copia"], "el empleado va en copia, para tener la constancia"
+    assert avisados["copia"], "se pasa el correo del empleado: responder_a y su constancia"
 
 
 async def test_la_excepcion_no_exige_el_fin_de_semana_obligatorio(cliente, auth, empleado):
@@ -232,13 +233,14 @@ async def test_una_vacacion_normal_sigue_avisando_al_jefe(
     })
     assert r.status_code == 201, r.text
     assert r.json()["estado"] == "pendiente_jefe"
-    assert r.json()["emergente"] is False
     assert "jefe" in avisados
     assert "rrhh" not in avisados
 
 
-async def test_el_correo_de_excepcion_lleva_copia_y_direccion_de_respuesta(monkeypatch):
-    """Talento Humano debe poder responderle al empleado, no a un buzón mudo."""
+async def test_el_correo_de_excepcion_responde_al_empleado_sin_mostrarle_la_marca(monkeypatch):
+    """Talento Humano debe poder responderle al empleado, no a un buzón mudo.
+    El empleado recibe su propia constancia, sin «emergentes»: esa marca es
+    para Talento Humano."""
     from app import correo, notificaciones
 
     enviados: list[dict] = []
@@ -265,13 +267,14 @@ async def test_el_correo_de_excepcion_lleva_copia_y_direccion_de_respuesta(monke
          {"email": "rrhh2@itsanet.com.ec", "nombre": "Dos"}],
         solicitud, "ana@itsanet.com.ec")
 
-    assert len(enviados) == 2
-    assert "emergentes" in enviados[0]["asunto"].lower()
-    assert enviados[0]["responder_a"] == "ana@itsanet.com.ec"
-    assert enviados[0]["copia"] == ["ana@itsanet.com.ec"]
-    # La copia solo con el primero: el empleado no necesita el mismo aviso
-    # tantas veces como personas haya en Talento Humano.
-    assert enviados[1]["copia"] is None
+    al_empleado = [e for e in enviados if e["para"] == "ana@itsanet.com.ec"]
+    a_rrhh = [e for e in enviados if e["para"] != "ana@itsanet.com.ec"]
+    assert len(al_empleado) == 1 and len(a_rrhh) == 2
+    assert "emergente" not in al_empleado[0]["asunto"].lower()
+    assert "123" in al_empleado[0]["asunto"]
+    assert all("emergentes" in e["asunto"].lower() for e in a_rrhh)
+    assert all(e["responder_a"] == "ana@itsanet.com.ec" for e in a_rrhh)
+    assert all(e["copia"] is None for e in a_rrhh), "el empleado ya no va en copia del aviso interno"
 
 
 async def _sin_buzon():
@@ -360,3 +363,48 @@ async def test_no_se_duplica_cuando_el_buzon_es_el_de_una_persona(monkeypatch):
     await notificaciones.avisar_a_rrhh(
         [{"email": "rrhh1@itsanet.com.ec", "nombre": "Uno"}], solicitud, "Jefe Prueba")
     assert enviados == ["rrhh1@itsanet.com.ec"]
+
+
+# ------------------------------------- anticipación sugerida y adjunto opcional
+async def test_se_pueden_pedir_vacaciones_desde_manana(cliente, auth):
+    """La anticipación es una sugerencia: una vacación puede empezar mañana.
+    Hoy o antes, no: eso se regulariza con Talento Humano."""
+    manana = date.today() + timedelta(days=1)
+    r = await cliente.post("/solicitudes", headers=auth, json={
+        "tipo": "vacacion", "fecha_inicio": str(manana), "fecha_fin": str(manana + timedelta(days=13)),
+        "descripcion": "Dos semanas de descanso", "firmar": False,
+    })
+    # Puede chocar con la regla del fin de semana según el día; lo que no
+    # puede es rechazarse por la anticipación.
+    if r.status_code == 422:
+        assert "anticipación" not in r.json()["detail"]["mensaje"]
+    else:
+        assert r.status_code == 201, r.text
+
+    hoy = date.today()
+    r = await cliente.post("/solicitudes", headers=auth, json={
+        "tipo": "vacacion", "fecha_inicio": str(hoy), "fecha_fin": str(hoy + timedelta(days=13)),
+        "descripcion": "Desde hoy", "firmar": False,
+    })
+    assert r.status_code == 422
+    assert "a partir de mañana" in r.json()["detail"]["mensaje"]
+
+
+async def test_la_anticipacion_se_sugiere_en_la_vista_previa(cliente, auth):
+    manana = date.today() + timedelta(days=1)
+    r = await cliente.post("/solicitudes/previsualizar", headers=auth, json={
+        "tipo": "vacacion", "fecha_inicio": str(manana), "fecha_fin": str(manana + timedelta(days=14))})
+    assert r.status_code == 200, r.text
+    assert any(a.startswith("Sugerencia:") for a in r.json()["avisos"])
+
+
+async def test_menos_del_bloque_sin_adjunto_se_registra(cliente, auth):
+    """El respaldo de unas vacaciones cortas es opcional."""
+    lunes = await lunes_sin_feriados()
+    r = await cliente.post("/solicitudes", headers=auth, json={
+        "tipo": "vacacion", "fecha_inicio": str(lunes), "fecha_fin": str(lunes + timedelta(days=1)),
+        "descripcion": "Dos dias", "bloque_menor_justificado": True,
+        "justificacion": "Viaje familiar por el feriado largo", "firmar": False,
+    })
+    assert r.status_code == 201, r.text
+    assert r.json()["estado"] == "pendiente_rrhh"

@@ -197,34 +197,34 @@ async def preparar_solicitud(s: dict[str, Any]) -> dict[str, Any]:
     s["ruta_aprobacion"] = "estandar"
     if tipo == "vacacion":
         minimo = await _config_numero("vacaciones_bloque_minimo")
-        anticipacion = await _config_numero("vacaciones_anticipacion_dias")
-        anticipacion = int(anticipacion) if anticipacion is not None else None
         hoy = (await obtener_uno("SELECT CURRENT_DATE() AS hoy"))["hoy"]
         # El mínimo se mide en días de AUSENCIA, no en los que se descuentan:
         # un feriado dentro del rango no acorta el descanso.
         calendario = (fin - inicio).days + 1
         aviso = (inicio - hoy).days
 
-        if (anticipacion or 0) > 0 and aviso < anticipacion and not excepcion:
+        # La anticipación es una SUGERENCIA (la previsualización la muestra):
+        # se pueden pedir vacaciones que empiecen mañana. Lo que no se pide es
+        # un descanso que ya empezó: eso se regulariza con Talento Humano.
+        if aviso < 1:
             raise ReglaDeNegocio(
-                f"Las vacaciones se comunican con {anticipacion} días de anticipación y usted avisa "
-                f"con {max(aviso, 0)} (Lineamiento 1 de Talento Humano). Su jefe necesita ese tiempo "
-                "para organizar quién cubre el puesto. Si el caso no admite espera, márquelo como "
-                "excepción y explíquelo.",
-                pista=f"anticipacion|{anticipacion}")
+                "Las vacaciones se piden a partir de mañana. Si ya está ausente desde hoy, "
+                "escríbale a Talento Humano por el chat para regularizarlo.")
 
+        # Menos del bloque mínimo: lo revisa primero Talento Humano. Para el
+        # colaborador es una solicitud más (con el motivo); la marca de
+        # «vacaciones emergentes» es para Talento Humano.
         if (minimo or 0) > 0 and calendario < minimo:
             if not excepcion:
                 raise ReglaDeNegocio(
                     f"Las vacaciones se toman en bloques de al menos {_texto(minimo)} días seguidos y "
-                    f"usted pidió {calendario}. Si su caso lo amerita, márquelo como excepción, explique "
-                    "el motivo y adjunte el respaldo: la autoriza Talento Humano, no su jefe.",
+                    f"usted pidió {calendario}. Puede enviarla a Talento Humano contando el motivo, o, "
+                    "si es un asunto puntual de un día, pedirlo como permiso.",
                     pista=f"bloque_minimo|{_texto(minimo)}")
-            if len((s.get("justificacion") or "").strip(" ")) < 30:
+            if len((s.get("justificacion") or "").strip(" ")) < 15:
                 raise ReglaDeNegocio(
-                    f"Para tomar menos de {_texto(minimo)} días debe justificarlo por escrito, con al "
-                    "menos 30 caracteres: quien autoriza la excepción necesita entender por qué se "
-                    "aparta de la política.")
+                    "Cuéntele a Talento Humano el motivo en al menos 15 caracteres: es lo único con "
+                    "lo que puede decidir.")
 
         # Apartarse de la política y comprometer días que no existen son las
         # dos decisiones que no le corresponden a la jefatura inmediata.
@@ -240,21 +240,13 @@ async def preparar_solicitud(s: dict[str, Any]) -> dict[str, Any]:
 async def validar_requisitos(request_id) -> None:
     """Lo que solo se puede comprobar con los adjuntos ya subidos.
 
-    Tomar menos del bloque mínimo es una excepción a la política: la
-    autoriza Talento Humano y el documento que la sustenta es lo que queda
-    en el expediente. Para un permiso, el respaldo se sugiere pero no se
-    exige al enviar: el certificado de una cita médica se emite DESPUÉS.
+    Hoy nada: en vacaciones el respaldo es OPCIONAL, también por debajo del
+    bloque mínimo (lo decide Talento Humano con el motivo que se escribe), y
+    en un permiso se sugiere pero no se exige al enviar, porque el
+    certificado de una cita médica se emite DESPUÉS. Se conserva el punto
+    de control por si una regla futura lo necesita.
     """
-    r = await obtener_uno(
-        """SELECT r.tipo, r.fecha_inicio, r.fecha_fin,
-                  (SELECT COUNT(*) FROM request_attachments a WHERE a.request_id = r.id) AS adjuntos
-             FROM requests r WHERE r.id = %s""", (request_id,))
-    if r is None or r["tipo"] != "vacacion":
-        return
-    minimo = await _config_numero("vacaciones_bloque_minimo") or Decimal(0)
-    if minimo > 0 and (r["fecha_fin"] - r["fecha_inicio"]).days + 1 < minimo and r["adjuntos"] == 0:
-        raise ReglaDeNegocio(
-            f"Para tomar menos de {_texto(minimo)} días debe adjuntar el documento que respalde la excepción.")
+    return None
 
 
 _COLUMNAS = ["id", "user_id", "tipo", "permission_type_id", "fecha_inicio", "fecha_fin", "hora_inicio",
@@ -314,6 +306,14 @@ async def previsualizar_solicitud(user_id, tipo: str, inicio: dt.date, fin: dt.d
         avisos.append("El rango seleccionado no genera días computables.")
 
     if tipo == "vacacion":
+        antic = await _config_numero("vacaciones_anticipacion_dias")
+        hoy = (await obtener_uno("SELECT CURRENT_DATE() AS hoy"))["hoy"]
+        if (inicio - hoy).days < 1:
+            ok = False
+            avisos.append("Las vacaciones se piden a partir de mañana.")
+        elif antic and (inicio - hoy).days < int(antic):
+            avisos.append(f"Sugerencia: pídalas con {int(antic)} días de anticipación cuando pueda; así su "
+                          "jefe organiza mejor quién cubre el puesto.")
         if saldo is not None and dias > saldo:
             avisos.append(f"Supera su saldo ({saldo} días disponibles). Debe registrar una justificación: "
                           "se tomará como días adelantados.")

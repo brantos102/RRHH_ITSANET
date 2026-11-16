@@ -376,7 +376,7 @@
           <input type="checkbox" id="excepcion-bloque"
                  class="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900">
           <span class="text-amber-900">
-            <span class="font-medium">Solicitar como excepción</span><br>
+            <span class="font-medium">Enviar a Talento Humano con el motivo</span><br>
             <span id="texto-excepcion" class="text-xs"></span>
           </span>
         </label>
@@ -601,7 +601,9 @@
 
 <script type="module" src="js/dashboard.js"></script>
 
-<!-- ============ Modal: vacaciones emergentes (excepción al bloque mínimo) ============
+<!-- ============ Modal: vacaciones de menos días que el bloque mínimo ============
+     Para el colaborador es una solicitud más, con su motivo; la marca de
+     «vacaciones emergentes» la ve solo Talento Humano. ============
      Pedir menos días de los que fija la política no es un trámite ordinario:
      lo autoriza Talento Humano. Este formulario arma la solicitud formal, la
      deja registrada en el sistema y la envía al grupo de Talento Humano de la
@@ -617,12 +619,11 @@
     </header>
 
     <div class="space-y-4 px-5 py-4">
-      <div class="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
+      <div class="rounded-xl bg-sky-50 p-3 text-sm text-sky-900 ring-1 ring-sky-200">
         <p id="excepcion-encabezado" class="font-medium"></p>
         <p class="mt-1 text-xs leading-relaxed">
-          Esta solicitud <strong>no descuenta días todavía</strong>. Queda registrada y pasa a
-          Talento Humano; si la autorizan, se registra como <strong>vacaciones emergentes</strong>
-          y ahí sí se descuentan los días. Después su jefe confirma la cobertura del puesto.
+          La revisa primero Talento Humano y después su jefe confirma quién cubre el puesto.
+          Los días se descuentan solo cuando quede aprobada.
         </p>
       </div>
 
@@ -639,26 +640,24 @@
 
       <div>
         <label for="excepcion-motivo" class="block text-sm font-medium">
-          Motivo por el que no puede tomar el bloque completo
+          Motivo
         </label>
         <p class="mt-0.5 text-xs leading-relaxed text-slate-500">
-          Quien autoriza necesita entender por qué su caso se aparta de la política. Diga el
-          hecho concreto y las fechas. Por ejemplo: «Debo acompañar a mi madre a una cirugía
-          programada el martes 3; el alta es el miércoles 4 y regreso el jueves.»
+          Cuente brevemente por qué necesita estos días. Por ejemplo: «Viaje familiar corto por
+          el feriado» o «Acompaño a mi madre a una cirugía el martes 3 y regreso el jueves.»
         </p>
-        <textarea id="excepcion-motivo" rows="4" minlength="30" maxlength="600" required
+        <textarea id="excepcion-motivo" rows="4" minlength="15" maxlength="600" required
                   class="mt-1.5 w-full rounded-xl border-slate-300 text-sm focus:border-slate-900 focus:ring-slate-900"
-                  placeholder="Hecho concreto, fechas y por qué no admite espera"></textarea>
-        <p class="mt-1 text-xs text-slate-400"><span id="excepcion-contador">0</span>/600 · mínimo 30</p>
+                  placeholder="Motivo breve"></textarea>
+        <p class="mt-1 text-xs text-slate-400"><span id="excepcion-contador">0</span>/600 · mínimo 15</p>
       </div>
 
       <div>
         <label for="excepcion-adjuntos" class="block text-sm font-medium">
-          Respaldo <span class="font-normal text-rose-600">(obligatorio)</span>
+          Respaldo <span class="font-normal text-slate-500">(opcional)</span>
         </label>
         <p class="mt-0.5 text-xs text-slate-500">
-          Certificado, cita, citación o el documento que sustente el caso. La solicitud no
-          se puede enviar sin él: es lo que sustenta apartarse de la política.
+          Si tiene un documento que ayude (una cita, un pasaje), puede adjuntarlo. No es obligatorio.
         </p>
         <input type="file" id="excepcion-adjuntos" multiple
                accept="image/jpeg,image/png,image/webp,image/heic,application/pdf"
@@ -671,8 +670,7 @@
         <p class="font-medium text-slate-700">A dónde va esta solicitud</p>
         <p id="excepcion-destinatarios" class="mt-1">Cargando el equipo de su región…</p>
         <p class="mt-1.5">
-          Se envía copia a <span id="excepcion-mi-correo" class="font-medium">su correo</span>,
-          que es su constancia. Puede responder desde ahí y le llegará a Talento Humano.
+          Recibirá una constancia en <span id="excepcion-mi-correo" class="font-medium">su correo</span>. Si necesita agregar algo, escríbales por el chat del sistema.
         </p>
       </div>
 

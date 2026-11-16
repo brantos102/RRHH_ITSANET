@@ -234,7 +234,11 @@ async def avisar_excepcion_a_rrhh(
     html = _marco(titulo, cuerpo, ("Revisar solicitud", url))
 
     buzon = await _buzon_del_departamento(solicitud.get("region"))
-    copia = [empleado_email] if empleado_email else None
+    # El colaborador ya no va en copia de este aviso: «vacaciones emergentes»
+    # es una marca para Talento Humano. Recibe su propia constancia, neutra.
+    copia = None
+    if empleado_email:
+        await avisar_recibida(empleado_email, solicitud)
     if buzon:
         try:
             await correo.enviar(buzon, titulo, texto, html,
@@ -261,6 +265,27 @@ async def avisar_excepcion_a_rrhh(
             "La solicitud %s necesita a Talento Humano y nadie recibió el aviso: no hay "
             "nadie registrado en su región ni buzón del departamento configurado "
             "(Configuración › Talento Humano)", solicitud.get("folio"))
+
+
+async def avisar_recibida(destino: str, solicitud: dict) -> None:
+    """Constancia al colaborador de que su solicitud quedó registrada y la
+    revisa Talento Humano. Sin calificativos internos («emergente»,
+    «excepción»): eso es para quien decide."""
+    titulo = f"Su solicitud Nº {solicitud.get('folio')} quedó registrada"
+    filas = _detalle(solicitud)
+    cuerpo = (
+        '<p style="margin:0 0 16px;font-size:14px;color:#333434">La revisa Talento Humano y '
+        "después su jefe confirma quién cubre el puesto. Le avisaremos por correo en cada paso.</p>"
+        + _tabla(filas)
+        + '<p style="margin:16px 0 0;font-size:13px;color:#707171">Si necesita agregar algo, '
+        "responda por el chat del sistema.</p>"
+    )
+    texto = (f"{titulo}\n\nLa revisa Talento Humano y después su jefe confirma quién cubre el puesto.\n\n"
+             + "\n".join(f"{e}: {v}" for e, v in filas))
+    try:
+        await correo.enviar(destino, titulo, texto, _marco(titulo, cuerpo))
+    except Exception:  # noqa: BLE001
+        log.exception("No se pudo enviar la constancia a %s", destino)
 
 
 async def avisar_aprobacion(empleado: dict, solicitud: dict, sede_firma: str | None = None) -> None:

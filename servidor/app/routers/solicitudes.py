@@ -453,7 +453,6 @@ async def crear_solicitud(
     elif completa:
         log.warning("La solicitud %s no tiene jefe asignado: nadie recibió el aviso", datos.id)
 
-    emergente = bool(completa and completa["bloque_menor_justificado"])
     return {
         "id": str(creada["id"]),
         "folio": creada["folio"],
@@ -462,12 +461,8 @@ async def crear_solicitud(
         "horas_solicitadas": float(creada["horas_solicitadas"]) if creada["horas_solicitadas"] else None,
         "fines_semana": creada["fines_semana"],
         "es_adelanto": creada["es_adelanto"],
-        "emergente": emergente,
-        "mensaje": (
-            f"Solicitud Nº {creada['folio']} enviada a {destino}."
-            + (" Quedó registrada como vacaciones emergentes; recibirá copia en su correo."
-               if emergente else "")
-        ),
+        # «Emergente» es una marca para Talento Humano, no para el colaborador.
+        "mensaje": f"Solicitud Nº {creada['folio']} enviada a {destino}.",
     }
 
 

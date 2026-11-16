@@ -2212,6 +2212,7 @@ async function atenderSolicitud(item) {
     </dl>
     <p class="rounded-xl bg-slate-50 p-3">${esc(s.descripcion || "")}</p>
     ${s.es_adelanto ? '<p class="text-amber-800">Supera su saldo: días adelantados.</p>' : ""}
+    ${s.bloque_menor_justificado ? '<p class="text-amber-800">Vacaciones emergentes: menos días que el bloque mínimo.</p>' : ""}
     <div class="flex flex-wrap gap-2 pt-1">
       ${s.tipo === "vacacion" ? `<button data-docs class="${CLASE_BTN} bg-slate-100 hover:bg-slate-200">📄 Documentos</button>` : ""}
       <a href="dashboard.html#aprobaciones" class="${CLASE_BTN} bg-slate-100 hover:bg-slate-200">Asignar reemplazo…</a>
