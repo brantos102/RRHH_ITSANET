@@ -116,8 +116,18 @@ cd ~/bryan/RRHH_ITSANET
 X=~/bryan/rrhh_datos/NOMBRE_DEL_EXCEL.xlsx
 .venv/bin/python mysql/cargar_registro.py "$X"                 # revisa
 .venv/bin/python mysql/cargar_registro.py "$X" --aplicar       # personas activas y saldos
-.venv/bin/python scripts/cargar_historial.py "$X" --aplicar    # historial de vacaciones
+.venv/bin/python scripts/cargar_historial.py "$X" --aplicar --sincronizar   # historial (quita lo que la hoja ya no tiene)
 ```
+
+La carga deja junto al Excel:
+
+- `…_NO_CARGADOS.csv`: lo que no entró y por qué. Quien figura «PASIVO en la
+  hoja y ACTIVO en el sistema» no se da de baja solo: si salió, Talento Humano
+  registra su salida con la causa en Administración › Usuarios.
+- `…_PERSONAS_NUEVAS.xlsx`: las personas ACTIVAS que no se pudieron cargar
+  (sin cédula o con cédulas en conflicto), ya en la plantilla de
+  Administración › Actualización masiva › Registrar personas nuevas. Se le
+  escribe la cédula y el correo y se sube desde la web.
 
 Deshacer todo lo cargado de ese Excel:
 

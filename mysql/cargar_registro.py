@@ -153,7 +153,10 @@ def leer(archivo: Path) -> tuple[list[dict], list[dict], collections.Counter]:
         estado = (_texto(v[1]) or "").upper()
         if estado != "ACTIVO":
             resumen["pasivo (pendiente de decisión)"] += 1
-            fuera.append({"fila": fila, "nombre": nombre, "motivo": f"estado {estado or 'vacío'}"})
+            cs = cedulas.get(k, set())
+            fuera.append({"fila": fila, "nombre": nombre, "motivo": f"estado {estado or 'vacío'}",
+                          "clave": k, "pasivo": True,
+                          "cedula": next(iter(cs)) if len(cs) == 1 else None})
             continue
         m = maestro.get(k, {})
         ingreso = m.get("ingreso") or rr.fecha(v[2])
@@ -176,7 +179,12 @@ def leer(archivo: Path) -> tuple[list[dict], list[dict], collections.Counter]:
             motivo = f"DISPONIBLE no es un número ({disponible!r})"
         if motivo:
             resumen[re.sub(r" \(.*\)|\d{10}", "…", motivo).replace("……", "…")] += 1
-            fuera.append({"fila": fila, "nombre": nombre, "motivo": motivo})
+            # Lo que sí se sabe de la persona, para la plantilla de personas
+            # nuevas: Talento Humano completa la cédula y la registra desde la web.
+            fuera.append({"fila": fila, "nombre": nombre, "motivo": motivo, "activo_sin_cargar": True,
+                          "ingreso": ingreso, "ciudad": _ciudad(m.get("ciudad") or v[4]),
+                          "bodega": m.get("bodega") or _texto(v[5]), "ceco": m.get("ceco"),
+                          "disponible": disponible if isinstance(disponible, (int, float)) else None})
             continue
         cargar.append({
             "fila": fila, "clave": k, "nombre": nombre, "cedula": cedula, "ingreso": ingreso,
@@ -260,6 +268,44 @@ async def _cargar(personas: list[dict], hoy: dt.date) -> dict:
     return {"cuenta": cuenta, "problemas": problemas}
 
 
+def _plantilla_personas_nuevas(destino: Path, filas: list[dict]) -> None:
+    """Las personas ACTIVAS que no se pudieron cargar, en la plantilla de
+    Administración › Actualización masiva › Registrar personas nuevas, con lo
+    que la hoja sí trae. Talento Humano escribe la cédula (y el correo) y la
+    sube desde la web: ahí se revisa todo antes de registrar a nadie."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    from app.reglas import altas as reglas_altas
+    libro = Workbook()
+    hoja = libro.active
+    hoja.title = "Personas nuevas"
+    encabezados = [e for _, e, _, _ in reglas_altas.COLUMNAS] + ["Por qué no entró (no se carga)"]
+    hoja.append(encabezados)
+    for i, (_, _, ancho, obligatorio) in enumerate([*reglas_altas.COLUMNAS, ("", "", 48, False)], start=1):
+        celda = hoja.cell(row=1, column=i)
+        celda.font = Font(bold=True, color="FFFFFF")
+        celda.fill = PatternFill("solid", fgColor="06122B" if obligatorio else "1C58D7")
+        celda.alignment = Alignment(wrap_text=True, vertical="center")
+        hoja.column_dimensions[get_column_letter(i)].width = ancho
+    hoja.row_dimensions[1].height = 44
+    campos = [c for c, _, _, _ in reglas_altas.COLUMNAS]
+    for f in filas:
+        valores = {"nombre": f["nombre"],
+                   "fecha_ingreso": f["ingreso"].strftime("%d/%m/%Y") if f.get("ingreso") else None,
+                   "saldo": f.get("disponible"), "ciudad": f.get("ciudad"), "bodega": f.get("bodega"),
+                   "centro_costo": f.get("ceco")}
+        hoja.append([valores.get(c) for c in campos] + [f["motivo"]])
+    for fila in hoja.iter_rows(min_row=2, max_col=9):
+        fila[0].number_format = "@"
+        fila[8].number_format = "@"
+        fila[0].fill = PatternFill("solid", fgColor="FFF7E6")
+    hoja.freeze_panes = "C2"
+    libro.save(destino)
+    destino.chmod(0o600)
+
+
 def _escribir(destino: Path, filas: list[dict], columnas: list[str]) -> None:
     with destino.open("w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f, delimiter=";")
@@ -324,9 +370,40 @@ async def principal(args) -> int:
             print(f"  {AMARILLO}{c['al día desde una fecha antigua']} persona(s) con la FECHA ACTUAL escrita a "
                   f"mano: se cargaron al día y quedan listadas para revisar{FIN}")
 
+        # Quien ya estaba cargado y la hoja ahora marca PASIVO sigue ACTIVO en
+        # el sistema: la carga no da de baja a nadie, porque la salida exige
+        # su causa (Código del Trabajo) y esa la registra Talento Humano.
+        activos = await obtener_todos("SELECT cedula, nombre FROM users WHERE activo")
+        por_cedula = {a["cedula"]: a for a in activos}
+        por_nombre = collections.defaultdict(list)
+        for a in activos:
+            por_nombre[rr.clave(a["nombre"])].append(a)
+        siguen_activos = 0
+        for f in fuera:
+            if not f.get("pasivo"):
+                continue
+            u = por_cedula.get(f.get("cedula")) or (por_nombre[f["clave"]][0]
+                                                    if len(por_nombre[f["clave"]]) == 1 else None)
+            if u:
+                siguen_activos += 1
+                f["cedula"] = u["cedula"]
+                f["motivo"] = ("PASIVO en la hoja y ACTIVO en el sistema: si ya no trabaja, registrar su "
+                               "salida con la causa en Administración › Usuarios")
+        if siguen_activos:
+            print(f"  {AMARILLO}{siguen_activos} persona(s) figuran PASIVO en la hoja y siguen ACTIVAS en el "
+                  f"sistema: la carga no da de baja a nadie. Si salieron, regístreles la salida con su causa "
+                  f"en Administración › Usuarios (están en el informe de abajo).{FIN}")
+
         informe = archivo.with_name(archivo.stem + "_NO_CARGADOS.csv")
         _escribir(informe, [*fuera, *resultado["problemas"]], ["fila", "nombre", "cedula", "motivo"])
         print(f"\n  Lo que no entró o hay que revisar: {informe}  ({len(fuera) + len(resultado['problemas'])} fila(s))")
+        sin_cargar = [f for f in fuera if f.get("activo_sin_cargar")]
+        if sin_cargar:
+            nuevas = archivo.with_name(archivo.stem + "_PERSONAS_NUEVAS.xlsx")
+            _plantilla_personas_nuevas(nuevas, sin_cargar)
+            print(f"  {AMARILLO}{len(sin_cargar)} persona(s) ACTIVAS no se pudieron cargar{FIN} (sin cédula o con "
+                  f"cédulas en conflicto). Están en {nuevas}: escriba su cédula y su correo, y súbala en "
+                  f"Administración › Actualización masiva › Registrar personas nuevas.")
         if args.aplicar:
             completar = archivo.with_name("personas_completar.csv")
             filas = await obtener_todos(
@@ -340,7 +417,7 @@ async def principal(args) -> int:
             print(f"  (complete esas columnas y cárguelo con mysql/cargar_personas.py; con «saldo» vacío "
                   f"el saldo cargado se conserva)")
             print(f"\n{VERDE}Listo.{FIN} Siguiente: el historial →  .venv/bin/python scripts/cargar_historial.py "
-                  f"{archivo} --aplicar")
+                  f"{archivo} --aplicar --sincronizar")
         else:
             print(f"\n{AMARILLO}Nada se escribió.{FIN} Repita con --aplicar para cargarlo.")
         return 0

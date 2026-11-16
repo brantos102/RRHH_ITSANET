@@ -341,8 +341,8 @@ sudo tail -40 /var/log/apache2/rrhh-itsanet-error.log</code></pre>
       <tr><td><b>Registrar personas nuevas</b></td><td>Altas por Excel con saldo conciliado, vista previa y folio. Reconoce a quien ya está.</td><td>Web: Administración › Actualización masiva</td></tr>
       <tr><td><b>Actualización masiva</b></td><td>Cambiar cargo, área, jefe, ciudad, bodega, CECO, cliente y contrato de personas registradas.</td><td>Web: Administración › Actualización masiva</td></tr>
       <tr><td><b>Cargos y áreas</b></td><td>Catálogo oficial: crear, renombrar, unificar, desactivar.</td><td>Web: Administración › Cargos y áreas</td></tr>
-      <tr><td><code>mysql/cargar_registro.py</code></td><td>Carga inicial desde el registro de vacaciones (Excel). Solo antes de la publicación.</td><td>Terminal</td></tr>
-      <tr><td><code>scripts/cargar_historial.py</code></td><td>Historial de vacaciones de la hoja (no toca saldos).</td><td>Terminal</td></tr>
+      <tr><td><code>mysql/cargar_registro.py</code></td><td>Carga desde el registro de vacaciones (Excel). Solo antes de la publicación. Deja junto al Excel lo que no entró y la plantilla de personas nuevas con los activos sin cédula.</td><td>Terminal</td></tr>
+      <tr><td><code>scripts/cargar_historial.py</code></td><td>Historial de vacaciones de la hoja (no toca saldos). Con <code>--sincronizar</code> quita lo que la hoja corregida ya no tiene.</td><td>Terminal</td></tr>
       <tr><td><code>mysql/cargar_personas.py</code></td><td>Personas desde CSV con correo, rol y jefe (crea o actualiza por cédula).</td><td>Terminal</td></tr>
       <tr><td><code>mysql/saldos.py</code></td><td>Explicar, recalcular, regenerar o fijar el saldo de una persona.</td><td>Terminal</td></tr>
     </tbody>

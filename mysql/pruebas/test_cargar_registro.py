@@ -104,3 +104,23 @@ def test_un_saldo_negativo_se_conserva(libro):
     ruta, _ = libro
     luis = next(p for p in cr.leer(ruta)[0] if p["nombre"] == "LOPEZ LUIS")
     assert luis["disponible"] == Decimal("-1.00")
+
+
+def test_los_activos_sin_cargar_salen_en_la_plantilla_de_personas_nuevas(libro, tmp_path):
+    """Quien está ACTIVO y no se pudo identificar no se pierde: sale en la
+    plantilla de «Registrar personas nuevas», con lo que la hoja trae, para
+    que Talento Humano escriba la cédula y lo registre desde la web."""
+    openpyxl = pytest.importorskip("openpyxl")
+    ruta, _ = libro
+    _, fuera, _ = cr.leer(ruta)
+    sin_cargar = [f for f in fuera if f.get("activo_sin_cargar")]
+    assert {f["nombre"] for f in sin_cargar} == {"SIN CEDULA", "DOBLE UNO"}, "el PASIVO no va"
+    destino = tmp_path / "nuevas.xlsx"
+    cr._plantilla_personas_nuevas(destino, sin_cargar)
+    hoja = openpyxl.load_workbook(destino).active
+    encabezado = [c.value for c in hoja[1]]
+    assert encabezado[:3] == ["Cédula", "Apellidos y nombres", "Fecha de ingreso (dd/mm/aaaa)"]
+    filas = {r[1]: r for r in hoja.iter_rows(min_row=2, values_only=True)}
+    assert filas["SIN CEDULA"][0] is None, "la cédula la escribe Talento Humano"
+    assert filas["SIN CEDULA"][2] == "15/01/2020" and filas["SIN CEDULA"][3] == 5
+    assert "sin cédula" in filas["SIN CEDULA"][-1]

@@ -8,6 +8,15 @@ podía responder la pregunta más simple que se le ocurre a cualquiera,
     python scripts/cargar_historial.py ARCHIVO.xlsx            # dice qué haría
     python scripts/cargar_historial.py ARCHIVO.xlsx --aplicar  # lo hace
     python scripts/cargar_historial.py ARCHIVO.xlsx --informe cotejo.csv
+    python scripts/cargar_historial.py ARCHIVO.xlsx --aplicar --sincronizar
+                                    # además quita lo que la hoja ya no tiene
+
+VOLVER A CARGAR UNA HOJA CORREGIDA. Si Talento Humano corrige las fechas de
+una vacación o borra una fila, la versión anterior queda en el sistema y la
+persona aparece con días de más en su historial. Con --sincronizar se quitan,
+SOLO de las personas que esta hoja empareja, las vacaciones cargadas desde
+la hoja que ya no están en ella. No toca el saldo (viene de la hoja) ni las
+solicitudes hechas en el sistema, que están en otra tabla.
 
 Lo delicado aquí es el emparejamiento. La hoja identifica a la gente por
 NOMBRE y el sistema por CÉDULA, así que hay que decidir quién es quién, y
@@ -165,9 +174,9 @@ def leer_hoja(archivo: Path) -> tuple[list[dict], Counter]:
     return eventos, descartes
 
 
-async def principal(archivo: Path, aplicar: bool, informe: Path | None) -> int:
+async def principal(archivo: Path, aplicar: bool, informe: Path | None, sincronizar: bool = False) -> int:
     from app.config import get_settings
-    from app.db import cerrar_pool, ejecutar, obtener_todos, obtener_uno
+    from app.db import a_json, cerrar_pool, ejecutar, lista, obtener_todos, obtener_uno
 
     if get_settings().es_produccion and not aplicar:
         pass                                # el ensayo se permite siempre
@@ -244,6 +253,22 @@ async def principal(archivo: Path, aplicar: bool, informe: Path | None) -> int:
                   f"{a['inicio']} a {a['fin']}  ({a['dias']:g} día(s))")
     print(f"  {VERDE}nuevas: {len(nuevos)}{FIN}")
 
+    # Lo cargado antes que la hoja ya no tiene (filas corregidas o borradas),
+    # solo de las personas que esta hoja empareja.
+    en_hoja = {(str(a["user_id"]), a["inicio"], a["fin"]) for a in asignados}
+    sobrantes = [f for f in await obtener_todos(
+        """select id, user_id, fecha_inicio, fecha_fin, dias, fila_origen from vacaciones_historicas""")
+        if str(f["user_id"]) in {str(u) for u in personas}
+        and (str(f["user_id"]), f["fecha_inicio"], f["fecha_fin"]) not in en_hoja]
+    if sobrantes:
+        print(f"  {AMARILLO}ya no están en la hoja: {len(sobrantes)} "
+              f"({sum(float(f['dias']) for f in sobrantes):g} día(s)). "
+              + ("Se quitan con --sincronizar." if not sincronizar else "Se quitan (--sincronizar).") + FIN)
+        for f in sobrantes[:20]:
+            persona = await obtener_uno("select nombre from users where id = %s", (f["user_id"],))
+            print(f"     {persona['nombre'][:34]:<34} {f['fecha_inicio']} a {f['fecha_fin']}  "
+                  f"({float(f['dias']):g} día(s))")
+
     if informe:
         with informe.open("w", newline="", encoding="utf-8-sig") as f:
             w = csv.writer(f, delimiter=";")
@@ -278,7 +303,15 @@ async def principal(archivo: Path, aplicar: bool, informe: Path | None) -> int:
     saldo_despues = await obtener_uno(
         "select coalesce(sum(dias_vacaciones), 0) as total from users")
 
-    print(f"\n{VERDE}Cargadas {cargados} vacaciones.{FIN}")
+    quitadas = 0
+    if sincronizar and sobrantes:
+        quitadas = await ejecutar("delete from vacaciones_historicas where id in %s",
+                                  (lista([f["id"] for f in sobrantes]),))
+        await ejecutar("insert into audit_logs (accion, entidad, detalle) values "
+                       "('historial_sincronizado', 'vacaciones_historicas', %s)",
+                       (a_json({"archivo": archivo.name, "quitadas": quitadas}),))
+
+    print(f"\n{VERDE}Cargadas {cargados} vacaciones.{FIN}" + (f" Quitadas {quitadas} que ya no están en la hoja." if quitadas else ""))
     if saldo_antes["total"] != saldo_despues["total"]:
         print(f"{ROJO}ATENCIÓN: el saldo total cambió de {saldo_antes['total']} a "
               f"{saldo_despues['total']}. No debía cambiar: el historial no toca el "
@@ -392,10 +425,10 @@ def localizar(pedido: Path) -> Path:
     raise SystemExit(2)
 
 
-async def _con_cierre(archivo, aplicar, informe) -> int:
+async def _con_cierre(archivo, aplicar, informe, sincronizar=False) -> int:
     from app.db import cerrar_pool
     try:
-        return await principal(archivo, aplicar, informe)
+        return await principal(archivo, aplicar, informe, sincronizar)
     finally:
         await cerrar_pool()
 
@@ -407,6 +440,8 @@ if __name__ == "__main__":
     p.add_argument("--aplicar", action="store_true", help="Cargar de verdad.")
     p.add_argument("--informe", type=Path, default=None,
                    help="CSV con el detalle de lo emparejado, para cotejar.")
+    p.add_argument("--sincronizar", action="store_true",
+                   help="Quitar del historial lo que la hoja ya no tiene (solo de las personas que empareja).")
     a = _cli.analizar(p)
     archivo = localizar(a.archivo)
-    raise SystemExit(asyncio.run(_con_cierre(archivo, a.aplicar, a.informe)))
+    raise SystemExit(asyncio.run(_con_cierre(archivo, a.aplicar, a.informe, a.sincronizar)))
