@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from .. import notificaciones, qr
 from ..audit import registrar
 from ..config import get_settings
-from ..db import booleanos, ejecutar, obtener_todos, obtener_uno
+from ..db import booleanos, ejecutar, obtener_todos, obtener_uno, transaccion
 from ..deps import exigir_rol, usuario_actual
 from ..errores import traducir
 from ..reglas import papeles as reglas_papeles
@@ -442,6 +442,118 @@ async def decidir(
                     entidad="requests", entidad_id=str(solicitud_id),
                     detalle={"via": "panel", "motivo": decision.motivo})
     return resultado
+
+
+# ------------------------------------------- corregir un rechazo por error
+DIAS_PARA_CORREGIR = 30
+
+
+class Correccion(BaseModel):
+    motivo: str = Field(..., min_length=10, max_length=300)
+    reemplazo_id: uuid.UUID | None = None
+
+
+def _puede_corregir(r: dict, usuario: dict) -> bool:
+    """Quien rechazó, el jefe de la etapa en que se rechazó, o Talento Humano."""
+    if usuario["rol"] in ("rrhh", "admin"):
+        return True
+    if r["rechazado_por"] and str(r["rechazado_por"]) == str(usuario["id"]):
+        return True
+    return r["rechazado_en_etapa"] == "jefe" and str(r["jefe_id"]) == str(usuario["id"])
+
+
+@router.get("/aprobaciones/rechazadas")
+async def rechazadas_recientes(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[dict]:
+    """Lo que esta persona rechazó (o, si es Talento Humano, lo rechazado) en
+    los últimos 30 días: para corregir una decisión tomada por error."""
+    if usuario["rol"] not in ("jefe", "rrhh", "admin"):
+        return []
+    filas = await obtener_todos(
+        f"""select r.id, r.rechazado_por, r.rechazado_en, r.rechazado_en_etapa, r.jefe_id,
+                   q.nombre as rechazado_por_nombre
+              from requests r left join users q on q.id = r.rechazado_por
+             where r.estado = 'rechazado'
+               and r.rechazado_en >= now(6) - interval {DIAS_PARA_CORREGIR} day
+               and r.user_id <> %s
+             order by r.rechazado_en desc limit 100""", (str(usuario["id"]),))
+    salida = []
+    for f in filas:
+        if not _puede_corregir(f, usuario):
+            continue
+        completa = await obtener_uno(SQL_SOLICITUD, (f["id"],))
+        salida.append({**_publico(completa), "rechazado_en": f["rechazado_en"],
+                       "rechazado_en_etapa": f["rechazado_en_etapa"],
+                       "rechazado_por": f["rechazado_por_nombre"]})
+    return salida
+
+
+@router.post("/aprobaciones/{solicitud_id}/corregir-rechazo")
+async def corregir_rechazo(
+    solicitud_id: uuid.UUID,
+    datos: Correccion,
+    request: Request,
+    tareas: BackgroundTasks,
+    usuario: Annotated[dict, Depends(usuario_actual)],
+) -> dict:
+    """Corrige un rechazo hecho por error: la solicitud vuelve a la etapa en
+    que se rechazó y se aprueba en el mismo paso, con el motivo de la
+    corrección en la bitácora. Sigue la ruta normal: si la corrigió el jefe,
+    pasa a Talento Humano; si la corrigió Talento Humano, queda aprobada (o
+    pasa al jefe, en la ruta invertida)."""
+    r = await obtener_uno(
+        """select id, user_id, estado, jefe_id, rechazado_por, rechazado_en, rechazado_en_etapa,
+                  motivo_rechazo, fecha_inicio, fecha_fin, hora_inicio, hora_fin, folio
+             from requests where id = %s""", (str(solicitud_id),))
+    if r is None:
+        raise HTTPException(status_code=404, detail={"mensaje": "Solicitud no encontrada."})
+    if str(r["user_id"]) == str(usuario["id"]):
+        raise HTTPException(status_code=403, detail={"mensaje": "No puede decidir sobre su propia solicitud."})
+    if r["estado"] != "rechazado":
+        raise HTTPException(status_code=409, detail={
+            "mensaje": f"Esta solicitud está en estado «{r['estado']}»: solo se corrige un rechazo."})
+    if not _puede_corregir(r, usuario):
+        raise HTTPException(status_code=403, detail={
+            "mensaje": "La corrige quien la rechazó, su jefe inmediato o Talento Humano."})
+    if r["rechazado_en"] and (date.today() - r["rechazado_en"].date()).days > DIAS_PARA_CORREGIR:
+        raise HTTPException(status_code=409, detail={
+            "mensaje": f"El rechazo tiene más de {DIAS_PARA_CORREGIR} días. Pida a la persona que la "
+                       "vuelva a solicitar."})
+    choque = await reglas_solicitudes.ausencia_solapada(
+        r["user_id"], r["fecha_inicio"], r["fecha_fin"], r["hora_inicio"], r["hora_fin"], r["id"])
+    if choque is not None:
+        raise HTTPException(status_code=409, detail={
+            "mensaje": f"Después del rechazo, la persona pidió otra ausencia en esas fechas (solicitud "
+                       f"Nº {choque['folio']}). Resuelva primero esa solicitud."})
+
+    etapa = r["rechazado_en_etapa"] or "jefe"
+    pendiente = "pendiente_jefe" if etapa == "jefe" else "pendiente_rrhh"
+    async with transaccion():
+        try:
+            await ejecutar("SET @reconsideracion_en_curso = 1")
+            await ejecutar(
+                """update requests
+                      set estado = %s, rechazado_por = null, rechazado_en = null,
+                          rechazado_en_etapa = null, motivo_rechazo = null
+                    where id = %s and estado = 'rechazado'""", (pendiente, str(solicitud_id)))
+        finally:
+            await ejecutar("SET @reconsideracion_en_curso = NULL")
+        solicitud = await obtener_uno(SQL_SOLICITUD, (str(solicitud_id),))
+        resultado = await _aplicar(solicitud, "jefe" if etapa == "jefe" else "rrhh",
+                                   Decision(accion="aprobar", reemplazo_id=datos.reemplazo_id),
+                                   str(usuario["id"]), tareas)
+        if resultado["estado"] != "aprobado":
+            await ejecutar(
+                """insert into notifications (user_id, tipo, severidad, titulo, mensaje, entidad, entidad_id,
+                                              accion_url)
+                   values (%s, 'informativo', 'info', %s, %s, 'requests', %s, '/dashboard.html')""",
+                (str(r["user_id"]), f"Se corrigió la decisión sobre su solicitud Nº {r['folio']}",
+                 "Su solicitud ya no está rechazada: sigue su trámite.", str(solicitud_id)))
+
+    await registrar(request, "rechazo_corregido", user_id=str(usuario["id"]), cedula=usuario["cedula"],
+                    entidad="requests", entidad_id=str(solicitud_id),
+                    detalle={"motivo": datos.motivo.strip(), "rechazo_anterior": r["motivo_rechazo"],
+                             "etapa": etapa, "queda": resultado["estado"]})
+    return {**resultado, "mensaje": "Decisión corregida. " + resultado["mensaje"]}
 
 
 # ------------------------------------------- camino 2: enlace del correo

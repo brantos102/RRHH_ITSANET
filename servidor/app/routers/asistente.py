@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 from ..audit import registrar
 from ..db import booleanos, ejecutar, obtener_todos, obtener_uno
 from ..deps import exigir_rol, usuario_actual
+from ..reglas import asistente_gestion as gestion
 
 router = APIRouter(tags=["Asistente"])
 Usuario = Annotated[dict, Depends(usuario_actual)]
@@ -298,9 +299,20 @@ class Pregunta(BaseModel):
 @router.get("/asistente/inicio")
 async def inicio(usuario: Usuario) -> dict:
     nombre = (usuario.get("nombre") or "").split()
-    return _r(f"Hola. Soy el asistente de Talento Humano. Puedo decirle su saldo, cómo va su "
-              "solicitud, qué necesita para un permiso y más. ¿En qué le ayudo?"
-              if nombre else "¿En qué le ayudo?")
+    rol = usuario.get("rol")
+    if rol in gestion.TH:
+        r = _r("Hola. Soy el asistente. Le digo qué tiene pendiente en su sede y dónde está cada cosa: "
+               "aprobar, corregir un rechazo, parámetros, registrar personas, bajas, exportar… "
+               "También su propio saldo. ¿En qué le ayudo?")
+    elif rol == "jefe":
+        r = _r("Hola. Soy el asistente. Le digo qué tiene por aprobar de su equipo, cómo corregir un "
+               "rechazo y dónde ver a su gente. También su propio saldo. ¿En qué le ayudo?")
+    else:
+        return _r(f"Hola. Soy el asistente de Talento Humano. Puedo decirle su saldo, cómo va su "
+                  "solicitud, qué necesita para un permiso y más. ¿En qué le ayudo?"
+                  if nombre else "¿En qué le ayudo?")
+    r["sugerencias"] = gestion.sugerencias(rol)
+    return r
 
 
 async def _guardar(tema: str, respondida: bool, texto: str | None, region: str | None) -> None:
@@ -315,6 +327,15 @@ async def _guardar(tema: str, respondida: bool, texto: str | None, region: str |
 
 @router.post("/asistente/preguntar")
 async def preguntar(datos: Pregunta, usuario: Usuario) -> dict:
+    r = await _preguntar(datos, usuario)
+    # Quien gestiona recibe sugerencias de gestión en todas las respuestas.
+    propias = gestion.sugerencias(usuario.get("rol"))
+    if propias:
+        r["sugerencias"] = propias
+    return r
+
+
+async def _preguntar(datos: Pregunta, usuario: Usuario) -> dict:
     texto = datos.texto.strip()
     tema, puntos = _tema(texto)
     propia, puntos_propia = await _respuesta_de_rrhh(texto)
@@ -327,6 +348,14 @@ async def preguntar(datos: Pregunta, usuario: Usuario) -> dict:
         acciones = ([{"texto": propia["enlace_texto"] or "Ver más", "url": propia["enlace_url"]}]
                     if propia["enlace_url"] else [])
         return _r(propia["respuesta"], acciones=acciones)
+
+    # Quien gestiona (jefe, Talento Humano, administración) pregunta además
+    # por su trabajo: gana el tema de gestión si coincide al menos igual.
+    if usuario.get("rol") in gestion.GESTIONA:
+        tema_g, puntos_g = gestion.tema(normal(texto), usuario["rol"])
+        if tema_g and puntos_g >= puntos:
+            await _guardar(f"gestion:{tema_g}", True, None, region)
+            return await gestion.responder(tema_g, usuario)
 
     respuestas = {
         "saldo": lambda: _saldo(usuario), "solicitudes": lambda: _solicitudes(usuario),

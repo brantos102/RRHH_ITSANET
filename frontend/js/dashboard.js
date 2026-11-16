@@ -60,7 +60,7 @@ async function cargar() {
   $("pestana-anulaciones").classList.toggle("hidden", !resuelveAnulaciones);
 
   const [saldo, notificaciones, solicitudes, catalogo, reglas, calendario,
-         pendientes, anulaciones, bloques, porConfirmar] =
+         pendientes, anulaciones, bloques, porConfirmar, rechazadas] =
     await Promise.all([
       api.saldo().catch(() => null),
       api.notificaciones().catch(() => []),
@@ -75,6 +75,8 @@ async function cargar() {
       api.misBloques().then((r) => r.bloques).catch(() => null),
       // Reemplazos que Talento Humano asignó a su gente y que usted confirma.
       aprueba ? api.reemplazosPorConfirmar().catch(() => []) : Promise.resolve([]),
+      // Lo que rechazó en los últimos 30 días, por si fue un error.
+      aprueba ? api.rechazadas().catch(() => []) : Promise.resolve([]),
     ]);
 
   estado.reglas = reglas ? {
@@ -84,7 +86,7 @@ async function cargar() {
     tabla: reglas.tabla, lineamientos: reglas.lineamientos,
     avisos: reglas.avisos || [],
   } : null;
-  Object.assign(estado, { saldo, solicitudes, calendario, pendientes, anulaciones, porConfirmar });
+  Object.assign(estado, { saldo, solicitudes, calendario, pendientes, anulaciones, porConfirmar, rechazadas });
   montarNavegacion($("barra"), {
     activo: "panel",
     contadores: { pendientes: pendientes.length + porConfirmar.length, anulaciones: anulaciones.length },
@@ -621,6 +623,65 @@ function textoReemplazo(s) {
   return `${esc(s.reemplazo)}<span class="block text-xs font-normal text-slate-500">${origen}</span>`;
 }
 
+/* Rechazadas en los últimos 30 días, por si alguna fue un error: plegado,
+   para que no compita con lo que sí espera decisión. «Corregir y aprobar»
+   la devuelve a la etapa en que se rechazó y la aprueba, con un motivo que
+   queda en la bitácora. */
+function pintarRechazadas() {
+  const lista = estado.rechazadas || [];
+  if (!lista.length) return "";
+  return `
+    <details id="rechazadas" ${estado.rechazadasAbierto ? "open" : ""}
+             class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+      <summary class="cursor-pointer select-none px-5 py-3 text-sm font-medium">
+        Rechazadas en los últimos 30 días (${lista.length})
+        <span class="font-normal text-slate-500">· ¿se equivocó? Corríjalo aquí</span>
+      </summary>
+      <ul class="divide-y divide-slate-100 border-t border-slate-100">
+        ${lista.map((s) => `
+          <li class="flex flex-wrap items-center gap-3 px-5 py-3 text-sm">
+            <div class="min-w-0 flex-1">
+              <p class="font-medium">
+                <span class="mr-1.5 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600">Nº ${s.folio}</span>
+                ${esc(s.empleado)} · ${s.tipo === "vacacion" ? "Vacaciones" : esc(s.categoria || "Permiso")}
+              </p>
+              <p class="text-xs text-slate-500">${fecha(s.fecha_inicio, false)} – ${fecha(s.fecha_fin)} ·
+                ${Number(s.dias_solicitados)} día(s) · rechazada por ${esc(s.rechazado_por || "—")}
+                el ${fecha(String(s.rechazado_en).slice(0, 10))}</p>
+              ${s.motivo_rechazo ? `<p class="mt-0.5 text-xs text-rose-700">Motivo: ${esc(s.motivo_rechazo)}</p>` : ""}
+            </div>
+            <button type="button" data-corregir="${s.id}" data-folio="${s.folio}"
+                    class="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">
+              Corregir y aprobar
+            </button>
+          </li>`).join("")}
+      </ul>
+    </details>`;
+}
+
+// El panel se vuelve a pintar al refrescar: se recuerda si estaba abierto.
+$("vista-aprobaciones").addEventListener("toggle", (e) => {
+  if (e.target.id === "rechazadas") estado.rechazadasAbierto = e.target.open;
+}, true);
+
+$("vista-aprobaciones").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-corregir]");
+  if (!b) return;
+  const motivo = prompt(
+    `¿Por qué corrige el rechazo de la solicitud Nº ${b.dataset.folio}? ` +
+    "Queda en la bitácora y la solicitud se aprueba en su etapa (mínimo 10 caracteres).");
+  if (motivo === null) return;
+  if (motivo.trim().length < 10) { avisar("Escriba el motivo con al menos 10 caracteres.", "error"); return; }
+  b.disabled = true;
+  try {
+    avisar((await api.corregirRechazo(b.dataset.corregir, motivo.trim())).mensaje);
+    await cargar();
+  } catch (err) {
+    avisar(err.message, "error");
+    b.disabled = false;
+  }
+});
+
 function pintarPendientes() {
   const caja = $("vista-aprobaciones");
   const cuenta = $("cuenta-pendientes");
@@ -629,12 +690,12 @@ function pintarPendientes() {
   cuenta.classList.toggle("hidden", total === 0);
 
   if (!estado.pendientes.length) {
-    caja.innerHTML = pintarPorConfirmar() || `<p class="rounded-2xl bg-white p-8 text-center text-sm text-slate-500 ring-1 ring-slate-200">
-        No tiene solicitudes por aprobar. 🎉</p>`;
+    caja.innerHTML = (pintarPorConfirmar() || `<p class="rounded-2xl bg-white p-8 text-center text-sm text-slate-500 ring-1 ring-slate-200">
+        No tiene solicitudes por aprobar. 🎉</p>`) + pintarRechazadas();
     return;
   }
 
-  caja.innerHTML = pintarPorConfirmar() + estado.pendientes.map((s) => {
+  caja.innerHTML = pintarPorConfirmar() + pintarRechazadas() + estado.pendientes.map((s) => {
     const rango = s.fecha_inicio === s.fecha_fin
       ? fecha(s.fecha_inicio)
       : `${fecha(s.fecha_inicio, false)} – ${fecha(s.fecha_fin)}`;
@@ -724,7 +785,7 @@ document.addEventListener("click", async (e) => {
       const op = await prepararImpresion(papel.id, docs.dataset.region);
       if (op !== null) await api.abrirPapel(papel.id, op.firmante, op);
     } catch (err) {
-      avisar(err.message, true);
+      avisar(err.message, "error");
     }
     return;
   }
@@ -1050,7 +1111,7 @@ async function imprimirPapel(id, boton) {
   try {
     await api.abrirPapel(id);
   } catch (err) {
-    avisar(err.message, true);
+    avisar(err.message, "error");
   } finally {
     boton.disabled = false;
     boton.textContent = antes;
@@ -1061,7 +1122,7 @@ document.addEventListener("click", (e) => {
   const boton = e.target.closest("[data-imprimir]");
   if (boton) imprimirPapel(boton.dataset.imprimir, boton);
   const firmado = e.target.closest("[data-ver-escaneo]");
-  if (firmado) api.abrirEscaneo(firmado.dataset.verEscaneo).catch((err) => avisar(err.message, true));
+  if (firmado) api.abrirEscaneo(firmado.dataset.verEscaneo).catch((err) => avisar(err.message, "error"));
 });
 
 async function cargarPapeles() {

@@ -498,7 +498,7 @@ ${ASIS_HTML}
   $("chat-cerrar").addEventListener("click", alternarBandeja);
   $("bandeja-volver").addEventListener("click", () => mostrarLista());
   document.querySelectorAll("#chat-modos [data-modo]").forEach((b) =>
-    b.addEventListener("click", () => modoBandeja(b.dataset.modo)));
+    b.addEventListener("click", () => { estado.eligioModo = true; modoBandeja(b.dataset.modo); }));
   $("asis-form").addEventListener("submit", (e) => {
     e.preventDefault();
     const texto = $("asis-texto").value.trim();
@@ -519,6 +519,7 @@ async function contarSinLeer() {
   try {
     const hilos = await api.bandejaChat("abierta");
     const sinLeer = hilos.reduce((n, h) => n + (h.sin_leer || 0), 0);
+    estado.sinLeer = sinLeer;
     const punto = $("chat-punto");
     punto.textContent = sinLeer > 99 ? "99+" : sinLeer;
     punto.classList.toggle("hidden", sinLeer === 0);
@@ -539,11 +540,15 @@ function alternarBandeja() {
     ? setInterval(() => (estado.modo === "asistente" ? null
         : estado.conversacion ? refrescarHilo() : cargarBandeja()), CADA)
     : null;
-  if (estado.abierto) modoBandeja(estado.modo === "asistente" ? "asistente" : "bandeja");
+  // Si nadie espera respuesta, se abre el asistente (qué tiene pendiente,
+  // dónde está cada cosa); si hay consultas sin leer, la bandeja.
+  const asistente = estado.modo === "asistente" || (!estado.eligioModo && !estado.sinLeer);
+  if (estado.abierto) modoBandeja(asistente ? "asistente" : "bandeja");
 }
 
-/* Talento Humano: «Consultas» (la bandeja) o «Asistente» (lo que verá el
-   colaborador, para probar las respuestas). */
+/* Talento Humano: «Consultas» (la bandeja) o «Asistente», que responde lo de
+   gestión (qué hay pendiente, dónde se aprueba, parámetros, altas, bajas…)
+   y también lo que pregunta cualquier colaborador. */
 function modoBandeja(modo, cargarAhora = true) {
   estado.modo = modo;
   document.querySelectorAll("#chat-modos [data-modo]").forEach((b) => {

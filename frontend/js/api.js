@@ -266,6 +266,9 @@ export const api = {
 
   // Anulaciones
   anulacionesPendientes: () => peticion("/aprobaciones/anulaciones"),
+  rechazadas: () => peticion("/aprobaciones/rechazadas"),
+  corregirRechazo: (id, motivo) =>
+    peticion(`/aprobaciones/${id}/corregir-rechazo`, { method: "POST", body: JSON.stringify({ motivo }) }),
   resolverAnulacion: (id, accion, motivo) =>
     peticion(`/aprobaciones/${id}/anulacion`, { method: "POST", body: JSON.stringify({ accion, motivo }) }),
 
