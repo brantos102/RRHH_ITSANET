@@ -107,3 +107,49 @@ async def test_sin_numero_explica_como_preguntar(cliente, rrhh_auth):
     r = (await cliente.post("/asistente/preguntar", headers=rrhh_auth,
                             json={"texto": "¿En qué va la solicitud Nº …?"})).json()
     assert "número" in r["texto"]
+
+
+# ------------------------------------------------------- consulta por cédula
+async def test_talento_humano_consulta_por_cedula(cliente, auth, jefe_auth, rrhh_auth, empleado):
+    from datetime import timedelta
+    from app.db import ejecutar, obtener_uno
+    from tests.test_reglas_nuevas import lunes_sin_feriados
+    lunes = await lunes_sin_feriados(16)
+    r = await cliente.post("/solicitudes", headers=auth, json={
+        "tipo": "vacacion", "fecha_inicio": str(lunes), "fecha_fin": str(lunes + timedelta(days=7)),
+        "descripcion": "Ocho dias con la familia", "firmar": False})
+    folio = r.json()["folio"]
+
+    r = (await cliente.post("/asistente/preguntar", headers=rrhh_auth,
+                            json={"texto": f"estado de {empleado['cedula']}"})).json()
+    texto = " ".join(r["detalles"])
+    assert f"Nº {folio}" in texto and "espera la decisión del jefe" in texto
+    assert "Saldo de vacaciones" in texto and "Jefe:" in texto
+    assert any(a["url"].startswith("persona.html?id=") for a in r["acciones"])
+    assert await obtener_uno(
+        "SELECT 1 AS x FROM audit_logs WHERE accion = 'asistente_consulta_persona' AND entidad_id = %s",
+        (str(empleado["id"]),)), "la consulta queda en la bitácora"
+
+    # Sin el cero inicial también la encuentra.
+    if empleado["cedula"].startswith("0"):
+        r = (await cliente.post("/asistente/preguntar", headers=rrhh_auth,
+                                json={"texto": empleado["cedula"][1:]})).json()
+        assert "No hay nadie" not in r["texto"]
+
+    # El jefe consulta a su equipo, no a otros.
+    r = (await cliente.post("/asistente/preguntar", headers=jefe_auth,
+                            json={"texto": empleado["cedula"]})).json()
+    assert "no es de su equipo" not in r["texto"]
+    r = (await cliente.post("/asistente/preguntar", headers=jefe_auth,
+                            json={"texto": CEDULA_RRHH_R})).json()
+    assert "no es de su equipo" in r["texto"]
+
+    # El colaborador no consulta a nadie por cédula.
+    r = (await cliente.post("/asistente/preguntar", headers=auth, json={"texto": CEDULA_RRHH_R})).json()
+    assert "Saldo de vacaciones" not in " ".join(r["detalles"])
+
+    r = (await cliente.post("/asistente/preguntar", headers=rrhh_auth, json={"texto": "1799999999"})).json()
+    assert "No hay nadie registrado" in r["texto"]
+    r = (await cliente.post("/asistente/preguntar", headers=rrhh_auth,
+                            json={"texto": "Consultar por cédula"})).json()
+    assert "Escríbame la cédula" in r["texto"]

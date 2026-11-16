@@ -352,6 +352,11 @@ async def _preguntar(datos: Pregunta, usuario: Usuario) -> dict:
     # Quien gestiona (jefe, Talento Humano, administración) pregunta además
     # por su trabajo: gana el tema de gestión si coincide al menos igual.
     if usuario.get("rol") in gestion.GESTIONA:
+        # Una cédula: la persona y el estado de sus solicitudes.
+        cedula = gestion.cedula_en(texto)
+        if cedula is not None:
+            await _guardar("gestion:cedula", True, None, region)
+            return await gestion.por_cedula(cedula, usuario)
         # «¿En qué va la solicitud Nº 4?»: el seguimiento completo de esa.
         folio = gestion.folio_en(texto)
         if folio is not None:

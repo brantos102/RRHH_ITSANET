@@ -14,7 +14,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ..db import obtener_todos, obtener_uno
+import json
+
+from ..db import ejecutar, obtener_todos, obtener_uno
 
 GESTIONA = ("jefe", "rrhh", "admin")
 TH = ("rrhh", "admin")
@@ -49,6 +51,8 @@ TEMAS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "jefaturas": (("jefatura", "jefaturas", "asignar jefe", "cambiar jefe", "asignar equipo"), TH),
     "anulaciones": (("anulacion", "anulaciones", "anular"), TH),
     "emergentes": (("emergente", "emergentes", "menos de 7", "menos dias"), TH),
+    "consulta_cedula_ayuda": (("consultar por cedula", "buscar por cedula", "por cedula", "numero de cedula"),
+                              GESTIONA),
     "seguimiento_ayuda": (("en que va la solicitud", "solicitud n", "buscar una solicitud",
                            "seguimiento de una solicitud", "estado de una solicitud"), GESTIONA),
     "esperan_jefe": (("esperan al jefe", "esperando al jefe", "espera a su jefe", "demoradas", "atrasadas",
@@ -59,6 +63,7 @@ TEMAS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
 }
 
 SUGERENCIAS_TH = ["¿Qué tengo pendiente?", "¿Qué solicitudes esperan al jefe?", "¿En qué va la solicitud Nº …?",
+                  "Consultar por cédula",
                   "Rechacé una solicitud por error", "¿Dónde cambio un parámetro?", "Registrar personas nuevas",
                   "Dar de baja a alguien", "Exportar datos"]
 SUGERENCIAS_JEFE = ["¿Qué tengo por aprobar?", "Rechacé una solicitud por error", "Calendario del equipo",
@@ -448,6 +453,89 @@ def _seguimiento_ayuda(u: dict) -> dict:
     ])
 
 
+# ------------------------------------------------------- consulta por cédula
+CEDULA = re.compile(r"(?<!\d)(\d{9,10})(?!\d)")
+
+
+def cedula_en(texto: str) -> str | None:
+    """Una cédula escrita en la pregunta. Si Excel o el teclado se comieron el
+    cero inicial (9 dígitos), se repone."""
+    m = CEDULA.search(texto or "")
+    return m.group(1).zfill(10) if m else None
+
+
+def _rango(f) -> str:
+    return (f"{f['fecha_inicio']:%d/%m/%Y}" if f["fecha_inicio"] == f["fecha_fin"]
+            else f"{f['fecha_inicio']:%d/%m} al {f['fecha_fin']:%d/%m/%Y}")
+
+
+async def por_cedula(cedula: str, u: dict) -> dict:
+    """La persona y sus solicitudes, para Talento Humano (todas) y para un
+    jefe (solo su equipo). Cada consulta queda en la bitácora: son datos
+    personales (LOPDP)."""
+    rol = u["rol"]
+    p = await obtener_uno(
+        """SELECT u.id, u.nombre, u.activo, u.cargo, u.departamento, u.ciudad, u.email, u.correo_pendiente,
+                  u.dias_vacaciones, u.fecha_salida, u.jefe_id, u.rol,
+                  j.nombre AS jefe, j.email AS jefe_email, j.correo_pendiente AS jefe_cp,
+                  (SELECT MAX(s.ultimo_uso) FROM sesiones s WHERE s.user_id = u.id) AS ultimo,
+                  (SELECT COUNT(*) FROM users e WHERE e.jefe_id = u.id AND e.activo) AS a_cargo,
+                  (SELECT COUNT(*) FROM requests r WHERE r.jefe_id = u.id AND r.estado = 'pendiente_jefe')
+                      AS por_decidir
+             FROM users u LEFT JOIN users j ON j.id = u.jefe_id WHERE u.cedula = %s""", (cedula,))
+    if p is None:
+        return _r(rol, f"No hay nadie registrado con la cédula {cedula}.", [
+            "Si debería estar, regístrela en Administración › Usuarios o en «Registrar personas nuevas»."],
+            [{"texto": "Registrar personas nuevas", "url": "administracion.html#masivo"}] if rol in TH else [])
+    if rol not in TH and str(p["jefe_id"]) != str(u["id"]):
+        return _r(rol, "Esa persona no es de su equipo.")
+    await ejecutar(
+        "INSERT INTO audit_logs (user_id, cedula, accion, entidad, entidad_id, detalle) "
+        "VALUES (%s, %s, 'asistente_consulta_persona', 'users', %s, %s)",
+        (str(u["id"]), u.get("cedula"), str(p["id"]), json.dumps({"cedula": cedula})))
+
+    tiene_correo = bool(p["email"]) and not p["correo_pendiente"]
+    texto = (f"{p['nombre']} · {p['cargo'] or 'sin cargo'} · {p['departamento'] or 'sin área'}"
+             + ("" if p["activo"] else f" · RETIRADO/A desde {p['fecha_salida']:%d/%m/%Y}"
+                if p["fecha_salida"] else " · inactivo/a") + ".")
+    d = [("Correo: " + p["email"] if tiene_correo else
+          "Sin correo registrado: no puede entrar ni recibe avisos. Regístrelo en Administración › Usuarios."),
+         f"Saldo de vacaciones: {float(p['dias_vacaciones'] or 0):g} día(s).",
+         ("Jefe: " + p["jefe"] + ("" if p["jefe_email"] and not p["jefe_cp"] else " (el jefe NO tiene correo)")
+          if p["jefe"] else "Sin jefe asignado: sus solicitudes las decide Talento Humano."),
+         ("Último ingreso: " + _cuando(p["ultimo"]) if p["ultimo"] else "Nunca ha entrado al sistema.")]
+    if _n(p["a_cargo"]):
+        d.append(f"Es jefe de {_n(p['a_cargo'])} persona(s); tiene {_n(p['por_decidir'])} solicitud(es) "
+                 "esperando su decisión.")
+    sols = await obtener_todos(
+        """SELECT r.folio, r.tipo, r.estado, r.fecha_inicio, r.fecha_fin, r.dias_solicitados, r.motivo_rechazo,
+                  pt.nombre AS categoria
+             FROM requests r LEFT JOIN permission_types pt ON pt.id = r.permission_type_id
+            WHERE r.user_id = %s ORDER BY r.created_at DESC LIMIT 8""", (str(p["id"]),))
+    if sols:
+        d.append("Sus solicitudes, de la más reciente:")
+        for f in sols:
+            que = "Vacaciones" if f["tipo"] == "vacacion" else (f["categoria"] or "Permiso")
+            linea = (f"Nº {f['folio']} · {que} {_rango(f)} ({float(f['dias_solicitados']):g} d): "
+                     f"{ESTADO.get(f['estado'], f['estado'])}")
+            if f["estado"] == "rechazado" and f["motivo_rechazo"]:
+                linea += f" — {f['motivo_rechazo']}"
+            d.append(linea)
+        d.append("Pregunte «Nº …» para el detalle de una (quién la tiene, si el jefe abrió el aviso).")
+    else:
+        d.append("No tiene solicitudes registradas.")
+    acciones = [{"texto": "Ver la ficha", "url": f"persona.html?id={p['id']}"}] if rol in TH else []
+    return _r(rol, texto, d, acciones)
+
+
+def _consulta_cedula_ayuda(u: dict) -> dict:
+    return _r(u["rol"], "Escríbame la cédula, por ejemplo: «0912345678».", [
+        "Le digo si está activa, su cargo y área, si tiene correo registrado, su jefe (y si el jefe tiene "
+        "correo), su saldo, su último ingreso y el estado de sus últimas solicitudes de vacaciones y permisos.",
+        "Cada consulta queda en la bitácora: son datos personales.",
+    ])
+
+
 RESPUESTAS = {
     "pendientes": _pendientes, "corregir_rechazo": _corregir_rechazo, "equipo": _equipo,
     "parametros": _parametros, "tipos_permiso": _tipos_permiso, "registrar_persona": _registrar_persona,
@@ -455,6 +543,7 @@ RESPUESTAS = {
     "exportar": _exportar, "tableros": _tableros, "jefaturas": _jefaturas, "anulaciones": _anulaciones,
     "emergentes": _emergentes, "asistente_admin": _asistente_admin, "esperan_jefe": _esperan_jefe,
     "seguimiento_ayuda": _seguimiento_ayuda,
+    "consulta_cedula_ayuda": _consulta_cedula_ayuda,
 }
 
 
