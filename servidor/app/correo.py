@@ -83,20 +83,22 @@ def por_que_no_sale(error: Exception, settings=None) -> list[str]:
         ]
 
     if "timed out" in texto or "timeout" in texto:
+        todos = puertos(settings)
         return [
-            f"El servidor {host}:{puerto} no respondió a tiempo.",
+            f"El servidor {host} no respondió a tiempo en "
+            + ("el puerto " + str(todos[0]) if len(todos) == 1
+               else "los puertos " + " ni ".join(map(str, todos))) + ".",
             "",
             "Casi siempre es el cortafuegos o la red, que bloquea la salida por ese",
             "puerto. Compruébelo en la terminal del servidor:",
-            f"    timeout 5 bash -c '</dev/tcp/{host}/{puerto}' && echo ABIERTO || echo CERRADO",
+            *[f"    timeout 5 bash -c '</dev/tcp/{host}/{p}' && echo ABIERTO || echo CERRADO" for p in todos],
             "",
-            "Si sale CERRADO, pídale a Sistemas que abra la salida, o pruebe otro",
-            "puerto del proveedor (bash despliegue/configurar_correo.sh):",
-            f"    {'465' if puerto == 587 else '587'} (o 2525, si su proveedor lo ofrece)",
+            "Si sale CERRADO, pídale a Sistemas que abra la salida hacia ese servidor y",
+            "puerto, o configure otro puerto del proveedor con",
+            "    bash despliegue/configurar_correo.sh",
             "",
-            "Mientras tanto, para no quedarse sin probar el sistema:",
+            "Solo para pruebas (nunca con usuarios reales, el código queda en el registro):",
             "    EMAIL_BACKEND=console   en servidor/.env",
-            "El código aparece en la terminal del backend en vez de por correo.",
         ]
 
     if "ssl" in texto or "wrong version number" in texto or "record layer" in texto:
@@ -106,6 +108,7 @@ def por_que_no_sale(error: Exception, settings=None) -> list[str]:
             "",
             "Hay dos formas y no se mezclan:",
             "    SMTP_PORT=587  →  SMTP_STARTTLS=true    (Google Workspace, Microsoft 365)",
+            "    SMTP_PORT=587 o 2525  →  SMTP_STARTTLS=auto  (proveedores «sin SSL», como turboSMTP)",
             "    SMTP_PORT=465  →  SMTP_STARTTLS=false   (la conexión ya nace cifrada)",
             "",
             f"Ahora tiene el puerto {puerto} con STARTTLS={str(settings.smtp_starttls).lower()}.",
@@ -234,24 +237,59 @@ def es_transitorio(error: Exception) -> bool:
     return isinstance(error, OSError) and not isinstance(error, aiosmtplib.SMTPException)
 
 
+def es_de_conexion(error: Exception) -> bool:
+    """No se llegó a hablar con el servidor: puerto cerrado o bloqueado."""
+    return isinstance(error, (aiosmtplib.SMTPConnectError, aiosmtplib.SMTPConnectTimeoutError,
+                              asyncio.TimeoutError, TimeoutError, ConnectionError)) or (
+        isinstance(error, OSError) and not isinstance(error, aiosmtplib.SMTPException))
+
+
+def puertos(settings) -> list[int]:
+    """El puerto principal y, si hay, el alterno (por ejemplo 587 y 2525)."""
+    alterno = getattr(settings, "smtp_port_alterno", None)
+    return [settings.smtp_port] + ([int(alterno)] if alterno and int(alterno) != settings.smtp_port else [])
+
+
 async def _enviar_con_reintentos(mensaje: EmailMessage, destinatarios: list[str], settings,
                                  *, intentos: int) -> None:
+    lista = puertos(settings)
+    indice = 0
     for intento in range(1, intentos + 1):
+        puerto = lista[indice]
         try:
-            await aiosmtplib.send(mensaje, recipients=destinatarios, **parametros_smtp(settings))
-            if intento > 1:
-                log.info("Correo enviado en el intento %s de %s", intento, intentos)
+            await aiosmtplib.send(mensaje, recipients=destinatarios, **parametros_smtp(settings, puerto))
+            if intento > 1 or puerto != settings.smtp_port:
+                log.info("Correo enviado en el intento %s de %s (puerto %s)", intento, intentos, puerto)
             return
         except Exception as exc:  # noqa: BLE001
             if intento >= intentos or not es_transitorio(exc):
                 raise
             espera = ESPERAS[min(intento - 1, len(ESPERAS) - 1)]
-            log.warning("El servidor de correo falló (%s: %s). Reintento %s de %s en %s s",
-                        type(exc).__name__, exc, intento + 1, intentos, espera)
+            # Si el puerto no conecta, el siguiente intento va por el otro,
+            # sin esperar: no es que el servidor esté ocupado, es que por ahí
+            # no se llega.
+            if len(lista) > 1 and es_de_conexion(exc):
+                indice = (indice + 1) % len(lista)
+                espera = 0 if indice else espera
+            log.warning("El servidor de correo falló en el puerto %s (%s: %s). Reintento %s de %s "
+                        "por el puerto %s en %s s", puerto, type(exc).__name__, exc, intento + 1,
+                        intentos, lista[indice], espera)
             await asyncio.sleep(espera)
 
 
-def parametros_smtp(settings) -> dict:
+def modo_starttls(valor) -> bool | None:
+    """SMTP_STARTTLS: true (exigirlo), false (nunca) o auto (si el servidor lo
+    ofrece). auto es lo que conviene con proveedores que publican sus puertos
+    587/2525 «sin SSL»: cifra igual cuando pueden y no falla cuando no."""
+    t = str(valor).strip().lower()
+    if t in ("true", "1", "si", "sí", "yes"):
+        return True
+    if t in ("false", "0", "no"):
+        return False
+    return None
+
+
+def parametros_smtp(settings, puerto: int | None = None) -> dict:
     """Cómo se conecta al servidor de correo, según el puerto.
 
     Hay dos formas de cifrar SMTP y confundirlas deja el envío colgado hasta
@@ -265,18 +303,19 @@ def parametros_smtp(settings) -> dict:
     El puerto manda sobre lo que diga SMTP_STARTTLS, porque el puerto es el
     dato que no se puede equivocar: 465 solo existe para TLS implícito.
     """
+    puerto = puerto or settings.smtp_port
     comun = {
         "hostname": settings.smtp_host,
-        "port": settings.smtp_port,
+        "port": puerto,
         "username": settings.smtp_user or None,
         "password": settings.smtp_password or None,
         # Por intento. El código de acceso se reintenta con 12 s para que la
         # pantalla no espere más de lo que Apache tolera (60 s en total).
         "timeout": getattr(settings, "smtp_timeout", 12),
     }
-    if settings.smtp_port == 465:
+    if puerto == 465:
         return {**comun, "use_tls": True, "start_tls": False}
-    return {**comun, "start_tls": settings.smtp_starttls}
+    return {**comun, "start_tls": modo_starttls(settings.smtp_starttls)}
 
 
 async def enviar_otp(destinatario: str, nombre: str, codigo: str) -> None:

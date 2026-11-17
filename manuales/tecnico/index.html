@@ -210,6 +210,8 @@ bash despliegue/diagnostico.sh</code></pre>
       <tr><td><code>JWT_SECRET</code></td><td>Firma de las sesiones. Cambiarla cierra todas las sesiones.</td></tr>
       <tr><td><code>ADJUNTOS_DIR</code></td><td>Carpeta de adjuntos, fotos y escaneos.</td></tr>
       <tr><td><code>SMTP_HOST</code>, <code>SMTP_PORT</code>, <code>SMTP_USER</code>, <code>SMTP_PASSWORD</code>, <code>SMTP_REMITENTE</code></td><td>Correo saliente. Se configuran con <code>bash despliegue/configurar_correo.sh</code>.</td></tr>
+      <tr><td><code>SMTP_PORT_ALTERNO</code></td><td>Puerto de respaldo (p. ej. 2525): si el principal no conecta, el envío lo intenta por este.</td></tr>
+      <tr><td><code>SMTP_STARTTLS</code></td><td><code>auto</code> (cifra si el proveedor lo ofrece; lo normal en 587 y 2525), <code>true</code> (lo exige) o <code>false</code> (465, que ya es cifrado de entrada).</td></tr>
       <tr><td><code>EMAIL_BACKEND</code></td><td><code>smtp</code> en producción; <code>console</code> solo para pruebas locales.</td></tr>
       <tr><td><code>APP_URL</code>, <code>CORS_ORIGINS</code></td><td>Dirección pública (<code>https://192.168.4.94:8444</code>) y orígenes permitidos.</td></tr>
       <tr><td><code>ENTORNO</code></td><td><code>produccion</code>: exige la lista explícita de <code>CORS_ORIGINS</code>.</td></tr>

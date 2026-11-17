@@ -50,13 +50,16 @@ def revisar(settings) -> list[str]:
         avisos.append(
             "SMTP_PASSWORD tiene espacios. Google muestra la contraseña de aplicación "
             "en cuatro grupos («abcd efgh ijkl mnop») pero se escribe SIN espacios.")
-    if settings.smtp_port == 465 and settings.smtp_starttls:
+    from app.correo import modo_starttls
+    modo = modo_starttls(settings.smtp_starttls)
+    if settings.smtp_port == 465 and modo is True:
         avisos.append(
             "SMTP_PORT=465 con SMTP_STARTTLS=true. El 465 nace cifrado y no lleva "
             "STARTTLS; se usará TLS implícito e ignorará esa línea, pero conviene "
             "corregirla para que el archivo diga la verdad.")
-    if settings.smtp_port == 587 and not settings.smtp_starttls:
-        avisos.append("SMTP_PORT=587 con SMTP_STARTTLS=false: el 587 exige STARTTLS.")
+    if settings.smtp_port == 587 and modo is False:
+        avisos.append("SMTP_PORT=587 con SMTP_STARTTLS=false: la clave viaja sin cifrar. Use "
+                      "SMTP_STARTTLS=auto, que cifra si el servidor lo ofrece.")
     # Un servidor de correo en esta misma máquina es casi siempre un
     # «cazador» de correos para desarrollo (MailHog, Mailpit, MailDev): no
     # entrega nada, los retiene en una bandeja local. Sirve para que usted

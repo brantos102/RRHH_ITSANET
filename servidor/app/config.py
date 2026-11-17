@@ -48,7 +48,11 @@ class Settings(BaseSettings):
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_remitente: str = "Talento Humano <no-responder@localhost>"
-    smtp_starttls: bool = True
+    # auto: cifra con STARTTLS si el servidor lo ofrece (proveedores «sin SSL»
+    # en 587/2525 como turboSMTP); true: lo exige; false: nunca.
+    smtp_starttls: str = "auto"
+    # Puerto de respaldo: si el principal no conecta (cortafuegos), se prueba éste.
+    smtp_port_alterno: int | None = None
     # Segundos por intento de conexión al servidor de correo.
     smtp_timeout: int = 12
     email_backend: str = "smtp"  # smtp | console

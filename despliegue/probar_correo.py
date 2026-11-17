@@ -32,8 +32,10 @@ from app.config import get_settings  # noqa: E402
 
 async def principal(destino: str) -> int:
     ajustes = get_settings()
-    print(f"Servidor: {ajustes.smtp_host}:{ajustes.smtp_port} "
-          f"(STARTTLS {'sí' if ajustes.smtp_starttls else 'no'}) · usuario: {ajustes.smtp_user or '—'}")
+    modo = correo.modo_starttls(ajustes.smtp_starttls)
+    print(f"Servidor: {ajustes.smtp_host}, puerto(s) {' / '.join(map(str, correo.puertos(ajustes)))} "
+          f"(STARTTLS {'sí' if modo else 'no' if modo is False else 'si el servidor lo ofrece'}) · "
+          f"usuario: {ajustes.smtp_user or '—'}")
     print(f"Remitente: {ajustes.smtp_remitente}")
     print(f"Destino:   {destino}\n")
     if ajustes.email_backend == "console":
