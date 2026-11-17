@@ -8,7 +8,7 @@ from datetime import date, time, timedelta
 from typing import Annotated, Literal
 
 from fastapi import (APIRouter, BackgroundTasks, Depends, File, HTTPException, Request,
-                     UploadFile, status)
+                     Response, UploadFile, status)
 from pydantic import BaseModel, Field, field_validator
 
 from .. import notificaciones
@@ -18,7 +18,7 @@ from ..deps import exigir_rol, usuario_actual
 from ..errores import traducir
 from ..reglas import personal
 from ..reglas import solicitudes as reglas_solicitudes
-from ..storage import nombre_seguro, subir_adjunto
+from ..storage import leer_adjunto, nombre_seguro, subir_adjunto
 
 log = logging.getLogger("rrhh.solicitudes")
 router = APIRouter(tags=["Solicitudes"])
@@ -479,6 +479,7 @@ async def mis_solicitudes(usuario: Annotated[dict, Depends(usuario_actual)]) -> 
                j.nombre as jefe, rp.nombre as reemplazo,
                r.jefe_aprobado_en, r.rrhh_aprobado_en,
                (select count(*) from request_attachments a where a.request_id = r.id) as adjuntos,
+               r.respaldo_pedido_en, r.respaldo_pedido_mensaje, r.respaldo_entregado_en,
                -- El registro de unas vacaciones termina con el papel firmado
                -- y escaneado: sin_firmar, firmado (falta el escaneo) o concluido.
                (select case when i.escaneo_ruta is not null then 'concluido'
@@ -550,6 +551,111 @@ async def cancelar(
                     entidad="requests", entidad_id=str(solicitud_id),
                     detalle={"folio": actual["folio"], "motivo": datos.motivo})
     return {"id": str(fila["id"]), "estado": fila["estado"], "mensaje": mensaje}
+
+
+# ------------------------------------------------- respaldo después de enviar
+class EntregaRespaldo(BaseModel):
+    adjuntos: list[AdjuntoEntrada] = Field(..., min_length=1, max_length=5)
+
+
+@router.post("/solicitudes/{solicitud_id}/respaldo")
+async def entregar_respaldo(solicitud_id: uuid.UUID, datos: EntregaRespaldo, request: Request,
+                            tareas: BackgroundTasks,
+                            usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
+    """La persona adjunta el respaldo a una solicitud ya enviada: el que pidió
+    Talento Humano, o uno que no tenía al pedirla (el certificado de la cita
+    se emite después de la cita). Los archivos se suben antes con
+    /solicitudes/adjuntos y deben ser suyos y de esta solicitud."""
+    sol = await obtener_uno(
+        """SELECT r.id, r.folio, r.estado, r.user_id, r.region, r.respaldo_pedido_por,
+                  r.respaldo_pedido_en, u.nombre AS empleado
+             FROM requests r JOIN users u ON u.id = r.user_id WHERE r.id = %s""", (str(solicitud_id),))
+    if sol is None or str(sol["user_id"]) != str(usuario["id"]):
+        raise HTTPException(status_code=404, detail={"mensaje": "Solicitud no encontrada."})
+    if sol["estado"] in ("rechazado", "cancelado"):
+        raise HTTPException(status_code=409, detail={
+            "mensaje": "La solicitud está rechazada o cancelada: ya no recibe respaldos."})
+    prefijo = f"{usuario['id']}/{solicitud_id}/"
+    for a in datos.adjuntos:
+        if not a.storage_path.startswith(prefijo) or ".." in a.storage_path:
+            raise HTTPException(status_code=422, detail={"mensaje": "El archivo no corresponde a esta solicitud."})
+    try:
+        for a in datos.adjuntos:
+            await ejecutar(
+                """INSERT INTO request_attachments
+                     (request_id, storage_path, nombre_archivo, mime_type, tamano_bytes, hash_sha256, subido_por)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                (str(solicitud_id), a.storage_path, a.nombre_archivo, a.mime_type, a.tamano_bytes,
+                 a.hash_sha256, str(usuario["id"])))
+        await ejecutar("UPDATE requests SET respaldo_entregado_en = NOW(6) WHERE id = %s", (str(solicitud_id),))
+    except Exception as exc:  # noqa: BLE001
+        raise traducir(exc) from exc
+
+    # Avisa a quien lo pidió; si nadie lo pidió, a Talento Humano de la sede.
+    if sol["respaldo_pedido_por"]:
+        destinos = [str(sol["respaldo_pedido_por"])]
+    else:
+        destinos = [str(p["id"]) for p in await personal.rrhh_de_region(sol["region"])]
+    for d in destinos:
+        await ejecutar(
+            """INSERT INTO notifications (user_id, tipo, severidad, titulo, mensaje, entidad, entidad_id,
+                                          accion_url)
+               VALUES (%s, 'informativo', 'info', %s, %s, 'requests', %s, '/dashboard.html#aprobaciones')""",
+            (d, f"Respaldo entregado: solicitud Nº {sol['folio']}",
+             f"{sol['empleado']} adjuntó {len(datos.adjuntos)} archivo(s).", str(solicitud_id)))
+    await registrar(request, "respaldo_entregado", user_id=str(usuario["id"]), cedula=usuario["cedula"],
+                    entidad="requests", entidad_id=str(solicitud_id),
+                    detalle={"folio": sol["folio"], "archivos": [a.nombre_archivo for a in datos.adjuntos]})
+    return {"mensaje": "Respaldo entregado. Talento Humano ya puede verlo."}
+
+
+# --------------------------------------------------------- ver los respaldos
+async def _solicitud_visible(solicitud_id: uuid.UUID, usuario: dict) -> dict:
+    """Los respaldos (certificados médicos, actas…) son datos sensibles: los
+    ven la persona, su jefe en esa solicitud y Talento Humano. Nadie más."""
+    sol = await obtener_uno("SELECT id, folio, user_id, jefe_id FROM requests WHERE id = %s",
+                            (str(solicitud_id),))
+    if sol is None or not (
+            usuario["rol"] in ("rrhh", "admin") or str(sol["user_id"]) == str(usuario["id"])
+            or (sol["jefe_id"] is not None and str(sol["jefe_id"]) == str(usuario["id"]))):
+        raise HTTPException(status_code=404, detail={"mensaje": "Solicitud no encontrada."})
+    return sol
+
+
+@router.get("/solicitudes/{solicitud_id}/adjuntos")
+async def ver_adjuntos(solicitud_id: uuid.UUID,
+                       usuario: Annotated[dict, Depends(usuario_actual)]) -> list[dict]:
+    await _solicitud_visible(solicitud_id, usuario)
+    filas = await obtener_todos(
+        """SELECT a.id, a.nombre_archivo, a.mime_type, a.tamano_bytes, a.created_at,
+                  u.nombre AS subido_por
+             FROM request_attachments a LEFT JOIN users u ON u.id = a.subido_por
+            WHERE a.request_id = %s ORDER BY a.created_at""", (str(solicitud_id),))
+    return [{**f, "id": str(f["id"])} for f in filas]
+
+
+@router.get("/solicitudes/{solicitud_id}/adjuntos/{adjunto_id}", response_class=Response)
+async def abrir_adjunto(solicitud_id: uuid.UUID, adjunto_id: uuid.UUID, request: Request,
+                        usuario: Annotated[dict, Depends(usuario_actual)]) -> Response:
+    sol = await _solicitud_visible(solicitud_id, usuario)
+    fila = await obtener_uno(
+        """SELECT storage_path, nombre_archivo, mime_type, hash_sha256 FROM request_attachments
+            WHERE id = %s AND request_id = %s""", (str(adjunto_id), str(solicitud_id)))
+    if fila is None:
+        raise HTTPException(status_code=404, detail={"mensaje": "Adjunto no encontrado."})
+    contenido = await leer_adjunto(fila["storage_path"])
+    if contenido is None:
+        raise HTTPException(status_code=404, detail={
+            "mensaje": "El archivo no está en el servidor. Revise el respaldo de adjuntos."})
+    integro = not fila["hash_sha256"] or hashlib.sha256(contenido).hexdigest() == fila["hash_sha256"]
+    await registrar(request, "adjunto_visto", user_id=str(usuario["id"]), cedula=usuario["cedula"],
+                    entidad="request_attachments", entidad_id=str(adjunto_id),
+                    detalle={"folio": sol["folio"], "integro": integro})
+    nombre = nombre_seguro(fila["nombre_archivo"] or "respaldo")
+    return Response(contenido, media_type=fila["mime_type"] or "application/octet-stream",
+                    headers={"Content-Disposition": f'inline; filename="{nombre}"',
+                             "Cache-Control": "private, no-store",
+                             "X-Integridad": "ok" if integro else "ALTERADO"})
 
 
 # ---------------------------------------------------------------- adjuntos

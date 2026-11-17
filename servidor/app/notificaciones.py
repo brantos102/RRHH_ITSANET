@@ -583,3 +583,30 @@ async def avisar_sesion_en_otro_dispositivo(destino: str, nombre: str, nuevo: st
     texto = (f"{titulo}\n\n" + "\n".join(f"{e}: {v}" for e, v in filas)
              + "\n\nSi no fue usted, avise de inmediato a Talento Humano.\n")
     await correo.enviar(destino, titulo, texto, _marco(titulo, cuerpo))
+
+
+# ----------------------------------------------------------- respaldo pedido
+async def avisar_respaldo_pedido(destino: str, nombre: str, solicitud: dict, mensaje: str,
+                                 quien: str) -> None:
+    """Al colaborador: Talento Humano necesita el respaldo de su permiso.
+    Se adjunta desde «Mis solicitudes», sin volver a pedir el permiso."""
+    from html import escape
+    url = f"{get_settings().app_url.rstrip('/')}/dashboard.html"
+    titulo = f"Talento Humano le pide el respaldo de la solicitud Nº {solicitud.get('folio')}"
+    filas = [("Nº de solicitud", str(solicitud.get("folio") or "—")),
+             ("Tipo", solicitud.get("categoria") or "Permiso"),
+             ("Fechas", _rango(solicitud["fecha_inicio"], solicitud["fecha_fin"])),
+             ("Lo pide", quien)]
+    cuerpo = (
+        f'<p style="margin:0 0 12px;font-size:14px;color:#475569">Hola {escape(nombre)}:</p>'
+        '<p style="margin:0 0 16px;padding:10px 12px;border-radius:10px;background:#fff7ed;'
+        f'color:#9a3412;font-size:14px">{escape(mensaje)}</p>'
+        + _tabla([(e, escape(v)) for e, v in filas])
+        + '<p style="margin:16px 0 0;font-size:14px;color:#475569">Entre al sistema, abra '
+          "«Mis solicitudes» y pulse <strong>«Adjuntar respaldo»</strong> en esta solicitud. "
+          "Se aceptan fotos o PDF de hasta 10 MB.</p>"
+    )
+    texto = (f"{titulo}\n\nHola {nombre}:\n{mensaje}\n\n"
+             + "\n".join(f"{e}: {v}" for e, v in filas)
+             + f"\n\nAdjúntelo desde «Mis solicitudes» en el sistema:\n{url}\n")
+    await correo.enviar(destino, titulo, texto, _marco(titulo, cuerpo, ("Adjuntar respaldo", url)))

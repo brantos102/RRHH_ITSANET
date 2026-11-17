@@ -270,6 +270,10 @@ export const api = {
   seguimiento: (sede = "todas") => peticion(`/aprobaciones/seguimiento?sede=${encodeURIComponent(sede)}`),
   aprobadores: () => peticion("/aprobaciones/aprobadores"),
   recordar: (id) => peticion(`/aprobaciones/${id}/recordar`, { method: "POST" }),
+  pedirRespaldo: (id, mensaje) =>
+    peticion(`/aprobaciones/${id}/pedir-respaldo`, { method: "POST", body: JSON.stringify({ mensaje }) }),
+  entregarRespaldo: (id, adjuntos) =>
+    peticion(`/solicitudes/${id}/respaldo`, { method: "POST", body: JSON.stringify({ adjuntos }) }),
   reasignar: (id, aprobador_id, motivo) =>
     peticion(`/aprobaciones/${id}/reasignar`, { method: "POST", body: JSON.stringify({ aprobador_id, motivo }) }),
   recordarAlJefe: (id) => peticion(`/aprobaciones/${id}/recordar-al-jefe`, { method: "POST" }),
@@ -557,6 +561,22 @@ export const api = {
     fd.append("archivo", archivo);
     if (motivo) fd.append("motivo_reemplazo", motivo);
     return peticion(`/admin/papeles/${id}/escaneo`, { method: "POST", body: fd });
+  },
+  /* Los respaldos de una solicitud: certificados, turnos, actas. */
+  adjuntosDe: (id) => peticion(`/solicitudes/${id}/adjuntos`),
+  async abrirAdjunto(solicitudId, adjuntoId) {
+    const r = await fetch(`${API}/solicitudes/${solicitudId}/adjuntos/${adjuntoId}`, {
+      headers: { Authorization: `Bearer ${sesion.token}` },
+    });
+    if (!r.ok) throw new ErrorApi("No se pudo abrir el respaldo.", r.status);
+    const tipo = r.headers.get("content-type") || "application/pdf";
+    const url = URL.createObjectURL(new Blob([await r.arrayBuffer()], { type: tipo }));
+    const ventana = window.open(url, "_blank");
+    if (!ventana) {
+      URL.revokeObjectURL(url);
+      throw new ErrorApi("El navegador bloqueó la ventana. Permita las ventanas emergentes de este sitio.", 0);
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
   },
   /* El escaneo firmado se abre igual que el PDF: con la sesión en la cabecera. */
   async abrirEscaneo(id) {

@@ -168,9 +168,9 @@ async def preparar_solicitud(s: dict[str, Any]) -> dict[str, Any]:
         if pt is None:
             raise ReglaDeNegocio("Tipo de permiso inválido o inactivo")
         s["es_adelanto"] = bool(pt["descuenta_vacaciones"]) and s["dias_solicitados"] > saldo
-        if pt["requiere_justificacion"] and len((s.get("justificacion") or "").strip(" ")) < 10:
-            raise ReglaDeNegocio(
-                f'El permiso "{pt["nombre"]}" requiere justificación de al menos 10 caracteres')
+        # La justificación del permiso es OPCIONAL (el motivo va en la
+        # descripción, que sí es obligatoria). Si Talento Humano necesita más,
+        # pide el respaldo desde el sistema.
         if pt["max_dias"] is not None and s["dias_solicitados"] > pt["max_dias"]:
             raise ReglaDeNegocio(
                 f'El permiso "{pt["nombre"]}" admite un máximo de {_texto(pt["max_dias"])} día(s); '
@@ -330,7 +330,8 @@ async def previsualizar_solicitud(user_id, tipo: str, inicio: dt.date, fin: dt.d
             avisos.append("Debe seleccionar un tipo de permiso válido.")
         else:
             if pt["requiere_adjunto"]:
-                avisos.append(f'El permiso "{pt["nombre"]}" exige adjuntar respaldo.')
+                avisos.append("Si tiene el respaldo, adjúntelo; si no, puede entregarlo después: "
+                              "Talento Humano se lo pedirá si lo necesita.")
             if pt["requiere_firma"]:
                 avisos.append("Debe firmar electrónicamente la solicitud.")
             if pt["max_dias"] is not None and dias > pt["max_dias"]:
@@ -340,14 +341,18 @@ async def previsualizar_solicitud(user_id, tipo: str, inicio: dt.date, fin: dt.d
                 avisos.append("Este permiso se descuenta de su saldo de vacaciones.")
 
     adelanto = tipo == "vacacion" and saldo is not None and dias > saldo
+    # Un permiso NO toca las vacaciones, salvo los tipos «con cargo a
+    # vacaciones». Mostrar «días a descontar» en los demás confunde.
+    descuenta = tipo == "vacacion" or bool(pt and pt["descuenta_vacaciones"])
     return {
         "valido": ok,
         "dias": dias,
+        "descuenta_vacaciones": descuenta,
         "saldo_actual": saldo,
-        "saldo_despues": (saldo - dias if saldo is not None else None) if tipo == "vacacion" else saldo,
+        "saldo_despues": (saldo - dias if saldo is not None else None) if descuenta else saldo,
         "fines_semana_incluidos": fds,
         "fines_semana_pendientes": fds_pend,
-        "requiere_justificacion": adelanto or bool(pt and pt["requiere_justificacion"]),
+        "requiere_justificacion": adelanto,
         "requiere_adjunto": bool(pt and pt["requiere_adjunto"]),
         "requiere_firma": bool(pt["requiere_firma"]) if pt else tipo == "permiso",
         "rango_sugerido": {"inicio": sug[0], "fin": sug[1]},

@@ -390,6 +390,8 @@ function pintarSolicitudes() {
         s.fecha_inicio === s.fecha_fin ? fecha(s.fecha_inicio) : `${fecha(s.fecha_inicio, false)} – ${fecha(s.fecha_fin)}`;
       const horas = s.hora_inicio ? ` · ${s.hora_inicio.slice(0, 5)} a ${s.hora_fin?.slice(0, 5)}` : "";
       const cancelable = ["pendiente_jefe", "pendiente_rrhh", "aprobado"].includes(s.estado);
+      const vigente = ["pendiente_jefe", "pendiente_rrhh", "pendiente_anulacion", "aprobado"].includes(s.estado);
+      const respaldoPedido = s.respaldo_pedido_en && !s.respaldo_entregado_en && vigente;
 
       return `
       <article class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
@@ -407,11 +409,23 @@ function pintarSolicitudes() {
         <p class="mt-2 text-sm text-slate-600">${esc(s.descripcion)}</p>
         ${s.es_adelanto ? `<p class="mt-1.5 text-xs text-amber-700">Incluye días adelantados</p>` : ""}
         ${s.motivo_rechazo ? `<p class="mt-2 rounded-lg bg-rose-50 p-2.5 text-sm text-rose-800">Motivo: ${esc(s.motivo_rechazo)}</p>` : ""}
+        ${respaldoPedido
+          ? `<div class="mt-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
+               <p><strong>Talento Humano le pide el respaldo:</strong> ${esc(s.respaldo_pedido_mensaje || "")}</p>
+               <button type="button" data-adjuntar-respaldo="${s.id}"
+                       class="mt-2 rounded-lg bg-amber-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-950">
+                 📎 Adjuntar respaldo</button>
+             </div>` : ""}
 
         <div class="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
           <span>Enviada ${fechaHora(s.created_at)}</span>
           ${s.reemplazo ? `<span>🔁 Lo cubre ${esc(s.reemplazo)}</span>` : ""}
-          ${s.adjuntos ? `<span>📎 ${s.adjuntos} adjunto(s)</span>` : ""}
+          ${s.adjuntos ? `<button type="button" data-ver-respaldo="${s.id}" data-folio="${s.folio}"
+                                  class="hover:underline">📎 ${s.adjuntos} adjunto(s)</button>` : ""}
+          ${s.respaldo_entregado_en ? `<span class="text-emerald-700">✔ Respaldo entregado</span>` : ""}
+          ${s.tipo === "permiso" && vigente && !respaldoPedido
+            ? `<button type="button" data-adjuntar-respaldo="${s.id}"
+                       class="font-medium text-sky-700 hover:underline">Adjuntar respaldo</button>` : ""}
           ${s.tipo === "vacacion" && s.estado === "aprobado" && s.documento
             ? `<span class="rounded-full px-2 py-0.5 ring-1 ${{
                 concluido: "bg-emerald-50 text-emerald-800 ring-emerald-200",
@@ -434,6 +448,85 @@ function pintarSolicitudes() {
     })
     .join("");
 }
+
+/* ---- Respaldos: verlos, adjuntarlos después, pedirlos (Talento Humano) ---- */
+async function verRespaldos(id, folio) {
+  try {
+    const lista = await api.adjuntosDe(id);
+    if (lista.length === 1) return await api.abrirAdjunto(id, lista[0].id);
+    $("adjuntos-titulo").textContent = `Respaldos de la solicitud Nº ${folio}`;
+    $("adjuntos-lista").innerHTML = lista.length
+      ? lista.map((a) => `
+          <li class="flex items-center gap-3 px-3 py-2.5 text-sm">
+            <div class="min-w-0 flex-1">
+              <p class="truncate font-medium">${esc(a.nombre_archivo)}</p>
+              <p class="text-xs text-slate-500">${fechaHora(a.created_at)}${a.subido_por ? ` · ${esc(a.subido_por)}` : ""}</p>
+            </div>
+            <button type="button" data-abrir-adjunto="${a.id}" data-solicitud="${id}"
+                    class="rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-medium text-white">Abrir</button>
+          </li>`).join("")
+      : `<li class="px-3 py-4 text-center text-sm text-slate-500">Sin respaldos adjuntos.</li>`;
+    abrir("modal-adjuntos");
+  } catch (err) {
+    avisar(err.message, "error");
+  }
+}
+
+function adjuntarRespaldo(id) {
+  const entrada = document.createElement("input");
+  entrada.type = "file";
+  entrada.multiple = true;
+  entrada.accept = "image/jpeg,image/png,image/webp,image/heic,application/pdf";
+  entrada.addEventListener("change", async () => {
+    const archivos = [...entrada.files].slice(0, 5);
+    if (!archivos.length) return;
+    avisar("Subiendo el respaldo…");
+    try {
+      const subidos = [];
+      for (const archivo of archivos) subidos.push(await api.subirAdjunto(id, archivo));
+      avisar((await api.entregarRespaldo(id, subidos)).mensaje);
+      await cargar();
+    } catch (err) {
+      avisar(err.message, "error");
+    }
+  });
+  entrada.click();
+}
+
+const pedido = { id: null };
+function pedirRespaldo(boton) {
+  pedido.id = boton.dataset.pedirRespaldo;
+  $("pedir-respaldo-que").textContent =
+    `Solicitud Nº ${boton.dataset.folio} de ${boton.dataset.empleado}${boton.dataset.categoria ? ` · ${boton.dataset.categoria}` : ""}.`;
+  $("pedir-respaldo-mensaje").value =
+    "Por favor adjunte el documento que respalde su permiso (certificado, turno o convocatoria) " +
+    "donde se lean la fecha y la institución.";
+  abrir("modal-pedir-respaldo");
+}
+
+$("form-pedir-respaldo").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    avisar((await api.pedirRespaldo(pedido.id, $("pedir-respaldo-mensaje").value.trim())).mensaje);
+    $("modal-pedir-respaldo").close();
+    await cargar();
+  } catch (err) {
+    avisar(err.message, "error");
+  }
+});
+
+document.addEventListener("click", async (e) => {
+  const ver = e.target.closest("[data-ver-respaldo]");
+  const abrirUno = e.target.closest("[data-abrir-adjunto]");
+  const adjuntar = e.target.closest("[data-adjuntar-respaldo]");
+  const pedir = e.target.closest("[data-pedir-respaldo]");
+  if (ver) await verRespaldos(ver.dataset.verRespaldo, ver.dataset.folio);
+  else if (abrirUno) {
+    try { await api.abrirAdjunto(abrirUno.dataset.solicitud, abrirUno.dataset.abrirAdjunto); }
+    catch (err) { avisar(err.message, "error"); }
+  } else if (adjuntar) adjuntarRespaldo(adjuntar.dataset.adjuntarRespaldo);
+  else if (pedir) pedirRespaldo(pedir);
+});
 
 /* ---- Código QR ---- */
 document.addEventListener("click", async (e) => {
@@ -673,12 +766,16 @@ function filaSeguimiento(s) {
   if (s.estado === "pendiente_jefe" && s.tiene_jefe && !s.jefe_con_correo) marcas.push(["rose", "El jefe no tiene correo"]);
   if (s.estado === "pendiente_jefe" && s.tiene_jefe && !s.jefe_activo) marcas.push(["rose", "Jefe inactivo"]);
   if (s.recordado_en) marcas.push(["slate", `Recordada el ${fechaHora(s.recordado_en)}`]);
+  if (s.respaldo_pedido_en && !s.respaldo_entregado_en) marcas.push(["amber", `Respaldo pedido el ${fechaHora(s.respaldo_pedido_en)}`]);
+  if (s.respaldo_entregado_en) marcas.push(["slate", "Respaldo entregado"]);
   const color = { amber: "bg-amber-100 text-amber-800", rose: "bg-rose-100 text-rose-800", slate: "bg-slate-100 text-slate-700" };
   const demora = pendiente && s.horas_esperando >= 48;
   const botones = [];
   if (pendiente) botones.push(`<button type="button" data-seg-recordar="${s.id}" class="rounded-lg bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700">Recordar</button>`);
   if (s.estado === "pendiente_jefe") botones.push(`<button type="button" data-seg-reasignar="${s.id}" data-folio="${s.folio}" data-empleado="${esc(s.empleado)}" class="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium hover:bg-slate-200">Reasignar</button>`);
   if (document.getElementById(`sol-${s.id}`)) botones.push(`<button type="button" data-seg-ir="sol-${s.id}" class="rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-medium text-white">Decidir</button>`);
+  if (s.adjuntos) botones.push(`<button type="button" data-ver-respaldo="${s.id}" data-folio="${s.folio}" class="rounded-lg bg-white px-2.5 py-1 text-xs font-medium ring-1 ring-slate-300 hover:bg-slate-50">📎 ${s.adjuntos}</button>`);
+  if (pendiente || s.estado === "aprobado") botones.push(`<button type="button" data-pedir-respaldo="${s.id}" data-folio="${s.folio}" data-empleado="${esc(s.empleado)}" data-categoria="${esc(s.categoria || "")}" class="rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-amber-800 ring-1 ring-amber-300 hover:bg-amber-50">Pedir respaldo</button>`);
   if (s.estado === "rechazado") botones.push(`<button type="button" data-seg-ir="rechazadas" class="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white">Corregir</button>`);
   botones.push(`<a href="persona.html?id=${s.user_id}" class="rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-sky-700 ring-1 ring-sky-200 hover:bg-sky-50">Ficha</a>`);
   const decidida = DECIDIDAS[s.estado];
@@ -875,7 +972,13 @@ function pintarPendientes() {
     if (s.bloque_menor_justificado && ["rrhh", "admin"].includes(sesion.perfil?.rol)) {
       banderas.push(["amber", "Vacaciones emergentes: menos días que el bloque mínimo"]);
     }
-    if (s.tipo === "permiso" && !s.adjuntos) banderas.push(["rose", "Sin respaldo adjunto"]);
+    if (s.respaldo_pedido_en && !s.respaldo_entregado_en) {
+      banderas.push(["amber", `Respaldo pedido el ${fechaHora(s.respaldo_pedido_en)}: aún no llega`]);
+    } else if (s.respaldo_entregado_en) {
+      banderas.push(["slate", `Respaldo entregado el ${fechaHora(s.respaldo_entregado_en)}`]);
+    } else if (s.tipo === "permiso" && !s.adjuntos) {
+      banderas.push(["slate", "Sin respaldo adjunto (puede pedirlo)"]);
+    }
     if (!s.reemplazo) banderas.push(["slate", "Sin reemplazo asignado"]);
     // Otra persona de Talento Humano la tomó en «Pendientes»: no duplicar.
     if (s.en_revision_por) banderas.unshift(["amber", `En revisión por ${s.en_revision_por}`]);
@@ -916,6 +1019,17 @@ function pintarPendientes() {
               : "bg-slate-50 text-slate-600 ring-1 ring-slate-200"}">${esc(texto)}</span>`
           ).join("")}</div>` : ""}
 
+      ${s.adjuntos || ["rrhh", "admin"].includes(sesion.perfil?.rol)
+        ? `<div class="mt-3 flex flex-wrap gap-2">
+             ${s.adjuntos ? `<button type="button" data-ver-respaldo="${s.id}" data-folio="${s.folio}"
+                 class="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50">
+                 📎 Ver respaldo (${s.adjuntos})</button>` : ""}
+             ${["rrhh", "admin"].includes(sesion.perfil?.rol)
+               ? `<button type="button" data-pedir-respaldo="${s.id}" data-folio="${s.folio}"
+                   data-empleado="${esc(s.empleado)}" data-categoria="${esc(s.categoria || "")}"
+                   class="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-amber-800 ring-1 ring-amber-300 hover:bg-amber-50">
+                   ${s.respaldo_pedido_en ? "Volver a pedir respaldo" : "Pedir respaldo"}</button>` : ""}
+           </div>` : ""}
       ${s.tipo === "vacacion" && ["rrhh", "admin"].includes(sesion.perfil?.rol)
         ? `<button type="button" data-docs-solicitud="${s.id}" data-region="${esc(s.region || "sierra")}"
                    class="mt-4 w-full rounded-xl bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700
@@ -1519,9 +1633,15 @@ document.querySelectorAll("[data-nueva]").forEach((boton) =>
    navegador se niega a enviarlo —no puede poner el foco en algo que no se
    ve— y no muestra ningún error. El botón se pulsa y no pasa nada, que es
    el peor de los fallos posibles porque no deja ni dónde mirar. */
-function pedirJustificacion(hace_falta) {
+function pedirJustificacion(hace_falta, opcional = false) {
   $("campo-justificacion").classList.toggle("hidden", !hace_falta);
-  $("justificacion").required = !!hace_falta;
+  $("justificacion").required = !!hace_falta && !opcional;
+  $("justificacion").minLength = opcional ? 0 : 10;
+  $("justificacion-requisito").textContent = opcional ? "(opcional)" : "(obligatoria)";
+  $("justificacion-requisito").className = opcional ? "font-normal text-slate-500" : "font-normal text-rose-600";
+  $("justificacion").placeholder = opcional
+    ? "Si quiere, agregue lo que ayude a decidir"
+    : "Explique el motivo con al menos 10 caracteres";
 }
 
 /* Quien pide uno o dos días de vacaciones casi siempre tiene un asunto
@@ -1633,8 +1753,7 @@ $("tipo-permiso").addEventListener("change", (e) => {
   }
 
   const requisitos = [
-    tipo.requiere_adjunto ? "exige adjuntar respaldo" : null,
-    tipo.requiere_justificacion ? "exige justificación" : null,
+    tipo.requiere_adjunto ? "lleva respaldo (puede adjuntarlo ahora o después)" : null,
     tipo.descuenta_vacaciones ? "se descuenta de sus vacaciones" : null,
     tipo.max_dias ? `máximo ${Number(tipo.max_dias)} día(s)` : null,
     tipo.max_horas ? `máximo ${Number(tipo.max_horas)} hora(s)` : null,
@@ -1666,10 +1785,10 @@ $("tipo-permiso").addEventListener("change", (e) => {
     ? 'Respaldo <span class="font-normal text-slate-500">(se sugiere adjuntarlo)</span>'
     : 'Respaldo <span class="font-normal text-slate-500">(opcional)</span>';
 
-  /* La justificación sí: es lo único con lo que el jefe y Talento Humano
-     pueden decidir. Sin ella la solicitud se devuelve y se pierde el tiempo
-     que se quería ganar. */
-  pedirJustificacion(true);
+  /* La justificación es opcional en un permiso: el motivo ya va en la
+     descripción. Si Talento Humano necesita más, pide el respaldo desde el
+     sistema y la persona lo adjunta en «Mis solicitudes». */
+  pedirJustificacion(true, true);
 
   /* Una cita a las 13:00 no es «un día de permiso», son tres horas. Los
      subtipos que admiten esa modalidad la ofrecen; los que por naturaleza
@@ -1846,8 +1965,21 @@ async function previsualizar() {
 
     caja.className = `rounded-xl p-3 text-sm ${esExcepcion
       ? "bg-amber-50 text-amber-900 ring-1 ring-amber-200" : tono}`;
+    /* Un permiso no toca las vacaciones (salvo los «con cargo a
+       vacaciones»): decir «1 día a descontar · le quedarían 11» a quien
+       pide un permiso de estudios le hace creer que pierde un día. */
+    const esPermiso = $("form-solicitud").dataset.tipo === "permiso";
+    // Por horas, el total lo muestra el propio campo de horas (cambia sin
+    // volver a pedir la previsualización).
+    const porHoras = esPermiso && estado.modalidad === "horas";
+    const duracion = porHoras ? "por horas" : `de ${plural(diasEnteros(p.dias), "día", "días")}`;
+    const resumenPermiso = p.descuenta_vacaciones
+      ? `<p><strong>Permiso ${duracion}, con cargo a sus vacaciones</strong>` + (porHoras
+          ? " · se descuenta la fracción de día que corresponda a las horas</p>"
+          : ` · le quedarían <strong>${diasEnteros(p.saldo_despues)}</strong></p>`)
+      : `<p><strong>Permiso ${duracion}</strong> · no se descuenta de sus vacaciones</p>`;
     caja.innerHTML =
-      (esExcepcion
+      (esPermiso ? resumenPermiso : esExcepcion
         ? `<p><strong>${plural(diasEnRango, "día", "días")}: menos que el bloque de ${minimo}</strong></p>
            <p class="mt-1">Esta solicitud la revisa primero Talento Humano: cuénteles el motivo.
            Si es un asunto puntual, también puede pedirlo como <strong>permiso de día completo</strong>.</p>`
@@ -1857,7 +1989,7 @@ async function previsualizar() {
       ((d.feriados || []).length
         ? `<p class="mt-1.5 text-xs">Feriados en el rango: ${
             d.feriados.map((f) => `${esc(f.nombre)} (${fecha(f.fecha, false)})`).join(", ")}${
-            d.feriados_cuentan ? " · cuentan como días de vacaciones (Art. 69)" : " · no se descuentan"}</p>`
+            esPermiso ? "" : d.feriados_cuentan ? " · cuentan como días de vacaciones (Art. 69)" : " · no se descuentan"}</p>`
         : "") +
       // En una excepción se callan los avisos del descanso anual completo: la
       // previsualización no sabe que esto va por otra vía, y le respondía

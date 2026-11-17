@@ -374,6 +374,7 @@ async def pendientes(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[
                -- por uno que no contesta, y quien resuelve tiene que poder
                -- distinguirlo antes de firmar.
                r.jefe_id is null as sin_jefe,
+               r.respaldo_pedido_en, r.respaldo_pedido_mensaje, r.respaldo_entregado_en,
                (select count(*) from request_attachments a where a.request_id = r.id) as adjuntos
         from requests r
         join users u on u.id = r.user_id
@@ -580,6 +581,8 @@ async def seguimiento(usuario: TH, sede: str = "todas", dias: int = 30) -> dict:
                    r.dias_solicitados, r.horas_solicitadas, r.created_at, r.user_id, r.jefe_id,
                    r.bloque_menor_justificado, r.es_adelanto, r.ruta_aprobacion, r.motivo_rechazo,
                    r.rechazado_en_etapa, COALESCE(r.region, 'sierra') AS region,
+                   r.respaldo_pedido_en, r.respaldo_entregado_en,
+                   (SELECT COUNT(*) FROM request_attachments a WHERE a.request_id = r.id) AS adjuntos,
                    u.nombre AS empleado, u.cedula, u.departamento,
                    pt.nombre AS categoria,
                    j.nombre AS jefe, (j.email IS NOT NULL AND NOT j.correo_pendiente) AS jefe_con_correo,
@@ -637,6 +640,8 @@ async def seguimiento(usuario: TH, sede: str = "todas", dias: int = 30) -> dict:
             "jefe_abrio_aviso": f["jefe_abrio_aviso"], "recordado_en": f["recordado_en"],
             "emergente": bool(f["bloque_menor_justificado"]), "adelanto": bool(f["es_adelanto"]),
             "motivo_rechazo": f["motivo_rechazo"],
+            "adjuntos": int(f["adjuntos"] or 0),
+            "respaldo_pedido_en": f["respaldo_pedido_en"], "respaldo_entregado_en": f["respaldo_entregado_en"],
         })
     return {"sede": sede, "dias": dias, "sedes": sedes, "solicitudes": salida}
 
@@ -719,6 +724,45 @@ async def recordar_al_jefe(solicitud_id: uuid.UUID, request: Request, tareas: Ba
     if solicitud and solicitud["estado"] != "pendiente_jefe":
         raise HTTPException(status_code=409, detail={"mensaje": "Esta solicitud no está esperando al jefe."})
     return await recordar(solicitud_id, request, tareas, usuario)
+
+
+class PedidoRespaldo(BaseModel):
+    mensaje: str = Field(..., min_length=10, max_length=300)
+
+
+@router.post("/aprobaciones/{solicitud_id}/pedir-respaldo")
+async def pedir_respaldo(solicitud_id: uuid.UUID, datos: PedidoRespaldo, request: Request,
+                         tareas: BackgroundTasks, usuario: TH) -> dict:
+    """Talento Humano pide a la persona el respaldo (certificado, turno,
+    convocatoria…) de una solicitud. La persona lo recibe por correo y en el
+    sistema, y lo adjunta desde «Mis solicitudes». No cambia el estado: se
+    puede pedir mientras espera o después de aprobada."""
+    solicitud = await obtener_uno(SQL_SOLICITUD, (str(solicitud_id),))
+    if solicitud is None:
+        raise HTTPException(status_code=404, detail={"mensaje": "Solicitud no encontrada."})
+    if solicitud["estado"] in ("rechazado", "cancelado"):
+        raise HTTPException(status_code=409, detail={
+            "mensaje": "La solicitud está rechazada o cancelada: no hace falta respaldo."})
+    mensaje = datos.mensaje.strip()
+    await ejecutar(
+        """UPDATE requests SET respaldo_pedido_en = NOW(6), respaldo_pedido_por = %s,
+                  respaldo_pedido_mensaje = %s, respaldo_entregado_en = NULL
+            WHERE id = %s""", (str(usuario["id"]), mensaje, str(solicitud_id)))
+    await ejecutar(
+        """INSERT INTO notifications (user_id, tipo, severidad, titulo, mensaje, entidad, entidad_id,
+                                      accion_url)
+           VALUES (%s, 'documento_faltante', 'advertencia', %s, %s, 'requests', %s,
+                   '/dashboard.html')""",
+        (str(solicitud["user_id"]), f"Talento Humano pide el respaldo de la solicitud Nº {solicitud['folio']}",
+         mensaje, str(solicitud_id)))
+    if solicitud["email"]:
+        tareas.add_task(notificaciones.avisar_respaldo_pedido, solicitud["email"], solicitud["empleado"],
+                        solicitud, mensaje, usuario["nombre"])
+    await registrar(request, "respaldo_pedido", user_id=str(usuario["id"]), cedula=usuario["cedula"],
+                    entidad="requests", entidad_id=str(solicitud_id),
+                    detalle={"folio": solicitud["folio"], "mensaje": mensaje})
+    return {"mensaje": f"Se pidió el respaldo a {solicitud['empleado']}"
+                       + ("." if solicitud["email"] else " (sin correo registrado: solo aviso en el sistema).")}
 
 
 class Reasignacion(BaseModel):

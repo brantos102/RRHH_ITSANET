@@ -197,7 +197,8 @@ async def _permisos(u: dict, texto: str) -> dict:
             partes.append(f"hasta {_dias(x['max_horas'])} hora(s)")
         partes.append("con remuneración" if x["remunerado"] else "sin remuneración")
         if x["requiere_adjunto"]:
-            partes.append("· requiere respaldo" + (f" ({x['guia_adjuntos']})" if x["guia_adjuntos"] else ""))
+            partes.append("· respaldo sugerido, se puede entregar después"
+                          + (f" ({x['guia_adjuntos']})" if x["guia_adjuntos"] else ""))
         detalles.append(" ".join(partes))
     return _r("Esto es lo que necesita:", detalles=detalles,
               acciones=[{"texto": "Hacer la solicitud", "url": "dashboard.html"}])

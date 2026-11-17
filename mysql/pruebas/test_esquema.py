@@ -176,14 +176,16 @@ def test_el_reemplazo_no_es_el_solicitante(db):
     assert "requests_reemplazo_distinto" in error_de(e)[1]
 
 
-def test_un_permiso_nuevo_lleva_justificacion(db):
+def test_un_permiso_nuevo_no_exige_justificacion(db):
+    """Desde 0020 la justificación del permiso es opcional (el respaldo lo
+    pide Talento Humano si hace falta)."""
     pid = nueva_persona(db)
-    with pytest.raises(pymysql.err.OperationalError) as e:
-        db.execute("""INSERT INTO requests (id, user_id, tipo, fecha_inicio, fecha_fin,
-                        descripcion, permission_type_id, dias_solicitados, saldo_al_solicitar)
-                      VALUES (UUID(), %s, 'permiso', '2026-12-01', '2026-12-01',
-                        'Trámite personal', 1, 1, 15)""", (pid,))
-    assert "requests_permiso_justificado" in error_de(e)[1]
+    db.execute("""INSERT INTO requests (id, user_id, tipo, fecha_inicio, fecha_fin,
+                    descripcion, permission_type_id, dias_solicitados, saldo_al_solicitar)
+                  VALUES (UUID(), %s, 'permiso', '2026-12-01', '2026-12-01',
+                    'Trámite personal', 1, 1, 15)""", (pid,))
+    db.execute("SELECT COUNT(*) AS n FROM requests WHERE user_id = %s AND justificacion IS NULL", (pid,))
+    assert db.fetchone()["n"] == 1
 
 
 # ----------------------------------------------------- la región

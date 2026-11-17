@@ -307,6 +307,35 @@
   </form>
 </dialog>
 
+<!-- ================= Modal: pedir el respaldo (Talento Humano) ================= -->
+<dialog id="modal-pedir-respaldo" class="w-[min(100vw-1.5rem,30rem)] rounded-2xl p-0 backdrop:backdrop-blur-sm">
+  <form id="form-pedir-respaldo" method="dialog" class="space-y-4 p-5">
+    <div>
+      <h2 class="font-semibold">Pedir el respaldo</h2>
+      <p id="pedir-respaldo-que" class="mt-0.5 text-sm text-slate-600"></p>
+    </div>
+    <label class="block text-sm font-medium">Qué documento necesita
+      <textarea id="pedir-respaldo-mensaje" required minlength="10" maxlength="300" rows="3"
+                class="mt-1 w-full resize-none rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm ring-1 ring-slate-300"></textarea></label>
+    <p class="text-xs text-slate-500">La persona recibe el pedido por correo y en el sistema, y lo adjunta desde
+      «Mis solicitudes». La solicitud no cambia de estado: puede seguir decidiéndola.</p>
+    <div class="flex gap-2">
+      <button type="button" data-cerrar class="flex-1 rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-medium hover:bg-slate-200">Cancelar</button>
+      <button class="flex-1 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800">Enviar pedido</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ================= Modal: respaldos de una solicitud ================= -->
+<dialog id="modal-adjuntos" class="w-[min(100vw-1.5rem,28rem)] rounded-2xl p-0 backdrop:backdrop-blur-sm">
+  <header class="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+    <h2 id="adjuntos-titulo" class="font-semibold">Respaldos</h2>
+    <button type="button" data-cerrar class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100" aria-label="Cerrar">✕</button>
+  </header>
+  <ul id="adjuntos-lista" class="divide-y divide-slate-100 px-2 py-2"></ul>
+  <p class="px-5 pb-4 text-xs text-slate-400">Documentos personales: cada apertura queda registrada (LOPDP).</p>
+</dialog>
+
 <!-- ================= Modal: nueva solicitud ================= -->
 <dialog id="modal-solicitud"
         class="w-[min(100vw-1.5rem,34rem)] rounded-2xl p-0 backdrop:backdrop-blur-sm">
@@ -466,7 +495,7 @@
       <!-- Justificación (condicional) -->
       <div id="campo-justificacion" class="hidden">
         <label for="justificacion" class="block text-sm font-medium text-slate-700">
-          Justificación <span class="font-normal text-rose-600">(obligatoria)</span>
+          Justificación <span id="justificacion-requisito" class="font-normal text-rose-600">(obligatoria)</span>
         </label>
         <textarea id="justificacion" rows="3" minlength="10"
                   placeholder="Explique el motivo con al menos 10 caracteres"

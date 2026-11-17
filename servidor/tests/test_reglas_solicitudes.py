@@ -31,10 +31,15 @@ def _regla_cambiada(pg, caso, hoy) -> bool:
         pedir desde mañana;
       · vacaciones de menos días que el bloque mínimo: el mensaje ofrece
         ahora pedirlo como permiso, y la excepción exige 15 caracteres (antes
-        30) con adjunto opcional (antes obligatorio).
+        30) con adjunto opcional (antes obligatorio);
+      · permisos sin justificación (nota 2026-11-17_04): ahora se registran.
 
     Las reglas nuevas tienen sus propias pruebas (test_saldo_y_excepcion.py).
     """
+    if caso.get("tipo") == "permiso":
+        # 0020: la justificación del permiso pasó a ser opcional (antes la
+        # exigían la regla del tipo y una restricción de la tabla).
+        return len((caso.get("justificacion") or "").strip(" ")) < 10
     if caso.get("tipo") != "vacacion":
         return False
     cfg = {f["clave"]: f["valor"] for f in pg.execute(
@@ -207,7 +212,22 @@ async def test_previsualizar_igual(muestra, tipo):
                                 (caso["user_id"], tipo, caso["fecha_inicio"], caso["fecha_fin"], pt)).fetchone()["p"]
         en_my = await solicitudes.previsualizar_solicitud(caso["user_id"], tipo, caso["fecha_inicio"],
                                                           caso["fecha_fin"], pt)
-        assert json_normal(en_my) == json_normal(en_pg), caso
+        assert _comparable(en_my, tipo) == _comparable(en_pg, tipo), caso
+
+
+def _comparable(p, tipo):
+    """La previsualización cambió a propósito en los permisos (0020): un
+    permiso que no descuenta ya no muestra «saldo después», la justificación
+    es opcional y el respaldo se sugiere en lugar de exigirse. Lo demás
+    —días, desglose, validez, rango— debe seguir igual que en PostgreSQL."""
+    p = dict(json_normal(p))
+    p.pop("descuenta_vacaciones", None)
+    if tipo == "permiso":
+        p.pop("saldo_despues", None)
+        p.pop("requiere_justificacion", None)
+        p["avisos"] = [a for a in p.get("avisos") or []
+                       if "exige adjuntar respaldo" not in a and not a.startswith("Si tiene el respaldo")]
+    return p
 
 
 @pytest.mark.parametrize("segundo, choca", [

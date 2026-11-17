@@ -200,8 +200,9 @@ async def test_un_permiso_medico_se_envia_aunque_el_respaldo_llegue_despues(clie
     assert fila["adjuntos"] == 0
 
 
-async def test_un_permiso_sin_justificacion_no_se_registra(cliente, auth):
-    """Es lo único con lo que el jefe y Talento Humano pueden decidir."""
+async def test_un_permiso_sin_justificacion_se_registra(cliente, auth):
+    """La justificación del permiso es opcional: el motivo va en la
+    descripción, y si hace falta más, Talento Humano pide el respaldo."""
     tipos = (await cliente.get("/catalogos/tipos-permiso", headers=auth)).json()
     medica = next(t for t in tipos if t["codigo"] == "cita_medica")
     lunes = await lunes_futuro()
@@ -213,7 +214,7 @@ async def test_un_permiso_sin_justificacion_no_se_registra(cliente, auth):
               "hora_inicio": "08:00", "hora_fin": "12:00",
               "descripcion": "Control médico"},
     )
-    assert r.status_code >= 400
+    assert r.status_code == 201, r.text
 
 
 async def test_un_permiso_puede_ser_para_hoy_mismo(cliente, auth):
