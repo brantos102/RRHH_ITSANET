@@ -326,6 +326,32 @@
   </form>
 </dialog>
 
+<!-- ================= Modal: completar una solicitud enviada (colaborador) ================= -->
+<dialog id="modal-completar" class="w-[min(100vw-1.5rem,30rem)] rounded-2xl p-0 backdrop:backdrop-blur-sm">
+  <form id="form-completar" method="dialog" class="space-y-4 p-5">
+    <div>
+      <h2 class="font-semibold">Adjuntar respaldo o justificación</h2>
+      <p id="completar-que" class="mt-0.5 text-sm text-slate-600"></p>
+    </div>
+    <p id="completar-pedido" class="hidden rounded-lg bg-amber-50 p-2.5 text-sm text-amber-900 ring-1 ring-amber-200"></p>
+    <label class="block text-sm font-medium">Respaldo <span class="font-normal text-slate-500">(foto o PDF, hasta 10 MB c/u)</span>
+      <input id="completar-archivos" type="file" multiple
+             accept="image/jpeg,image/png,image/webp,image/heic,application/pdf"
+             class="mt-1 block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white"></label>
+    <ul id="completar-lista" class="space-y-1 text-xs text-slate-600"></ul>
+    <label class="block text-sm font-medium">Justificación <span class="font-normal text-slate-500">(opcional)</span>
+      <textarea id="completar-justificacion" rows="3" maxlength="1000"
+                placeholder="Lo que ayude a decidir: la hora real de la cita, el trámite, quién lo emitió…"
+                class="mt-1 w-full resize-none rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm ring-1 ring-slate-300"></textarea></label>
+    <p class="text-xs text-slate-500">Se agrega a la solicitud sin cambiar su estado. Lo ven su jefe y Talento Humano.</p>
+    <p id="completar-error" class="hidden rounded-lg bg-rose-50 p-2.5 text-sm text-rose-800"></p>
+    <div class="flex gap-2">
+      <button type="button" data-cerrar class="flex-1 rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-medium hover:bg-slate-200">Cancelar</button>
+      <button id="completar-enviar" class="flex-1 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800">Enviar</button>
+    </div>
+  </form>
+</dialog>
+
 <!-- ================= Modal: respaldos de una solicitud ================= -->
 <dialog id="modal-adjuntos" class="w-[min(100vw-1.5rem,28rem)] rounded-2xl p-0 backdrop:backdrop-blur-sm">
   <header class="flex items-center justify-between border-b border-slate-200 px-5 py-4">

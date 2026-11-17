@@ -15,9 +15,13 @@ que falten, en orden).
   lugar, hora) sigue siendo obligatoria.
 - El **respaldo** ya no «se exige»: el formulario dice que puede adjuntarlo
   ahora o después.
-- En «Mis solicitudes», cada permiso vigente tiene **«Adjuntar respaldo»**,
-  para entregarlo después (el certificado de una cita se emite después de la
-  cita).
+- En «Mis solicitudes», cada permiso vigente sin respaldo muestra
+  **«¿Ya tiene el respaldo o quiere agregar una justificación?»** con el botón
+  **«Adjuntar respaldo o justificación»**: sube la foto o el PDF, escribe la
+  justificación, o ambos, sin cambiar el estado de la solicitud (el
+  certificado de una cita se emite después de la cita). Una justificación
+  agregada después no borra la anterior: se suma con la fecha. Al enviar un
+  permiso sin archivo, el aviso recuerda que puede adjuntarlo después.
 
 **Para Talento Humano**
 
@@ -81,9 +85,13 @@ bash despliegue/instalar.sh --si
 2. **Talento Humano:** Por autorizar › «Todas las solicitudes» › en ese
    permiso, **«Pedir respaldo»** › «Enviar pedido».
 3. **Colaborador:** le llega el correo; en «Mis solicitudes» aparece el
-   recuadro ámbar. «Adjuntar respaldo» › elegir una foto o PDF.
-4. **Talento Humano:** la fila dice «Respaldo entregado»; el botón 📎 lo abre.
-5. Un permiso «Asunto personal (con cargo a vacaciones)» sí muestra cuántos
+   recuadro ámbar. «Adjuntar respaldo» › elegir una foto o PDF y, si quiere,
+   escribir la justificación › «Enviar».
+4. **Colaborador, sin pedido:** en otro permiso enviado sin archivo, pulsar
+   «Adjuntar respaldo o justificación» y escribir solo la justificación: se
+   ve en la tarjeta.
+5. **Talento Humano:** la fila dice «Respaldo entregado»; el botón 📎 lo abre.
+6. Un permiso «Asunto personal (con cargo a vacaciones)» sí muestra cuántos
    días le quedarían.
 
 ## Si algo sale mal

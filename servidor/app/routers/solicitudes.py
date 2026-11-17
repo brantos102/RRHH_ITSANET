@@ -555,20 +555,36 @@ async def cancelar(
 
 # ------------------------------------------------- respaldo después de enviar
 class EntregaRespaldo(BaseModel):
-    adjuntos: list[AdjuntoEntrada] = Field(..., min_length=1, max_length=5)
+    adjuntos: list[AdjuntoEntrada] = Field(default_factory=list, max_length=5)
+    # La justificación también se puede agregar después de enviar: es
+    # opcional al pedir el permiso y a veces se completa cuando se tiene el
+    # dato (la hora real de la cita, el diagnóstico).
+    justificacion: str | None = Field(None, max_length=1000)
+
+    @field_validator("justificacion")
+    @classmethod
+    def limpiar(cls, v: str | None) -> str | None:
+        return v.strip() if v and v.strip() else None
 
 
 @router.post("/solicitudes/{solicitud_id}/respaldo")
 async def entregar_respaldo(solicitud_id: uuid.UUID, datos: EntregaRespaldo, request: Request,
                             tareas: BackgroundTasks,
                             usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
-    """La persona adjunta el respaldo a una solicitud ya enviada: el que pidió
-    Talento Humano, o uno que no tenía al pedirla (el certificado de la cita
-    se emite después de la cita). Los archivos se suben antes con
-    /solicitudes/adjuntos y deben ser suyos y de esta solicitud."""
+    """La persona completa una solicitud ya enviada con el respaldo y/o la
+    justificación: lo que pidió Talento Humano, o lo que no tenía al pedirla
+    (el certificado de la cita se emite después de la cita). Los archivos se
+    suben antes con /solicitudes/adjuntos y deben ser suyos y de esta
+    solicitud. La justificación no reemplaza la anterior: se agrega con fecha."""
+    if not datos.adjuntos and not datos.justificacion:
+        raise HTTPException(status_code=422, detail={
+            "mensaje": "Adjunte al menos un archivo o escriba la justificación."})
+    if datos.justificacion and len(datos.justificacion) < 10:
+        raise HTTPException(status_code=422, detail={
+            "mensaje": "Escriba la justificación con al menos 10 caracteres."})
     sol = await obtener_uno(
         """SELECT r.id, r.folio, r.estado, r.user_id, r.region, r.respaldo_pedido_por,
-                  r.respaldo_pedido_en, u.nombre AS empleado
+                  r.respaldo_pedido_en, r.justificacion, u.nombre AS empleado
              FROM requests r JOIN users u ON u.id = r.user_id WHERE r.id = %s""", (str(solicitud_id),))
     if sol is None or str(sol["user_id"]) != str(usuario["id"]):
         raise HTTPException(status_code=404, detail={"mensaje": "Solicitud no encontrada."})
@@ -587,6 +603,11 @@ async def entregar_respaldo(solicitud_id: uuid.UUID, datos: EntregaRespaldo, req
                    VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                 (str(solicitud_id), a.storage_path, a.nombre_archivo, a.mime_type, a.tamano_bytes,
                  a.hash_sha256, str(usuario["id"])))
+        if datos.justificacion:
+            previa = (sol["justificacion"] or "").strip()
+            nueva = (f"{previa}\n\nAgregado el {date.today():%d/%m/%Y}: {datos.justificacion}"
+                     if previa else datos.justificacion)
+            await ejecutar("UPDATE requests SET justificacion = %s WHERE id = %s", (nueva, str(solicitud_id)))
         await ejecutar("UPDATE requests SET respaldo_entregado_en = NOW(6) WHERE id = %s", (str(solicitud_id),))
     except Exception as exc:  # noqa: BLE001
         raise traducir(exc) from exc
@@ -602,11 +623,15 @@ async def entregar_respaldo(solicitud_id: uuid.UUID, datos: EntregaRespaldo, req
                                           accion_url)
                VALUES (%s, 'informativo', 'info', %s, %s, 'requests', %s, '/dashboard.html#aprobaciones')""",
             (d, f"Respaldo entregado: solicitud Nº {sol['folio']}",
-             f"{sol['empleado']} adjuntó {len(datos.adjuntos)} archivo(s).", str(solicitud_id)))
+             f"{sol['empleado']} " + " y ".join(filter(None, [
+                 f"adjuntó {len(datos.adjuntos)} archivo(s)" if datos.adjuntos else None,
+                 "agregó la justificación" if datos.justificacion else None])) + ".",
+             str(solicitud_id)))
     await registrar(request, "respaldo_entregado", user_id=str(usuario["id"]), cedula=usuario["cedula"],
                     entidad="requests", entidad_id=str(solicitud_id),
-                    detalle={"folio": sol["folio"], "archivos": [a.nombre_archivo for a in datos.adjuntos]})
-    return {"mensaje": "Respaldo entregado. Talento Humano ya puede verlo."}
+                    detalle={"folio": sol["folio"], "archivos": [a.nombre_archivo for a in datos.adjuntos],
+                             "justificacion": bool(datos.justificacion)})
+    return {"mensaje": "Listo: su jefe y Talento Humano ya pueden verlo en la solicitud."}
 
 
 # --------------------------------------------------------- ver los respaldos

@@ -139,3 +139,33 @@ async def test_no_se_pide_respaldo_de_una_cancelada(cliente, auth, rrhh_auth):
     r = await cliente.post(f"/aprobaciones/{creada['id']}/pedir-respaldo", headers=rrhh_auth,
                            json={"mensaje": "Adjunte el certificado del examen"})
     assert r.status_code == 409
+
+
+async def test_la_justificacion_se_agrega_despues_sin_borrar_la_anterior(cliente, auth, rrhh_auth):
+    """Sin que nadie lo pida: la persona completa su permiso cuando tiene el dato."""
+    creada, _, _ = await _permiso(cliente, auth, semanas=35)
+    sid = creada["id"]
+    # Nada que entregar: se avisa.
+    assert (await cliente.post(f"/solicitudes/{sid}/respaldo", headers=auth, json={})).status_code == 422
+    assert (await cliente.post(f"/solicitudes/{sid}/respaldo", headers=auth,
+                               json={"justificacion": "corto"})).status_code == 422
+
+    r = await cliente.post(f"/solicitudes/{sid}/respaldo", headers=auth,
+                           json={"justificacion": "El examen se movió a las 10:00, salgo a las 09:00."})
+    assert r.status_code == 200, r.text
+    fila = await obtener_uno("SELECT justificacion, respaldo_entregado_en, estado FROM requests WHERE id = %s",
+                             (sid,))
+    assert fila["justificacion"].startswith("El examen se movió")
+    assert fila["respaldo_entregado_en"] and fila["estado"] == "pendiente_jefe"
+
+    # Una segunda vez se agrega con fecha, sin borrar lo anterior.
+    r = await cliente.post(f"/solicitudes/{sid}/respaldo", headers=auth,
+                           json={"justificacion": "Adjunto luego la convocatoria sellada."})
+    assert r.status_code == 200
+    j = (await obtener_uno("SELECT justificacion FROM requests WHERE id = %s", (sid,)))["justificacion"]
+    assert j.startswith("El examen se movió") and "Agregado el" in j and j.endswith("convocatoria sellada.")
+
+    # Sin pedido previo, se avisa a Talento Humano de la sede.
+    assert await obtener_uno(
+        """SELECT 1 AS x FROM notifications WHERE entidad_id = %s AND mensaje LIKE '%%agregó la justificación%%'""",
+        (sid,))

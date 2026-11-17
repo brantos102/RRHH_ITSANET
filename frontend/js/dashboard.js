@@ -407,15 +407,25 @@ function pintarSolicitudes() {
         </div>
 
         <p class="mt-2 text-sm text-slate-600">${esc(s.descripcion)}</p>
+        ${s.justificacion ? `<p class="mt-1.5 whitespace-pre-line rounded-lg bg-slate-50 p-2.5 text-xs text-slate-600">
+            <span class="font-medium">Justificación:</span> ${esc(s.justificacion)}</p>` : ""}
         ${s.es_adelanto ? `<p class="mt-1.5 text-xs text-amber-700">Incluye días adelantados</p>` : ""}
         ${s.motivo_rechazo ? `<p class="mt-2 rounded-lg bg-rose-50 p-2.5 text-sm text-rose-800">Motivo: ${esc(s.motivo_rechazo)}</p>` : ""}
         ${respaldoPedido
           ? `<div class="mt-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
                <p><strong>Talento Humano le pide el respaldo:</strong> ${esc(s.respaldo_pedido_mensaje || "")}</p>
-               <button type="button" data-adjuntar-respaldo="${s.id}"
+               <button type="button" data-adjuntar-respaldo="${s.id}" data-folio="${s.folio}"
+                       data-pedido="${esc(s.respaldo_pedido_mensaje || "")}"
                        class="mt-2 rounded-lg bg-amber-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-950">
                  📎 Adjuntar respaldo</button>
-             </div>` : ""}
+             </div>`
+          : s.tipo === "permiso" && vigente && !s.adjuntos && !s.respaldo_entregado_en
+            ? `<div class="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 p-2.5 text-xs text-slate-600 ring-1 ring-slate-200">
+                 <span>¿Ya tiene el respaldo o quiere agregar una justificación?</span>
+                 <button type="button" data-adjuntar-respaldo="${s.id}" data-folio="${s.folio}"
+                         class="rounded-lg bg-slate-900 px-3 py-1.5 font-medium text-white hover:bg-slate-800">
+                   📎 Adjuntar respaldo o justificación</button>
+               </div>` : ""}
 
         <div class="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
           <span>Enviada ${fechaHora(s.created_at)}</span>
@@ -423,9 +433,9 @@ function pintarSolicitudes() {
           ${s.adjuntos ? `<button type="button" data-ver-respaldo="${s.id}" data-folio="${s.folio}"
                                   class="hover:underline">📎 ${s.adjuntos} adjunto(s)</button>` : ""}
           ${s.respaldo_entregado_en ? `<span class="text-emerald-700">✔ Respaldo entregado</span>` : ""}
-          ${s.tipo === "permiso" && vigente && !respaldoPedido
-            ? `<button type="button" data-adjuntar-respaldo="${s.id}"
-                       class="font-medium text-sky-700 hover:underline">Adjuntar respaldo</button>` : ""}
+          ${s.tipo === "permiso" && vigente && !respaldoPedido && (s.adjuntos || s.respaldo_entregado_en)
+            ? `<button type="button" data-adjuntar-respaldo="${s.id}" data-folio="${s.folio}"
+                       class="font-medium text-sky-700 hover:underline">Agregar respaldo o justificación</button>` : ""}
           ${s.tipo === "vacacion" && s.estado === "aprobado" && s.documento
             ? `<span class="rounded-full px-2 py-0.5 ring-1 ${{
                 concluido: "bg-emerald-50 text-emerald-800 ring-emerald-200",
@@ -472,26 +482,56 @@ async function verRespaldos(id, folio) {
   }
 }
 
-function adjuntarRespaldo(id) {
-  const entrada = document.createElement("input");
-  entrada.type = "file";
-  entrada.multiple = true;
-  entrada.accept = "image/jpeg,image/png,image/webp,image/heic,application/pdf";
-  entrada.addEventListener("change", async () => {
-    const archivos = [...entrada.files].slice(0, 5);
-    if (!archivos.length) return;
-    avisar("Subiendo el respaldo…");
-    try {
-      const subidos = [];
-      for (const archivo of archivos) subidos.push(await api.subirAdjunto(id, archivo));
-      avisar((await api.entregarRespaldo(id, subidos)).mensaje);
-      await cargar();
-    } catch (err) {
-      avisar(err.message, "error");
-    }
-  });
-  entrada.click();
+/* Completar una solicitud ya enviada: el respaldo que no se tenía al
+   pedirla, una justificación, o ambos. */
+const completar = { id: null, archivos: [] };
+function adjuntarRespaldo(boton) {
+  completar.id = boton.dataset.adjuntarRespaldo;
+  completar.archivos = [];
+  $("form-completar").reset();
+  $("completar-lista").innerHTML = "";
+  $("completar-error").classList.add("hidden");
+  $("completar-que").textContent = `Solicitud Nº ${boton.dataset.folio}.`;
+  const pedidoTH = boton.dataset.pedido || "";
+  $("completar-pedido").textContent = pedidoTH ? `Talento Humano le pide: ${pedidoTH}` : "";
+  $("completar-pedido").classList.toggle("hidden", !pedidoTH);
+  abrir("modal-completar");
 }
+
+$("completar-archivos").addEventListener("change", (e) => {
+  completar.archivos = [...e.target.files].slice(0, 5);
+  $("completar-lista").innerHTML = completar.archivos
+    .map((a) => `<li>📎 ${esc(a.name)} · ${(a.size / 1024 / 1024).toFixed(1)} MB</li>`).join("");
+});
+
+$("form-completar").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const error = $("completar-error");
+  const texto = $("completar-justificacion").value.trim();
+  error.classList.add("hidden");
+  if (!completar.archivos.length && !texto) {
+    error.textContent = "Elija un archivo o escriba la justificación.";
+    return error.classList.remove("hidden");
+  }
+  if (texto && texto.length < 10) {
+    error.textContent = "Escriba la justificación con al menos 10 caracteres.";
+    return error.classList.remove("hidden");
+  }
+  const boton = $("completar-enviar");
+  boton.disabled = true; boton.textContent = "Enviando…";
+  try {
+    const subidos = [];
+    for (const archivo of completar.archivos) subidos.push(await api.subirAdjunto(completar.id, archivo));
+    avisar((await api.entregarRespaldo(completar.id, subidos, texto || null)).mensaje);
+    $("modal-completar").close();
+    await cargar();
+  } catch (err) {
+    error.textContent = err.message;
+    error.classList.remove("hidden");
+  } finally {
+    boton.disabled = false; boton.textContent = "Enviar";
+  }
+});
 
 const pedido = { id: null };
 function pedirRespaldo(boton) {
@@ -524,7 +564,7 @@ document.addEventListener("click", async (e) => {
   else if (abrirUno) {
     try { await api.abrirAdjunto(abrirUno.dataset.solicitud, abrirUno.dataset.abrirAdjunto); }
     catch (err) { avisar(err.message, "error"); }
-  } else if (adjuntar) adjuntarRespaldo(adjuntar.dataset.adjuntarRespaldo);
+  } else if (adjuntar) adjuntarRespaldo(adjuntar);
   else if (pedir) pedirRespaldo(pedir);
 });
 
@@ -2206,8 +2246,10 @@ $("form-solicitud").addEventListener("submit", async (e) => {
     $("modal-solicitud").close();
     avisar(noSubieron.length
       ? `${respuesta.mensaje} No se pudo guardar ${noSubieron.length === 1
-          ? "el archivo" : "los archivos"}: entregue el respaldo a Talento Humano.`
-      : respuesta.mensaje);
+          ? "el archivo" : "los archivos"}: vuelva a adjuntarlo desde «Mis solicitudes».`
+      : tipo === "permiso" && !adjuntosSubidos.length
+        ? `${respuesta.mensaje} Si después tiene el respaldo, adjúntelo desde «Mis solicitudes».`
+        : respuesta.mensaje);
     await cargar();
     // El papel que hay que firmar, en el único momento en que la persona
     // todavía está mirando la pantalla.

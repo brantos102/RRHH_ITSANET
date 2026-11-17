@@ -272,8 +272,8 @@ export const api = {
   recordar: (id) => peticion(`/aprobaciones/${id}/recordar`, { method: "POST" }),
   pedirRespaldo: (id, mensaje) =>
     peticion(`/aprobaciones/${id}/pedir-respaldo`, { method: "POST", body: JSON.stringify({ mensaje }) }),
-  entregarRespaldo: (id, adjuntos) =>
-    peticion(`/solicitudes/${id}/respaldo`, { method: "POST", body: JSON.stringify({ adjuntos }) }),
+  entregarRespaldo: (id, adjuntos, justificacion = null) =>
+    peticion(`/solicitudes/${id}/respaldo`, { method: "POST", body: JSON.stringify({ adjuntos, justificacion }) }),
   reasignar: (id, aprobador_id, motivo) =>
     peticion(`/aprobaciones/${id}/reasignar`, { method: "POST", body: JSON.stringify({ aprobador_id, motivo }) }),
   recordarAlJefe: (id) => peticion(`/aprobaciones/${id}/recordar-al-jefe`, { method: "POST" }),
