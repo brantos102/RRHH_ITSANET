@@ -688,15 +688,28 @@ async def recordar(solicitud_id: uuid.UUID, request: Request, tareas: Background
 
     titulo = f"Recordatorio: la solicitud Nº {solicitud['folio']} espera su decisión"
     mensaje = f"{solicitud['empleado']} espera su respuesta. Talento Humano le recuerda revisarla."
+    correo_enviado = None
     if solicitud["estado"] == "pendiente_jefe" and solicitud["jefe_id"]:
         jefe = await obtener_uno("SELECT id, email, nombre FROM users WHERE id = %s AND activo",
                                  (solicitud["jefe_id"],))
         if jefe is None:
             raise HTTPException(status_code=409, detail={
                 "mensaje": "El jefe asignado ya no está activo: reasigne la solicitud a otra persona."})
-        await _avisar_aprobador(solicitud, jefe, titulo, mensaje, tareas)
-        destino, accion = jefe["nombre"] + (" (sin correo: solo aviso en el sistema)" if not jefe["email"] else ""), \
-            "recordatorio_al_jefe"
+        await ejecutar(
+            """INSERT INTO notifications (user_id, tipo, severidad, titulo, mensaje, entidad, entidad_id, accion_url)
+               VALUES (%s, 'solicitud_pendiente', 'advertencia', %s, %s, 'requests', %s,
+                       '/dashboard.html#aprobaciones')""",
+            (str(jefe["id"]), titulo, mensaje, str(solicitud_id)))
+        accion = "recordatorio_al_jefe"
+        if not jefe["email"]:
+            destino = f"{jefe['nombre']} (no tiene correo registrado: solo verá el aviso en el sistema)"
+        else:
+            # Se envía AHORA y no en segundo plano: quien pulsa «Recordar»
+            # tiene que saber si el correo salió. Antes decía «Se le
+            # recordó» aunque el servidor de correo hubiera fallado.
+            correo_enviado = await _enviar_recordatorio(solicitud, jefe, usuario["nombre"], request)
+            destino = (f"{jefe['nombre']} por correo ({_enmascarar(jefe['email'])}) y en el sistema"
+                       if correo_enviado else jefe["nombre"])
     else:
         equipo = await personal.rrhh_de_region(solicitud.get("region"))
         for p in equipo:
@@ -712,8 +725,46 @@ async def recordar(solicitud_id: uuid.UUID, request: Request, tareas: Background
                             solicitud, solicitud.get("jefe_nombre") or "el jefe", [])
         destino, accion = f"Talento Humano de la sede ({len(equipo)} persona(s))", "recordatorio_solicitud"
     await registrar(request, accion, user_id=str(usuario["id"]), cedula=usuario["cedula"],
-                    entidad="requests", entidad_id=str(solicitud_id), detalle={"a": destino})
-    return {"mensaje": f"Se le recordó a {destino}."}
+                    entidad="requests", entidad_id=str(solicitud_id),
+                    detalle={"a": destino, "correo_enviado": correo_enviado})
+    if correo_enviado is False:
+        return {"mensaje": f"Se dejó el aviso en el sistema de {destino}, pero el correo NO salió: el servidor "
+                           "de correo falló. Avísele por otro medio y pida a TI revisar el registro "
+                           f"(solicitud Nº {solicitud['folio']}).",
+                "correo_enviado": False}
+    return {"mensaje": f"Se le recordó a {destino}.", "correo_enviado": correo_enviado}
+
+
+def _enmascarar(email: str) -> str:
+    usuario, _, dominio = (email or "").partition("@")
+    return f"{usuario[:2]}***@{dominio}" if dominio else "***"
+
+
+async def _enviar_recordatorio(solicitud: dict, jefe: dict, quien: str, request: Request) -> bool:
+    """Envía el recordatorio y dice si salió. Si falla, deja en el registro
+    por qué (servidor, puerto, clave…), igual que el código de acceso."""
+    dias = get_settings().aprobacion_link_dias
+    vigente = await obtener_uno(
+        "SELECT created_at > NOW(6) - INTERVAL %s DAY AS v FROM requests WHERE id = %s",
+        (dias, str(solicitud["id"])))
+    try:
+        await notificaciones.recordar_al_jefe(jefe, solicitud, quien,
+                                              enlace_vigente=bool(vigente and vigente["v"]))
+    except Exception as exc:  # noqa: BLE001 - el detalle va al registro, no a la pantalla
+        log.exception("No salió el recordatorio de la solicitud Nº %s al jefe (%s)",
+                      solicitud.get("folio"), _enmascarar(jefe["email"]))
+        from .. import correo
+        for linea in correo.por_que_no_sale(exc, get_settings()):
+            if linea:
+                log.error("   %s", linea)
+        await registrar(request, "recordatorio_correo_fallido", entidad="requests",
+                        entidad_id=str(solicitud["id"]), detalle={"folio": solicitud.get("folio")})
+        return False
+    await ejecutar(
+        """UPDATE notifications SET email_enviado_en = NOW(6)
+            WHERE entidad_id = %s AND user_id = %s AND tipo = 'solicitud_pendiente' AND email_enviado_en IS NULL""",
+        (str(solicitud["id"]), str(jefe["id"])))
+    return True
 
 
 # Se conserva la ruta anterior (la usa el asistente).

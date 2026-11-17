@@ -23,7 +23,7 @@ function avisar(texto, tono = "neutro") {
     "max-w-sm rounded-xl px-4 py-3 text-center text-sm shadow-lg " +
     (tono === "error" ? "bg-rose-600 text-white" : "bg-slate-900 text-white");
   clearTimeout(temporizadorAviso);
-  temporizadorAviso = setTimeout(() => el.classList.add("hidden"), 4000);
+  temporizadorAviso = setTimeout(() => el.classList.add("hidden"), tono === "error" ? 9000 : 4000);
 }
 
 /* ------------------------------------------------------------------ modales */
@@ -889,7 +889,9 @@ $("vista-seguimiento").addEventListener("click", async (e) => {
   if (recordar) {
     recordar.disabled = true;
     try {
-      avisar((await api.recordar(recordar.dataset.segRecordar)).mensaje);
+      const r = await api.recordar(recordar.dataset.segRecordar);
+      // Si el correo no salió, se dice en rojo: «se le recordó» no basta.
+      avisar(r.mensaje, r.correo_enviado === false ? "error" : undefined);
       await cargarSeguimiento();
     } catch (err) { avisar(err.message, "error"); recordar.disabled = false; }
   } else if (reasignar) {

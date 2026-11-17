@@ -144,6 +144,38 @@ async def avisar_al_jefe(jefe: dict, solicitud: dict) -> None:
         log.exception("No se pudo anotar el envío del correo al jefe")
 
 
+async def recordar_al_jefe(jefe: dict, solicitud: dict, quien: str, *, enlace_vigente: bool = True,
+                          intentos: int = 2) -> None:
+    """Recordatorio de Talento Humano a quien debe decidir. Es un correo
+    PROPIO, con su asunto: si repitiera el del aviso original, el buzón lo
+    juntaría en la misma conversación y el jefe no vería nada nuevo.
+
+    No atrapa los errores: quien lo llama dice en pantalla si salió o no.
+    """
+    from html import escape
+    base = get_settings().app_url.rstrip("/")
+    url = _enlace(str(solicitud["jefe_token"]), "jefe") if enlace_vigente else f"{base}/dashboard.html#aprobaciones"
+    que = "vacaciones" if solicitud["tipo"] == "vacacion" else "un permiso"
+    titulo = f"Recordatorio: {solicitud['empleado']} espera su decisión (solicitud Nº {solicitud.get('folio')})"
+    cuerpo = (
+        f'<p style="margin:0 0 16px;font-size:14px;color:#475569">Hola {escape(jefe.get("nombre") or "")}: '
+        f"{escape(quien)}, de Talento Humano, le recuerda que {escape(solicitud['empleado'])} pidió {que} y "
+        "la solicitud sigue esperando su decisión como jefe inmediato.</p>"
+        + _tabla(_detalle(solicitud))
+        + '<p style="margin:18px 0 0;font-size:13px;color:#64748b">'
+        + ("Abra el enlace para revisarla y decidir." if enlace_vigente else
+           "Entre al sistema: la encontrará en «Por autorizar».")
+        + "</p>"
+    )
+    texto = (f"{titulo}\n\n{quien}, de Talento Humano, le recuerda que {solicitud['empleado']} pidió {que} "
+             "y la solicitud sigue esperando su decisión.\n\n"
+             + "\n".join(f"{e}: {v}" for e, v in _detalle(solicitud))
+             + f"\n\nRevise y decida aquí:\n{url}\n")
+    await correo.enviar(jefe["email"], titulo, texto,
+                        _marco(titulo, cuerpo, ("Revisar y decidir" if enlace_vigente else "Entrar al sistema", url)),
+                        intentos=intentos)
+
+
 async def avisar_a_rrhh(destinatarios: list[dict], solicitud: dict, jefe: str,
                        adjuntos: list[tuple[str, bytes, str]] | None = None) -> None:
     """A Talento Humano cuando el jefe aprobó. En vacaciones van adjuntas la
