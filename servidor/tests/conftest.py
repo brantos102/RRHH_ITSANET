@@ -96,6 +96,16 @@ async def _pool_por_prueba():
     from app.db import cerrar_pool
     await cerrar_pool()
 
+
+@pytest.fixture(autouse=True)
+def _sin_puerto_recordado():
+    """El correo recuerda en memoria el puerto que funcionó; cada prueba
+    empieza sin ese recuerdo."""
+    correo._puerto_que_funciona.clear()
+    yield
+    correo._puerto_que_funciona.clear()
+
+
 CEDULA_PRUEBA = "1700000001"
 CEDULA_SIN_REGISTRO = "0900000001"
 CORREO_PRUEBA = "prueba@api.test"

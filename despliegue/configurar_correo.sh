@@ -114,7 +114,7 @@ unset CLAVE
 
 echo
 echo "Guardado en servidor/.env (solo legible por $(id -un)). Así quedó, sin la clave:"
-sed -E 's/^(SMTP_PASSWORD=).*/\1********/; s/^(JWT_SECRET=).*/\1********/; s/(rrhh_app:)[^@]*@/\1********@/' "$ENV" | sed 's/^/  /'
+sed -E 's/^(SMTP_USER=.{4}).*/\1…/; s/^(SMTP_PASSWORD=).*/\1********/; s/^(JWT_SECRET=).*/\1********/; s/(rrhh_app:)[^@]*@/\1********@/' "$ENV" | sed 's/^/  /'
 echo
 echo "Para que el sistema use la configuración nueva, reinicie el backend:"
 echo "  sudo systemctl restart rrhh-itsanet-api"

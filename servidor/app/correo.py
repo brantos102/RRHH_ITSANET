@@ -250,16 +250,26 @@ def puertos(settings) -> list[int]:
     return [settings.smtp_port] + ([int(alterno)] if alterno and int(alterno) != settings.smtp_port else [])
 
 
+# El último puerto por el que salió un correo, por servidor. Si el principal
+# no conecta (cortafuegos) y el alterno sí, los envíos siguientes empiezan por
+# el alterno: el código de acceso no hace esperar el plazo del puerto cerrado
+# cada vez. Vive en memoria: tras reiniciar se vuelve a probar el principal.
+_puerto_que_funciona: dict[tuple, int] = {}
+
+
 async def _enviar_con_reintentos(mensaje: EmailMessage, destinatarios: list[str], settings,
                                  *, intentos: int) -> None:
     lista = puertos(settings)
-    indice = 0
+    clave = (settings.smtp_host, tuple(lista))
+    preferido = _puerto_que_funciona.get(clave)
+    indice = lista.index(preferido) if preferido in lista else 0
     for intento in range(1, intentos + 1):
         puerto = lista[indice]
         try:
             await aiosmtplib.send(mensaje, recipients=destinatarios, **parametros_smtp(settings, puerto))
             if intento > 1 or puerto != settings.smtp_port:
                 log.info("Correo enviado en el intento %s de %s (puerto %s)", intento, intentos, puerto)
+            _puerto_que_funciona[clave] = puerto
             return
         except Exception as exc:  # noqa: BLE001
             if intento >= intentos or not es_transitorio(exc):
@@ -269,8 +279,11 @@ async def _enviar_con_reintentos(mensaje: EmailMessage, destinatarios: list[str]
             # sin esperar: no es que el servidor esté ocupado, es que por ahí
             # no se llega.
             if len(lista) > 1 and es_de_conexion(exc):
-                indice = (indice + 1) % len(lista)
-                espera = 0 if indice else espera
+                siguiente = (indice + 1) % len(lista)
+                # Sin esperar la primera vez que se cambia de puerto; si ya se
+                # probaron todos, sí (puede ser un corte momentáneo).
+                espera = 0 if intento < len(lista) else espera
+                indice = siguiente
             log.warning("El servidor de correo falló en el puerto %s (%s: %s). Reintento %s de %s "
                         "por el puerto %s en %s s", puerto, type(exc).__name__, exc, intento + 1,
                         intentos, lista[indice], espera)

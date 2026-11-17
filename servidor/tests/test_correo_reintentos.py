@@ -105,3 +105,34 @@ def test_starttls_automatico_para_proveedores_sin_ssl():
     assert correo.parametros_smtp(_Ajustes())["start_tls"] is None
     assert correo.parametros_smtp(_Ajustes(), 2525)["port"] == 2525
     assert correo.modo_starttls("true") is True and correo.modo_starttls(False) is False
+
+
+async def test_recuerda_el_puerto_que_funciono(monkeypatch, sin_esperas):
+    """Con el 587 bloqueado, solo el primer envío paga el plazo: los demás
+    (el código de acceso, que alguien espera en pantalla) salen por el 2525."""
+    puertos = []
+
+    async def falso(*a, port, **k):
+        puertos.append(port)
+        if port == 587:
+            raise aiosmtplib.SMTPConnectTimeoutError("Timed out connecting on port 587")
+
+    monkeypatch.setattr(correo, "_puerto_que_funciona", {})
+    monkeypatch.setattr(aiosmtplib, "send", falso)
+    await correo._enviar_con_reintentos(_mensaje(), ["a@b.ec"], _Ajustes(), intentos=3)
+    await correo._enviar_con_reintentos(_mensaje(), ["a@b.ec"], _Ajustes(), intentos=3)
+    assert puertos == [587, 2525, 2525]
+
+
+async def test_si_el_recordado_se_cae_vuelve_al_otro(monkeypatch, sin_esperas):
+    puertos = []
+
+    async def falso(*a, port, **k):
+        puertos.append(port)
+        if port == 2525:
+            raise aiosmtplib.SMTPConnectError("Connection refused")
+
+    monkeypatch.setattr(correo, "_puerto_que_funciona", {("pro.turbo-smtp.com", (587, 2525)): 2525})
+    monkeypatch.setattr(aiosmtplib, "send", falso)
+    await correo._enviar_con_reintentos(_mensaje(), ["a@b.ec"], _Ajustes(), intentos=3)
+    assert puertos == [2525, 587]

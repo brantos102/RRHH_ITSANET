@@ -30,12 +30,20 @@ from app import correo, qr  # noqa: E402
 from app.config import get_settings  # noqa: E402
 
 
+def _oculto(usuario: str | None) -> str:
+    """El usuario del proveedor es una credencial: se muestra solo el inicio,
+    lo justo para reconocerlo, por si la pantalla termina en una captura."""
+    if not usuario:
+        return "—"
+    return usuario[:4] + "…" if len(usuario) > 6 else "…"
+
+
 async def principal(destino: str) -> int:
     ajustes = get_settings()
     modo = correo.modo_starttls(ajustes.smtp_starttls)
     print(f"Servidor: {ajustes.smtp_host}, puerto(s) {' / '.join(map(str, correo.puertos(ajustes)))} "
           f"(STARTTLS {'sí' if modo else 'no' if modo is False else 'si el servidor lo ofrece'}) · "
-          f"usuario: {ajustes.smtp_user or '—'}")
+          f"usuario: {_oculto(ajustes.smtp_user)}")
     print(f"Remitente: {ajustes.smtp_remitente}")
     print(f"Destino:   {destino}\n")
     if ajustes.email_backend == "console":
