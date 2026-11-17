@@ -71,20 +71,31 @@ def por_que_no_sale(error: Exception, settings=None) -> list[str]:
             "Si la copió con espacios («abcd efgh ijkl mnop»), quítelos.",
         ]
 
+    if "quota" in texto or "exceeded" in texto or "limit" in texto or "credit" in texto \
+            or "too many" in texto:
+        return [
+            "El proveedor de correo no acepta más envíos por ahora: se alcanzó el",
+            "límite de su plan (cuota diaria o mensual, o créditos agotados).",
+            "",
+            "Revise el panel del proveedor (envíos usados, créditos, bloqueos) y",
+            "amplíe el plan o espere a que se renueve la cuota. Mientras tanto, nadie",
+            "recibe el código de acceso.",
+        ]
+
     if "timed out" in texto or "timeout" in texto:
         return [
             f"El servidor {host}:{puerto} no respondió a tiempo.",
             "",
-            "Casi siempre es el cortafuegos o la red de la oficina, que bloquea",
-            "la salida por ese puerto. Compruébelo desde PowerShell:",
-            f"    Test-NetConnection {host} -Port {puerto}",
+            "Casi siempre es el cortafuegos o la red, que bloquea la salida por ese",
+            "puerto. Compruébelo en la terminal del servidor:",
+            f"    timeout 5 bash -c '</dev/tcp/{host}/{puerto}' && echo ABIERTO || echo CERRADO",
             "",
-            "Si «TcpTestSucceeded» sale en False, el puerto está cerrado: pídale a",
-            "Sistemas que abra la salida, o pruebe el otro puerto de este servidor",
-            f"    SMTP_PORT={'465' if puerto == 587 else '587'}",
+            "Si sale CERRADO, pídale a Sistemas que abra la salida, o pruebe otro",
+            "puerto del proveedor (bash despliegue/configurar_correo.sh):",
+            f"    {'465' if puerto == 587 else '587'} (o 2525, si su proveedor lo ofrece)",
             "",
             "Mientras tanto, para no quedarse sin probar el sistema:",
-            "    EMAIL_BACKEND=console   en backend/.env",
+            "    EMAIL_BACKEND=console   en servidor/.env",
             "El código aparece en la terminal del backend en vez de por correo.",
         ]
 
@@ -132,12 +143,12 @@ def por_que_no_sale(error: Exception, settings=None) -> list[str]:
         "No reconozco este fallo. El texto completo está arriba.",
         "",
         "Lo que conviene revisar, en este orden:",
-        f"  1. SMTP_USER y SMTP_PASSWORD en backend/.env (contraseña DE APLICACIÓN)",
-        f"  2. Que el puerto salga:  Test-NetConnection {host} -Port {puerto}",
+        f"  1. SMTP_USER y SMTP_PASSWORD en servidor/.env (contraseña DE APLICACIÓN)",
+        f"  2. Que el puerto salga:  timeout 5 bash -c '</dev/tcp/{host}/{puerto}' && echo ABIERTO",
         f"  3. Que el puerto y el cifrado cuadren (587+STARTTLS, o 465 sin él)",
         "",
         "Y para seguir probando el sistema sin correo:",
-        "    EMAIL_BACKEND=console   en backend/.env",
+        "    EMAIL_BACKEND=console   en servidor/.env",
     ]
 
 

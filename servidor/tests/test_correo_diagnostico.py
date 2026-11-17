@@ -58,8 +58,16 @@ def test_puerto_bloqueado_por_la_red_de_la_oficina():
     error = TimeoutError("Connection timed out")
     lineas = por_que_no_sale(error, Config())
     texto = " ".join(lineas)
-    assert "Test-NetConnection" in texto, "debe decir cómo comprobar el puerto"
+    assert "/dev/tcp/" in texto, "debe decir cómo comprobar el puerto desde el servidor"
     assert "EMAIL_BACKEND=console" in texto, "y cómo seguir probando mientras tanto"
+
+
+def test_cuota_del_proveedor_agotada():
+    """Los proveedores de envío (turboSMTP, SendGrid…) cortan al llegar al
+    límite del plan: hay que decirlo así, no «no reconozco este fallo»."""
+    error = Exception("(554, b'5.7.1 Sending quota exceeded for this account')")
+    texto = " ".join(por_que_no_sale(error, Config(smtp_host="pro.eu.turbo-smtp.com")))
+    assert "límite" in texto and "panel del proveedor" in texto
 
 
 def test_cifrado_que_no_cuadra_con_el_puerto():
@@ -82,7 +90,7 @@ def test_remitente_distinto_de_la_cuenta():
 
 def test_un_fallo_desconocido_no_deja_sin_respuesta():
     texto = " ".join(por_que_no_sale(Exception("algo rarísimo"), Config()))
-    assert "backend/.env" in texto
+    assert "servidor/.env" in texto
     assert "EMAIL_BACKEND=console" in texto
 
 
@@ -179,7 +187,7 @@ async def test_el_registro_dice_el_motivo_bajo_la_referencia_de_la_pantalla(
 
     escrito = "\n".join(m.getMessage() for m in caplog.records)
     assert "no respondió a tiempo" in escrito, "no tradujo el fallo"
-    assert "Test-NetConnection" in escrito, "no dice cómo comprobarlo"
+    assert "/dev/tcp/" in escrito, "no dice cómo comprobarlo"
     assert "EMAIL_BACKEND=console" in escrito, "no dice cómo seguir probando"
 
 
