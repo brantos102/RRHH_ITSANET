@@ -1,0 +1,158 @@
+-- ===========================================================================
+-- DEPURAR LA BASE DESDE DBEAVER (MySQL) — LO QUE HAY QUE SABER ANTES DE
+-- ESCRIBIR NADA
+--
+-- Este archivo no se ejecuta. Se lee. Los otros tres traen las consultas.
+--
+--   01_revisar.sql      Mirar sin tocar. Empiece siempre por aquí.
+--   02_corregir.sql     Cambiar datos, de uno o en bloque.
+--   03_eliminar.sql     Borrar filas, y qué se lleva por delante cada borrado.
+--
+-- Es la versión para MySQL del manual que acompañaba a la base de Supabase.
+-- Lo que cambia está marcado con «EN MYSQL».
+--
+-- ===========================================================================
+-- 1. CON QUÉ USUARIO SE CONECTA
+-- ===========================================================================
+--
+-- El sistema usa el usuario `rrhh_app`, que solo puede leer, insertar,
+-- modificar y borrar filas de la base `rrhh` (y ejecutar sus funciones). No
+-- puede crear ni borrar tablas, ni tocar otras bases del servidor.
+--
+-- Conéctese con `rrhh_app` para depurar. `root` puede todo, incluso borrar
+-- la base entera o tocar las de otros sistemas del mismo servidor: úselo solo
+-- para lo que de verdad lo necesite.
+--
+-- EN MYSQL, lo que la base sigue protegiendo con cualquier usuario:
+--
+--   · Las bitácoras (audit_logs, access_logs) no se pueden modificar ni
+--     borrar. Un disparador lo impide también a `root`.
+--   · Una cédula que no pasa el dígito verificador no entra.
+--   · Nadie puede ser su propio jefe.
+--
+-- Lo que en Supabase decidía la base según quién estaba conectado —que solo
+-- Talento Humano cambie el rol, la cédula o el saldo de otra persona, y que
+-- cada quien vea solo sus filas— EN MYSQL lo decide el sistema (la
+-- aplicación). Desde DBeaver no hay esa red: con `rrhh_app` puede cambiar el
+-- rol de cualquiera. Ni ante un DELETE sin WHERE lo va a detener la base.
+--
+-- ===========================================================================
+-- 2. TODO DENTRO DE UNA TRANSACCIÓN. SIN EXCEPCIONES.
+-- ===========================================================================
+--
+--   start transaction;
+--     select ... ;          -- 1. ver qué filas va a tocar
+--     update ... ;          -- 2. tocarlas
+--     select ... ;          -- 3. ver cómo quedaron
+--   commit;                 -- 4. si está bien.  Si no: rollback;
+--
+-- En DBeaver: cambie a modo de transacción manual (el botón «Auto-Commit»
+-- de la barra de la ventana de SQL). Con auto-commit encendido, cada
+-- sentencia se guarda sola y `rollback` ya no sirve de nada.
+--
+-- EN MYSQL, una trampa que PostgreSQL no tenía: cualquier CREATE, ALTER,
+-- DROP o TRUNCATE confirma en el acto lo que llevaba la transacción. Si en
+-- medio de una depuración se ejecuta uno, el rollback posterior no deshace
+-- lo anterior. No los mezcle con correcciones de datos.
+--
+-- Y antes de cualquier cosa masiva, una copia (en la terminal del servidor):
+--
+--   sudo mysqldump --single-transaction --routines --triggers rrhh \
+--        > ~/bryan/respaldos/rrhh_$(date +%F_%H%M).sql
+--
+-- La copia nocturna no le devuelve lo que cargó esta mañana.
+--
+-- ===========================================================================
+-- 3. TRES COSAS QUE EL SISTEMA RECALCULA SOLO
+-- ===========================================================================
+--
+-- a) `users.dias_vacaciones` NO SE EDITA A MANO.
+--
+--    Un disparador lo recalcula sumando los saldos de `vacation_periods`
+--    cada vez que esa tabla cambia. Si usted lo actualiza directamente, el
+--    número aguanta hasta el siguiente movimiento de vacaciones de esa
+--    persona y entonces vuelve al anterior, sin avisar. Para corregir un
+--    saldo se corrige el período; hay receta en 02_corregir.sql.
+--
+-- b) `vacation_periods.dias_saldo` es una columna calculada.
+--
+--    Vale siempre `dias_asignados - dias_consumidos`. No admite UPDATE.
+--
+-- c) `users.region` se deduce de `users.ciudad`.
+--
+--    Hay un disparador que la fija al insertar y al actualizar. Cambie la
+--    ciudad y la región se acomoda sola; al revés no funciona.
+--
+-- ===========================================================================
+-- 4. LO MÁS PELIGROSO DE TODA LA BASE
+-- ===========================================================================
+--
+--    delete from users where ...
+--
+-- Borrar UNA persona borra en cascada, sin preguntar y sin dejar rastro:
+--
+--    sus solicitudes            (requests, y con ellas adjuntos, firmas
+--                                y ajustes)
+--    sus períodos de vacaciones (vacation_periods)
+--    sus movimientos de saldo   (vacation_movements)
+--    su historial de la hoja    (vacaciones_historicas)
+--    sus firmas                 (signatures)
+--    sus familiares y contactos (family_members, emergency_contacts)
+--    sus conversaciones         (conversaciones, mensajes)
+--    sus avisos                 (notifications)
+--    sus consentimientos        (data_consents, data_subject_requests)
+--    sus códigos de acceso      (auth_otp, altas_pendientes,
+--                                confirmaciones_correo)
+--    sus cambios de ficha       (cambios_ficha)
+--
+-- Un expediente laboral entero por una línea de SQL, incluidos los
+-- consentimientos de protección de datos que la LOPDP obliga a poder
+-- demostrar.
+--
+-- EN MYSQL además: los borrados en cascada NO activan los disparadores de
+-- las tablas hijas. Nada se recalcula ni queda anotado al borrar así.
+--
+-- PARA DAR DE BAJA A ALGUIEN NO SE BORRA. Se usa la pantalla de
+-- Administración (registra la causa de salida y lo que queda por liquidar),
+-- o, si no hay otra forma:
+--
+--    update users set activo = false, fecha_salida = '2026-09-30',
+--                     motivo_salida = 'renuncia'
+--     where cedula = '0000000000';
+--
+-- Deja de aparecer en listados, calendarios y buscadores, no puede entrar, y
+-- su expediente queda entero por si mañana hay que consultarlo.
+--
+-- ===========================================================================
+-- 5. QUÉ PASA AL BORRAR EN CADA TABLA
+-- ===========================================================================
+--
+--   CASCADE   La fila hija se borra también. Silencioso.
+--   SET NULL  La fila hija se queda y pierde la referencia. Una solicitud
+--             aprobada por alguien que se borró queda «aprobada por nadie».
+--   BLOQUEA   MySQL se niega (error 1451). Es la protección que uno agradece.
+--
+-- La lista completa sale de la propia base: sección C de 03_eliminar.sql.
+--
+-- ===========================================================================
+-- 6. DESPUÉS DE TOCAR DATOS, RECALCULE
+-- ===========================================================================
+--
+-- EN MYSQL estas reglas viven en el sistema y no en la base, así que no se
+-- llaman con un SELECT desde DBeaver sino desde la terminal del servidor,
+-- en la carpeta del proyecto:
+--
+--   .venv/bin/python mysql/saldos.py recalcular                    # toda la planilla
+--   .venv/bin/python mysql/saldos.py recalcular --cedula 1712345678
+--
+-- Y si cambió una fecha de ingreso:
+--
+--   .venv/bin/python mysql/saldos.py regenerar --cedula 1712345678 --aplicar
+--
+-- La fecha de ingreso decide cuántos años de servicio hay y de cuántos días
+-- es cada uno. Cambiarla sin regenerar deja los períodos viejos y el saldo
+-- calculado sobre una antigüedad que ya no es.
+--
+-- Sin `--aplicar`, `regenerar` y `cargar` muestran cómo quedaría y no
+-- guardan nada.
+-- ===========================================================================

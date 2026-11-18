@@ -1,0 +1,39 @@
+# Publica el manual de usuario (solo la carpeta manuales/usuario) en GitHub Pages.
+#
+# Una sola vez, en GitHub: Settings › Pages › Build and deployment ›
+# Source: «GitHub Actions». Después se publica solo cuando cambia la carpeta,
+# o a mano desde Actions › «Publicar manual de usuario» › Run workflow.
+#
+# No publica nada más del repositorio: ni el manual técnico, ni el código.
+name: Publicar manual de usuario
+
+on:
+  push:
+    paths:
+      - "manuales/usuario/**"
+      - ".github/workflows/manual-usuario.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.despliegue.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: manuales/usuario
+      - id: despliegue
+        uses: actions/deploy-pages@v4

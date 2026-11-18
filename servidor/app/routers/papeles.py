@@ -1,0 +1,404 @@
+"""Los dos papeles que el colaborador firma y lleva a Talento Humano.
+
+Reglas de emisión, que son lo que distingue un documento del otro:
+
+  TRAZABILIDAD — el historial completo. Se emite UNA SOLA VEZ, al registrarse
+  la primera solicitud de vacaciones. No se vuelve a emitir salvo que
+  Administración o Talento Humano lo autoricen con un motivo; el parámetro
+  `trazabilidad_reemision` puede abrirlo («libre») si la empresa prefiere que
+  el colaborador lo reimprima cuando quiera. El ejemplar ya firmado nunca
+  cambia: una reemisión es un documento nuevo con folio nuevo.
+
+  SOLICITUD — solo lo pedido en esa sesión. Se emite SIEMPRE, con cada
+  solicitud de vacaciones, y se puede reimprimir cuantas veces haga falta: un
+  papel que se mojó en la bodega no es un incidente de seguridad. Cada
+  impresión queda contada.
+
+Quién puede verlos: el propio colaborador y Talento Humano. Nadie más, ni el
+jefe inmediato —lleva el historial completo de vacaciones de la persona, y el
+jefe no necesita eso para autorizar cinco días (LOPDP, Art. 10).
+"""
+from __future__ import annotations
+
+import hashlib
+import uuid
+from datetime import date
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
+from pydantic import BaseModel, Field
+
+from ..audit import registrar
+from ..db import booleanos, obtener_todos, obtener_uno
+from ..errores import traducir
+from ..deps import exigir_rol, usuario_actual
+from ..reglas import papeles as reglas_papeles
+from ..documentos import armar, nombre_archivo
+from ..storage import leer_adjunto, subir_adjunto
+
+router = APIRouter(tags=["Papeles para firmar"])
+
+Usuario = Annotated[dict, Depends(usuario_actual)]
+RRHH = Annotated[dict, Depends(exigir_rol("rrhh", "admin"))]
+
+
+class Reemision(BaseModel):
+    motivo: str = Field(..., min_length=15, max_length=400)
+
+
+CAMPOS = """i.id, i.user_id, i.tipo, i.request_id, i.folio,
+            i.emitido_en, i.impresiones, i.ultima_impresion, i.datos,
+            i.autorizado_en, i.autorizacion_motivo,
+            i.autorizado_por is not null as es_reemision,
+            a.nombre as autorizado_por, i.firmado_en,
+            i.escaneo_ruta is not null as tiene_escaneo, i.escaneo_subido_en"""
+
+
+async def _buscar(informe_id: uuid.UUID) -> dict | None:
+    fila = await obtener_uno(
+        f"""select {CAMPOS}, u.nombre as de_quien, u.cedula
+              from informes_firmados i
+              join users u on u.id = i.user_id
+              left join users a on a.id = i.autorizado_por
+             where i.id = %s""",
+        (str(informe_id),))
+    return booleanos([fila], "es_reemision")[0] if fila else None
+
+
+@router.get("/papeles/mios")
+async def mis_papeles(usuario: Usuario) -> dict:
+    """Lo que tengo emitido, para volver a imprimirlo."""
+    filas = await obtener_todos(
+        """select id, tipo, folio, request_id, emitido_en,
+                  impresiones, ultima_impresion,
+                  autorizado_por is not null as es_reemision, firmado_en,
+                  escaneo_ruta is not null as tiene_escaneo
+             from informes_firmados
+            where user_id = %s
+            order by emitido_en desc""",
+        (usuario["id"],))
+    reemision = await obtener_uno(
+        "select cfg_texto('trazabilidad_reemision') as modo")
+    return {
+        "papeles": booleanos(filas, "es_reemision", "tiene_escaneo"),
+        # Para que la pantalla sepa si ofrecer el botón o explicar a quién
+        # pedírselo, en vez de ofrecerlo y fallar después.
+        "trazabilidad_reemision": reemision["modo"],
+    }
+
+
+@router.post("/papeles/trazabilidad")
+async def asegurar_trazabilidad(request: Request, usuario: Usuario) -> dict:
+    """Mi constancia de goce. Si no la tengo, se emite ahora; si la tengo, es esa.
+
+    Hace falta para quienes ya habían pedido vacaciones antes de que el
+    documento existiera: su primera solicitud no lo generó porque no había
+    nada que generar.
+    """
+    fila = await reglas_papeles.informe_trazabilidad_asegurar(usuario["id"])
+    await registrar(request, "papel_trazabilidad_emitido", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="informes_firmados",
+                    entidad_id=str(fila["id"]))
+    return {"id": fila["id"], "folio": fila["folio"], "emitido_en": fila["emitido_en"]}
+
+
+async def _firmante_elegido(informe: dict, usuario: dict, firmante: str | None) -> dict | None:
+    """Quién firma por Talento Humano en este ejemplar.
+
+    Por defecto, la cabeza del departamento en la sede del colaborador. Solo
+    Talento Humano puede elegir a otro de su sede o dejarlo en blanco; al
+    colaborador siempre le sale el de por defecto.
+    """
+    if firmante and usuario["rol"] in ("rrhh", "admin"):
+        if firmante == "blanco":
+            return None
+        fila = await obtener_uno(
+            """SELECT u.nombre, COALESCE(f.cargo_firma, u.cargo) AS firma_como
+                 FROM firmantes_rrhh f JOIN users u ON u.id = f.user_id AND u.activo
+                WHERE f.id = %s""", (firmante,))
+        if fila is None:
+            raise HTTPException(status_code=422, detail={
+                "mensaje": "Ese firmante no está en la lista de Talento Humano."})
+        return fila
+    return await reglas_papeles.firmante_por_defecto(informe["user_id"])
+
+
+async def _fechas_de(informe_id: str) -> dict:
+    """Cuántas fechas anteriores se usaron en este documento y cuántas quedan."""
+    fila = await obtener_uno(
+        """select cfg_int('papeles_fechas_anteriores_max') as maximo, current_date() as hoy,
+                  (select count(*) from impresiones_papel
+                    where informe_id = %s and retroactiva) as usadas,
+                  (select u.fecha_ingreso from informes_firmados i join users u on u.id = i.user_id
+                    where i.id = %s) as minimo""", (informe_id, informe_id))
+    maximo = int(fila["maximo"] if fila["maximo"] is not None else 3)
+    return {"hoy": fila["hoy"], "maximo": maximo, "usadas": int(fila["usadas"]),
+            "restantes": max(maximo - int(fila["usadas"]), 0), "minimo": fila["minimo"]}
+
+
+@router.get("/papeles/{informe_id}/fechas")
+async def fechas_del_papel(informe_id: uuid.UUID, usuario: RRHH) -> dict:
+    """Para el diálogo de impresión: qué fecha se puede consignar y el historial."""
+    datos = await _fechas_de(str(informe_id))
+    historial = await obtener_todos(
+        """select p.fecha_documento, p.retroactiva, p.justificacion, p.impreso_en, u.nombre as por
+             from impresiones_papel p left join users u on u.id = p.impreso_por
+            where p.informe_id = %s order by p.impreso_en desc limit 30""", (str(informe_id),))
+    return {**datos, "historial": booleanos(historial, "retroactiva")}
+
+
+@router.get("/papeles/{informe_id}.pdf", response_class=Response)
+async def imprimir(informe_id: uuid.UUID, request: Request, usuario: Usuario,
+                   firmante: str | None = None, fecha: date | None = None,
+                   justificacion: str | None = None) -> Response:
+    """El documento en PDF, listo para imprimir y firmar a mano.
+
+    `fecha`: la que se consigna en el documento. Por defecto, hoy. Una
+    anterior solo la puede poner Talento Humano, con justificación, y hasta
+    `papeles_fechas_anteriores_max` veces por documento: el sistema entra a
+    funcionar con vacaciones que ya se gozaron y hay que documentarlas con
+    su fecha, pero no puede volverse una forma de rehacer papeles a voluntad.
+    """
+    informe = await _buscar(informe_id)
+    if informe is None:
+        raise HTTPException(status_code=404, detail={"mensaje": "Ese documento no existe."})
+
+    propio = str(informe["user_id"]) == str(usuario["id"])
+    if not propio and usuario["rol"] not in ("rrhh", "admin"):
+        # Ni el jefe inmediato: lleva el historial completo de la persona.
+        raise HTTPException(status_code=403, detail={
+            "mensaje": "Ese documento es del colaborador y de Talento Humano."})
+
+    limites = await _fechas_de(str(informe_id))
+    hoy = limites["hoy"]
+    fecha = fecha or hoy
+    retroactiva = fecha < hoy
+    if fecha > hoy:
+        raise HTTPException(status_code=422, detail={
+            "mensaje": "No se puede consignar una fecha futura."})
+    if retroactiva:
+        if usuario["rol"] not in ("rrhh", "admin"):
+            raise HTTPException(status_code=403, detail={
+                "mensaje": "Solo Talento Humano puede imprimir con una fecha anterior."})
+        if len((justificacion or "").strip()) < 15:
+            raise HTTPException(status_code=422, detail={
+                "mensaje": "Explique en al menos 15 caracteres por qué va con fecha anterior."})
+        if limites["restantes"] <= 0:
+            raise HTTPException(status_code=409, detail={
+                "mensaje": f"Este documento ya se imprimió {limites['usadas']} veces con fecha "
+                           f"anterior, que es el máximo. Imprímalo con la fecha de hoy."})
+        if limites["minimo"] and fecha < limites["minimo"]:
+            raise HTTPException(status_code=422, detail={
+                "mensaje": "La fecha no puede ser anterior al ingreso de la persona."})
+
+    elegido = await _firmante_elegido(informe, usuario, firmante)
+    contenido = armar({**informe, "fecha_documento": fecha, "retroactiva": retroactiva}, elegido)
+
+    from ..db import ejecutar
+    await ejecutar(
+        """insert into impresiones_papel (informe_id, fecha_documento, retroactiva, justificacion,
+                                          impreso_por) values (%s, %s, %s, %s, %s)""",
+        (str(informe_id), fecha, retroactiva,
+         (justificacion or "").strip()[:400] or None, str(usuario["id"])))
+
+    # Cada impresión se cuenta: es la diferencia entre «se emitió una vez» y
+    # «se imprimió catorce veces», y la segunda es la que cuenta en una
+    # auditoría.
+    await reglas_papeles.informe_impreso(str(informe_id))
+    await registrar(request, "papel_impreso", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="informes_firmados",
+                    entidad_id=str(informe_id),
+                    detalle={"tipo": informe["tipo"], "folio": informe["folio"],
+                             "de": informe["de_quien"], "propio": propio,
+                             "firma_th": elegido["nombre"] if elegido else None,
+                             "fecha_documento": fecha.isoformat(),
+                             "retroactiva": retroactiva,
+                             "justificacion": ((justificacion or "").strip() or None)
+                             if retroactiva else None})
+
+    return Response(content=contenido, media_type="application/pdf",
+                    headers={"Cache-Control": "no-store",
+                             "Content-Disposition": f'inline; filename="{nombre_archivo(informe)}"'})
+
+
+@router.get("/papeles/de-la-solicitud/{request_id}")
+async def papel_de_la_solicitud(request_id: uuid.UUID, usuario: Usuario) -> dict:
+    """El formulario de una solicitud concreta. Se emite si todavía no existía."""
+    duena = await obtener_uno(
+        "select user_id, tipo from requests where id = %s",
+        (str(request_id),))
+    if duena is None:
+        raise HTTPException(status_code=404, detail={"mensaje": "Esa solicitud no existe."})
+    if str(duena["user_id"]) != str(usuario["id"]) and usuario["rol"] not in ("rrhh", "admin"):
+        raise HTTPException(status_code=403, detail={
+            "mensaje": "Esa solicitud no es suya."})
+    if duena["tipo"] != "vacacion":
+        raise HTTPException(status_code=422, detail={
+            "mensaje": "Este formulario es de vacaciones; esa solicitud es de otro tipo."})
+
+    fila = await reglas_papeles.informe_solicitud_asegurar(str(request_id))
+    return {"id": fila["id"], "folio": fila["folio"], "emitido_en": fila["emitido_en"]}
+
+
+# -------------------------------------------------------- Talento Humano
+@router.get("/admin/papeles")
+async def listar_papeles(usuario: RRHH, q: str = "", tipo: str | None = None) -> list[dict]:
+    """Quién tiene qué emitido, y cuántas veces lo imprimió."""
+    condiciones, parametros = [], []
+    if q:
+        condiciones.append("(v.nombre like %s or v.cedula like %s or v.folio like %s)")
+        parametros += [f"%{q}%", f"{q}%", f"%{q}%"]
+    if tipo in ("trazabilidad", "solicitud"):
+        condiciones.append("v.tipo = %s")
+        parametros.append(tipo)
+    donde = ("where " + " and ".join(condiciones)) if condiciones else ""
+    filas = await obtener_todos(
+        f"""select v.id, v.user_id, v.cedula, v.nombre, v.departamento, v.tipo, v.folio,
+                   coalesce(v.region, 'sierra') as region,
+                   x.firmado_en, x.escaneo_subido_en, x.escaneo_sha256,
+                   x.escaneo_ruta is not null as tiene_escaneo,
+                   v.solicitud_folio, v.emitido_en, v.emitido_por, v.impresiones,
+                   v.ultima_impresion, v.es_reemision, v.es_el_vigente,
+                   v.autorizado_por, v.autorizacion_motivo
+              from v_informes_firmados v
+              join informes_firmados x on x.id = v.id
+              {donde}
+             order by v.emitido_en desc
+             limit 200""",
+        tuple(parametros))
+    return booleanos(filas, "es_reemision", "es_el_vigente", "tiene_escaneo")
+
+
+@router.post("/admin/papeles/{user_id}/reemitir-trazabilidad")
+async def reemitir(user_id: uuid.UUID, datos: Reemision,
+                   request: Request, usuario: RRHH) -> dict:
+    """Autoriza una nueva constancia de goce para esa persona.
+
+    No se borra ni se corrige la anterior: está firmada y sigue siendo un
+    documento válido. La nueva nace con su folio, con la fecha de hoy y con el
+    nombre de quien la autorizó impreso en el pie, que es exactamente lo que
+    hace falta para poder explicar en una auditoría por qué hay dos.
+    """
+    try:
+        fila = await reglas_papeles.informe_trazabilidad_reemitir(
+            str(user_id), str(usuario["id"]), datos.motivo)
+    except Exception as exc:  # la base es la que conoce las reglas
+        raise traducir(exc) from exc
+
+    persona = await obtener_uno("select nombre from users where id = %s",
+                                (str(user_id),))
+    await registrar(request, "papel_trazabilidad_reemitido", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="informes_firmados",
+                    entidad_id=str(fila["id"]),
+                    detalle={"de": persona["nombre"] if persona else None,
+                             "folio": fila["folio"], "motivo": datos.motivo})
+    return {"id": fila["id"], "folio": fila["folio"],
+            "mensaje": f"Nueva constancia {fila['folio']} para "
+                       f"{persona['nombre'] if persona else 'el colaborador'}. "
+                       "La anterior sigue siendo válida."}
+
+
+@router.post("/admin/papeles/{informe_id}/firmado")
+async def registrar_firma(informe_id: uuid.UUID, request: Request, usuario: RRHH) -> dict:
+    """Talento Humano recibió el documento firmado por el colaborador. El
+    registro queda concluido cuando, además, se sube el escaneo."""
+    informe = await _buscar(informe_id)
+    if informe is None:
+        raise HTTPException(status_code=404, detail={"mensaje": "Ese documento no existe."})
+    from ..db import ejecutar
+    await ejecutar(
+        """UPDATE informes_firmados SET firmado_en = NOW(6), firmado_registrado_por = %s
+            WHERE id = %s AND firmado_en IS NULL""", (str(usuario["id"]), str(informe_id)))
+    await registrar(request, "papel_firmado", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="informes_firmados",
+                    entidad_id=str(informe_id),
+                    detalle={"folio": informe["folio"], "de": informe["de_quien"]})
+    return {"mensaje": f"Documento {informe['folio']} registrado como firmado por "
+                       f"{informe['de_quien']}. Suba hoy el escaneo para concluir el registro."}
+
+
+# ------------------------------------------------------------ escaneo firmado
+# El papel firmado es la prueba; su escaneo es lo que se presenta en una
+# auditoría sin ir al archivador. Se guarda tal cual llegó (sin recodificar:
+# lo que se audita es el archivo original) en ADJUNTOS_DIR/firmados/, fuera
+# de la web y del repositorio, con su huella SHA-256. La huella permite
+# demostrar después que el archivo no se alteró.
+ESCANEO_MAXIMO = 15 * 1024 * 1024
+ESCANEO_TIPOS = {"application/pdf": "pdf", "image/jpeg": "jpg", "image/png": "png"}
+FIRMAS_DE_ARCHIVO = {"pdf": b"%PDF", "jpg": b"\xff\xd8\xff", "png": b"\x89PNG"}
+
+
+@router.post("/admin/papeles/{informe_id}/escaneo")
+async def subir_escaneo(informe_id: uuid.UUID, request: Request, usuario: RRHH,
+                        archivo: UploadFile = File(...),
+                        motivo_reemplazo: str | None = Form(None)) -> dict:
+    """Sube el documento firmado y escaneado. Si aún no constaba como firmado,
+    queda registrado como firmado en el mismo acto."""
+    informe = await _buscar(informe_id)
+    if informe is None:
+        raise HTTPException(status_code=404, detail={"mensaje": "Ese documento no existe."})
+    contenido = await archivo.read()
+    extension = ESCANEO_TIPOS.get(archivo.content_type or "")
+    if not contenido:
+        raise HTTPException(status_code=422, detail={"mensaje": "El archivo está vacío."})
+    if len(contenido) > ESCANEO_MAXIMO:
+        raise HTTPException(status_code=413, detail={"mensaje": "El escaneo debe pesar menos de 15 MB."})
+    if extension is None or not contenido.startswith(FIRMAS_DE_ARCHIVO[extension]):
+        raise HTTPException(status_code=422, detail={
+            "mensaje": "Suba el escaneo en PDF (recomendado), JPG o PNG."})
+
+    previo = await obtener_uno(
+        "select escaneo_ruta, escaneo_sha256 from informes_firmados where id = %s", (str(informe_id),))
+    if previo and previo["escaneo_ruta"]:
+        # Reemplazar es excepcional (se escaneó mal una hoja) y deja rastro.
+        # El archivo anterior no se borra: queda en el disco y en la bitácora.
+        if len((motivo_reemplazo or "").strip()) < 10:
+            raise HTTPException(status_code=409, detail={
+                "mensaje": "Este documento ya tiene su escaneo. Para reemplazarlo indique el motivo."})
+
+    huella = hashlib.sha256(contenido).hexdigest()
+    ruta = f"firmados/{informe['user_id']}/{informe['folio']}-{huella[:12]}.{extension}"
+    await subir_adjunto(ruta, contenido, archivo.content_type)
+    from ..db import ejecutar
+    await ejecutar(
+        """UPDATE informes_firmados
+              SET escaneo_ruta = %s, escaneo_nombre = %s, escaneo_mime = %s, escaneo_bytes = %s,
+                  escaneo_sha256 = %s, escaneo_subido_por = %s, escaneo_subido_en = NOW(6),
+                  firmado_en = COALESCE(firmado_en, NOW(6)),
+                  firmado_registrado_por = COALESCE(firmado_registrado_por, %s)
+            WHERE id = %s""",
+        (ruta, (archivo.filename or "")[:160], archivo.content_type, len(contenido), huella,
+         str(usuario["id"]), str(usuario["id"]), str(informe_id)))
+    await registrar(request, "papel_escaneo_subido", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="informes_firmados",
+                    entidad_id=str(informe_id),
+                    detalle={"folio": informe["folio"], "de": informe["de_quien"],
+                             "sha256": huella, "bytes": len(contenido),
+                             "reemplaza": (previo or {}).get("escaneo_sha256"),
+                             "motivo_reemplazo": (motivo_reemplazo or "").strip() or None})
+    return {"mensaje": f"Escaneo del documento {informe['folio']} guardado.", "sha256": huella}
+
+
+@router.get("/papeles/{informe_id}/escaneo", response_class=Response)
+async def ver_escaneo(informe_id: uuid.UUID, request: Request, usuario: Usuario) -> Response:
+    """El escaneo firmado. Lo ven Talento Humano y el propio colaborador."""
+    fila = await obtener_uno(
+        """select user_id, folio, escaneo_ruta, escaneo_mime, escaneo_sha256
+             from informes_firmados where id = %s""", (str(informe_id),))
+    es_rrhh = usuario["rol"] in ("rrhh", "admin")
+    if fila is None or not fila["escaneo_ruta"] or (
+            not es_rrhh and str(fila["user_id"]) != str(usuario["id"])):
+        raise HTTPException(status_code=404, detail={"mensaje": "No hay escaneo de ese documento."})
+    contenido = await leer_adjunto(fila["escaneo_ruta"])
+    if contenido is None:
+        raise HTTPException(status_code=404, detail={
+            "mensaje": "El archivo no está en el servidor. Revise el respaldo de adjuntos."})
+    integro = hashlib.sha256(contenido).hexdigest() == fila["escaneo_sha256"]
+    await registrar(request, "papel_escaneo_visto", user_id=str(usuario["id"]),
+                    cedula=usuario["cedula"], entidad="informes_firmados",
+                    entidad_id=str(informe_id), detalle={"folio": fila["folio"], "integro": integro})
+    nombre = f"{fila['folio']}-firmado.{ESCANEO_TIPOS.get(fila['escaneo_mime'], 'pdf')}"
+    return Response(contenido, media_type=fila["escaneo_mime"] or "application/octet-stream",
+                    headers={"Content-Disposition": f'inline; filename="{nombre}"',
+                             "Cache-Control": "private, no-store",
+                             "X-Integridad": "ok" if integro else "ALTERADO"})

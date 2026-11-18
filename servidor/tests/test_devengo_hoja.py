@@ -1,0 +1,243 @@
+"""El devengo del año en curso, como lo lleva Talento Humano.
+
+El sistema y la hoja daban cifras distintas para la misma persona: 84,33
+frente a 83,75. La diferencia no era de redondeo. El sistema prorrateaba
+también los días adicionales del Art. 69, y la hoja los concede enteros al
+cumplir el año.
+
+Lo que estas pruebas fijan es lo que hace que el cambio sea seguro: que los
+dos cálculos coinciden exactamente en cada aniversario, y que solo se
+separan dentro del año en marcha.
+"""
+from __future__ import annotations
+
+import re
+from decimal import Decimal
+
+from app.db import ejecutar, obtener_uno
+from tests.test_reglas_nuevas import auth  # noqa: F401
+
+BASE = Decimal("1.25")   # quince días partidos para doce
+
+
+async def _devengado(ingreso: str, periodo: int) -> Decimal:
+    fila = await obtener_uno(
+        "select dias_devengados_en_curso(%s, %s) as d", (ingreso, periodo))
+    return Decimal(str(fila["d"]))
+
+
+async def test_el_ano_en_curso_acumula_uno_con_veinticinco_al_mes(cliente):
+    """Siete meses del sexto año son 8,75 días, no 9,33.
+
+    Es el caso que destapó todo: la hoja decía 83,75 devengados y el panel
+    84,33 para la misma persona y el mismo día.
+    """
+    hoy = await obtener_uno("select current_date() - interval 67 month as f")
+    ingreso = str(hoy["f"])
+    assert await _devengado(ingreso, 6) == Decimal("8.75")
+
+
+async def test_los_dos_calculos_coinciden_en_cada_aniversario(cliente):
+    """La razón por la que el cambio no mueve ningún saldo de nadie.
+
+    La hoja calcula «meses trabajados x 1,25 + días adicionales enteros». El
+    sistema suma el tope de cada año cumplido. Al completar un año las dos
+    fórmulas dan el mismo número: la diferencia vive solo dentro del año y se
+    cierra sola en el aniversario.
+    """
+    for anios in (1, 3, 5, 6, 10, 16, 21):
+        # Lo que dice la hoja: doce meses por año, a 1,25, más los adicionales.
+        topes = [Decimal(str((await obtener_uno(
+            "select dias_por_antiguedad(%s) as d", (k,)))["d"]))
+            for k in range(1, anios + 1)]
+        segun_el_sistema = sum(topes)
+        base_hoja = BASE * 12 * anios
+        adicionales = segun_el_sistema - base_hoja
+
+        assert base_hoja + adicionales == segun_el_sistema, f"con {anios} años"
+        # Y los adicionales son enteros: nunca una fracción de día.
+        assert adicionales == adicionales.to_integral_value(), (
+            f"con {anios} años los adicionales salieron fraccionados: {adicionales}")
+
+        # Recién cumplido el aniversario, el período en curso arranca en cero
+        # con cualquiera de los dos cálculos.
+        fila = await obtener_uno(
+            "select (current_date() - interval %s YEAR) as f", (anios,))
+        assert await _devengado(str(fila["f"]), anios + 1) == Decimal("0.00")
+
+
+async def test_quien_lleva_menos_de_cinco_anos_no_ve_ninguna_diferencia(cliente):
+    """283 de las 351 personas de la planilla. Para ellas no cambia nada.
+
+    Antes de los cinco años no hay días adicionales que prorratear, así que
+    los dos cálculos eran ya el mismo.
+    """
+    for anios, meses in ((0, 7), (1, 3), (2, 11), (4, 6)):
+        fila = await obtener_uno(
+            """select (current_date() - interval %s year - interval %s month) as f""",
+            (anios, meses))
+        ingreso = str(fila["f"])
+        esperado = (BASE * meses).quantize(Decimal("0.01"))
+        assert await _devengado(ingreso, anios + 1) == esperado, f"{anios}a {meses}m"
+
+
+async def test_no_acumula_mas_de_un_ano_si_el_periodo_quedo_sin_renovar(cliente):
+    """Un período vencido y no renovado no sigue sumando para siempre."""
+    fila = await obtener_uno("select (current_date() - interval 3 YEAR) as f")
+    assert await _devengado(str(fila["f"]), 1) == BASE * 12
+
+
+async def test_se_puede_volver_al_prorrateo_sin_otra_migracion(cliente):
+    """Si la empresa decide adoptar el cálculo del sistema, es un parámetro.
+
+    Se deja la puerta porque la decisión es suya, no del programa.
+    """
+    from app.db import ejecutar
+
+    fila = await obtener_uno("select current_date() - interval 67 month as f")
+    ingreso = str(fila["f"])
+    try:
+        await ejecutar(
+            """insert into app_config (clave, valor)
+               values ('vacaciones_extra_prorrateado', 'true')
+               on duplicate key update valor = 'true'""")
+        assert await _devengado(ingreso, 6) == Decimal("9.33")
+    finally:
+        await ejecutar(
+            """update app_config set valor = 'false'
+                where clave = 'vacaciones_extra_prorrateado'""")
+    assert await _devengado(ingreso, 6) == Decimal("8.75")
+
+
+async def test_ante_un_parametro_raro_se_queda_con_el_calculo_de_la_hoja(cliente):
+    """Ni «sí», ni «1», ni vacío encienden el prorrateo. Solo «true»."""
+    from app.db import ejecutar
+
+    fila = await obtener_uno("select current_date() - interval 67 month as f")
+    ingreso = str(fila["f"])
+    for valor in ("si", "1", "", "TRUE.", "verdadero"):
+        await ejecutar(
+            """insert into app_config (clave, valor)
+               values ('vacaciones_extra_prorrateado', %s)
+               on duplicate key update valor = values(valor)""", (valor,))
+        assert await _devengado(ingreso, 6) == Decimal("8.75"), f"con «{valor}»"
+    await ejecutar(
+        """update app_config set valor = 'false'
+            where clave = 'vacaciones_extra_prorrateado'""")
+
+
+async def test_la_vista_de_cotejo_ensena_los_dos_numeros(cliente, empleado):
+    """«El sistema dice otra cosa» no es discutible sin las dos cifras."""
+    fila = await obtener_uno(
+        """select meses_del_periodo, tope_anual_del_periodo,
+                  devengado_hoja, devengado_prorrateado
+             from v_devengo_cotejo limit 1""")
+    assert fila is not None
+    assert fila["devengado_hoja"] <= fila["devengado_prorrateado"]
+
+
+async def test_ningun_aviso_dice_que_los_dias_se_pierden(cliente):
+    """La afirmación que el sistema no puede hacer, en ningún aviso.
+
+    El Art. 75 permite acumular hasta tres años y el Art. 76 manda pagar lo
+    no gozado; la Constitución, en su Art. 326 núm. 2, declara los derechos
+    laborales irrenunciables. Un sistema de la empresa que le dice a alguien
+    que va a perder días no comete un error de redacción: empuja a decisiones
+    equivocadas, y lo hace con la voz de la empresa.
+
+    Se revisan las funciones que escriben avisos y los avisos ya guardados.
+    """
+    from app.db import obtener_todos
+
+    prohibido = ("se pierden", "perderá", "perder sus días", "perderlas",
+                 "caducan sus días")
+
+    # Los comodines van como parámetro: el cliente lee el signo de porcentaje
+    # como marcador aunque esté dentro de una cadena SQL.
+    funciones = await obtener_todos(
+        """select routine_name as proname, routine_definition as prosrc
+             from information_schema.routines
+            where routine_schema = database()
+              and (routine_name like %s or routine_name like %s or routine_name like %s)""",
+        ("%alerta%", "%notific%", "%vacacion%"))
+    # En MySQL buena parte de esas reglas viven en Python. Se revisan las
+    # cadenas que el código le dice a la gente, no sus docstrings ni sus
+    # comentarios, que explican justamente que antes se anunciaba la pérdida.
+    import ast
+    from pathlib import Path
+    app = Path(__file__).resolve().parents[1] / "app"
+    for archivo in [*app.glob("reglas/*.py"), app / "notificaciones.py", app / "correo.py"]:
+        arbol = ast.parse(archivo.read_text(encoding="utf-8"))
+        docstrings = {id(n.body[0].value) for n in ast.walk(arbol)
+                      if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                      and n.body and isinstance(n.body[0], ast.Expr)
+                      and isinstance(n.body[0].value, ast.Constant)}
+        textos = [n.value for n in ast.walk(arbol)
+                  if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docstrings]
+        funciones.append({"proname": archivo.name, "prosrc": "\n".join(textos)})
+    def sin_comentarios(fuente: str) -> str:
+        """Lo que la función le dice a la gente, sin lo que se dice a sí misma.
+
+        Los comentarios explican precisamente que antes se anunciaba una
+        pérdida y ya no; buscar ahí la frase prohibida la encuentra siempre
+        y obligaría a borrar la explicación para que la prueba pase.
+        """
+        return "\n".join(re.sub(r"--.*$", "", linea)
+                          for linea in (fuente or "").splitlines()).lower()
+
+    for f in funciones:
+        visible = sin_comentarios(f["prosrc"])
+        for frase in prohibido:
+            assert frase not in visible, f"{f['proname']} todavía dice «{frase}»"
+
+    guardados = await obtener_todos(
+        """select id, mensaje from notifications
+            where mensaje like %s or mensaje like %s""",
+        ("%se pierden%", "%perderá%"))
+    assert not guardados, (
+        "quedan avisos enviados que afirman que los días se pierden: "
+        f"{[g['id'] for g in guardados][:5]}")
+
+
+# ------------------------------------------------- el período en curso vale
+# lo del PERÍODO, no lo de los años cumplidos (migración 0041)
+async def test_a_este_anio_le_tocan_los_dias_del_periodo_en_curso(cliente, auth, empleado):
+    """Quien lleva 7 años CUMPLIDOS cursa su período 8, que vale 18 días.
+
+    Los períodos se generan por su número —el 6 valió 16, el 7 valió 17— pero
+    la línea informativa los calculaba por los años cumplidos, y le decía 17
+    a quien va a consolidar 18. El saldo nunca estuvo mal: el año en curso
+    devenga sobre la base de quince. Lo que estaba mal era lo que se le decía
+    a la persona, que es el número que Talento Humano contrasta con su hoja.
+    """
+    await ejecutar(
+        "update users set fecha_ingreso = current_date() - interval 90 month "
+        "where id = %s", (empleado["id"],))
+
+    saldo = (await cliente.get("/auth/mi-saldo", headers=auth)).json()
+    assert saldo["anios_servicio"] == 7
+    assert saldo["dias_por_anio_actual"] == 18, (
+        "cursa el período 8: 15 base + 3 por antigüedad")
+
+
+async def test_por_debajo_de_seis_anios_no_cambia_nada(cliente, auth, empleado):
+    """Todos esos períodos valen quince: el día adicional nace en el sexto."""
+    await ejecutar(
+        "update users set fecha_ingreso = current_date() - interval 38 month "
+        "where id = %s", (empleado["id"],))
+    saldo = (await cliente.get("/auth/mi-saldo", headers=auth)).json()
+    assert saldo["anios_servicio"] == 3
+    assert saldo["dias_por_anio_actual"] == 15
+
+
+async def test_la_correccion_no_mueve_el_saldo(cliente, auth, empleado):
+    """El año en curso devenga sobre la base de quince, no sobre el tope del
+    período: por eso esto corrige un texto y no un número de días."""
+    await ejecutar(
+        "update users set fecha_ingreso = current_date() - interval 90 month "
+        "where id = %s", (empleado["id"],))
+    saldo = (await cliente.get("/auth/mi-saldo", headers=auth)).json()
+    fila = await obtener_uno(
+        "select round(coalesce(sum(dias_saldo), 0), 2) as total "
+        "from vacation_periods where user_id = %s and not caducado", (empleado["id"],))
+    assert float(saldo["saldo_total"]) == float(fila["total"])

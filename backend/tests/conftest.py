@@ -1,0 +1,126 @@
+"""Pruebas contra una base PostgreSQL real (no simulada).
+
+Se apuntan a la base local levantada para desarrollo; en CI se apunta a una
+instancia efímera. El correo se intercepta para leer el código sin enviarlo.
+"""
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+os.environ.setdefault(
+    "DATABASE_URL",
+    "postgresql://postgres@/rrhh_v4?host=/var/lib/pgtest&port=55432",
+)
+os.environ.setdefault("SUPABASE_JWT_SECRET", "secreto-de-prueba-suficientemente-largo-1234")
+os.environ.setdefault("EMAIL_BACKEND", "console")
+os.environ.setdefault("ENTORNO", "desarrollo")
+# El límite de envíos de código es por cédula y, multiplicado por cuatro, por
+# IP. Todas las pruebas salen de la misma IP, así que con el valor de
+# producción (5, o sea 20 por IP) la suite se bloqueaba a sí misma en cuanto
+# algo más había iniciado sesión desde esta máquina en la última hora: las
+# pruebas de navegador dejaban el contador alto y aquí empezaban a llover
+# 429 en el arranque de cada prueba. El límite se prueba aparte, leyendo este
+# mismo valor en vez de suponerlo.
+os.environ.setdefault("OTP_MAX_ENVIOS_HORA", "50")
+os.environ.setdefault("SUPABASE_URL", "")
+os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
+
+import httpx  # noqa: E402
+from app import correo  # noqa: E402
+from app.db import ejecutar, obtener_uno  # noqa: E402
+from app.main import app  # noqa: E402
+
+CEDULA_PRUEBA = "1700000001"
+CEDULA_SIN_REGISTRO = "0900000001"
+CORREO_PRUEBA = "prueba@api.test"
+
+
+@pytest.fixture
+def codigos(monkeypatch) -> list[str]:
+    """Captura el OTP en lugar de enviarlo por correo."""
+    capturados: list[str] = []
+
+    async def falso_envio(destinatario: str, nombre: str, codigo: str) -> None:
+        capturados.append(codigo)
+
+    monkeypatch.setattr(correo, "enviar_otp", falso_envio)
+    return capturados
+
+
+@pytest.fixture
+async def cliente(empleado):
+    transporte = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transporte, base_url="http://api") as c:
+        yield c
+
+
+@pytest.fixture
+async def empleado():
+    """Crea un empleado de prueba y limpia todo lo que la prueba genere."""
+    await _limpiar()
+    fila = await obtener_uno(
+        """
+        insert into public.users (cedula, nombre, email, rol, fecha_ingreso, telefono)
+        values (%s, 'API Empleado', %s, 'empleado',
+                (current_date - make_interval(years => 7))::date, '0999123456')
+        returning id
+        """,
+        (CEDULA_PRUEBA, CORREO_PRUEBA),
+    )
+    user_id = str(fila["id"])
+    # Saldo realista: sin esto acumularía los 7 años completos (108 días)
+    await obtener_uno("select public.cargar_saldo_inicial(%s, 12.5, 0) as saldo", (user_id,))
+    yield {"id": user_id, "cedula": CEDULA_PRUEBA, "email": CORREO_PRUEBA}
+    await _limpiar()
+
+
+async def _limpiar() -> None:
+    # Los códigos de acceso se borran por dueño y no por una lista fija de
+    # cédulas. El límite de envíos cuenta por hora, y cada módulo de pruebas
+    # crea su propio jefe, su guardia o su Talento Humano: con una lista
+    # cerrada, esas cédulas acumulaban envíos hasta que el fixture recibía un
+    # 429 y la prueba moría en el arranque, sin que nada estuviera roto. Pasa
+    # igual cuando las pruebas de navegador entraron antes con el mismo
+    # personal de la semilla.
+    await ejecutar(
+        """delete from public.auth_otp
+            where cedula = any(%s)
+               or cedula in (select cedula from public.users
+                              where email::text like '%%@api.test'
+                                 or email::text like '%%@itsanet.test')""",
+        ([CEDULA_PRUEBA, CEDULA_SIN_REGISTRO, "0900000001", "1100000007", "1200000006"],))
+    await ejecutar(
+        "delete from public.notifications where user_id in "
+        "(select id from public.users where email like %s)", ("%@api.test",))
+    await ejecutar("delete from public.audit_logs where cedula = any(%s)",
+                   ([CEDULA_PRUEBA, CEDULA_SIN_REGISTRO, "0900000001", "1100000007", "1200000006"],))
+    # Y los intentos fallidos de identificarse, que NO se borran por cédula:
+    # se registran justamente con una que no corresponde a nadie, así que la
+    # limpieza de arriba no los alcanzaba. El alta se cierra tras diez
+    # intentos por hora desde la misma red, de modo que se iban acumulando
+    # entre ejecuciones hasta que todas las pruebas del alta empezaban a
+    # recibir 429 sin que nada estuviera roto.
+    await ejecutar("delete from public.audit_logs where accion = 'alta_identidad_fallida'")
+    # Los ajustes apuntan a quien los hizo y la clave foránea es restrictiva a
+    # propósito: en producción las personas se desactivan, no se borran, y la
+    # constancia del ajuste debe sobrevivirlas. Aquí sí hay que quitarlos.
+    await ejecutar(
+        "delete from public.request_adjustments where ajustado_por in "
+        "(select id from public.users where email like %s)", ("%@api.test",))
+    await ejecutar("delete from public.visitors where motivo_visita like %s", ("%de prueba%",))
+    await ejecutar("delete from public.visitors where nombre like %s", ("Proveedor de prueba%",))
+    # También por cédula: una prueba que cambie el correo de un usuario de
+    # prueba lo dejaba fuera de esta limpieza y rompía a las siguientes.
+    await ejecutar(
+        "delete from public.users where cedula = any(%s)",
+        ([CEDULA_PRUEBA, "0900000001", "1100000007", "1200000006",
+          "1700000019", "1700000027", "1700000035"],))
+    await ejecutar("delete from public.users where email like %s", ("%@api.test",))
+    await ejecutar("delete from public.users where email like %s", ("%@empresa-prueba.com",))
+    await ejecutar("delete from auth.users where email like %s", ("%@api.test",))

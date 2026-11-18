@@ -1,0 +1,2605 @@
+/* Panel del empleado: perfil, saldo, alertas y solicitudes. */
+import { api, sesion, fecha, fechaHora, esc, ESTADOS, ErrorApi, uuid } from "./api.js";
+import { prepararImpresion } from "./firmante.js";
+import { montarNavegacion } from "./navegacion.js";
+
+const $ = (id) => document.getElementById(id);
+const estado = {
+  tipos: [], catalogo: null, pilarActual: null, adjuntos: [],
+  tipoActual: null, saldo: null, bloqueMinimo: null, modalidad: null,
+  reglas: null,
+  solicitudes: [], pendientes: [], anulaciones: [], calendario: [],
+  mes: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+};
+
+if (!sesion.vigente) location.replace("index.html");
+
+/* ------------------------------------------------------------------ avisos */
+let temporizadorAviso;
+function avisar(texto, tono = "neutro") {
+  const el = $("aviso-texto");
+  el.textContent = texto;
+  el.className =
+    "max-w-sm rounded-xl px-4 py-3 text-center text-sm shadow-lg " +
+    (tono === "error" ? "bg-rose-600 text-white" : "bg-slate-900 text-white");
+  clearTimeout(temporizadorAviso);
+  temporizadorAviso = setTimeout(() => el.classList.add("hidden"), tono === "error" ? 9000 : 4000);
+}
+
+/* ------------------------------------------------------------------ modales */
+function abrir(id) { $(id).showModal(); }
+document.addEventListener("click", (e) => {
+  if (e.target.closest("[data-cerrar]")) e.target.closest("dialog")?.close();
+});
+/* Cerrar al pulsar fuera del cuadro, pero solo si el gesto EMPEZÓ fuera.
+
+   Cerraba con cualquier clic que aterrizara en el diálogo, incluido el que
+   empieza dentro —al arrastrar para seleccionar texto, o al soltar el dedo
+   un poco más allá del borde en un teléfono— y se perdía todo lo escrito en
+   el formulario. Exigir que el gesto nazca y muera en el fondo elimina el
+   cierre accidental sin quitar el atajo a quien sí quiere salir. */
+document.querySelectorAll("dialog").forEach((d) => {
+  let empezoFuera = false;
+  d.addEventListener("pointerdown", (e) => { empezoFuera = e.target === d; });
+  d.addEventListener("click", (e) => {
+    if (e.target === d && empezoFuera) d.close();
+    empezoFuera = false;
+  });
+});
+
+/* ------------------------------------------------------------------- carga */
+async function cargar() {
+  const perfil = sesion.perfil;
+  $("cab-nombre").textContent = perfil.nombre;
+  $("cab-cargo").textContent = [perfil.cargo, perfil.departamento].filter(Boolean).join(" · ") || perfil.rol;
+
+  // Quien aprueba cambia de sombrero sin cambiar de página
+  const aprueba = ["jefe", "rrhh", "admin"].includes(perfil.rol);
+  const resuelveAnulaciones = ["rrhh", "admin"].includes(perfil.rol);
+  $("pestanas").classList.toggle("hidden", !aprueba);
+  $("pestana-anulaciones").classList.toggle("hidden", !resuelveAnulaciones);
+
+  const [saldo, notificaciones, solicitudes, catalogo, reglas, calendario,
+         pendientes, anulaciones, bloques, porConfirmar, rechazadas] =
+    await Promise.all([
+      api.saldo().catch(() => null),
+      api.notificaciones().catch(() => []),
+      api.misSolicitudes().catch(() => []),
+      api.catalogoPermisos().catch(() => ({ mandato: "", pilares: [] })),
+      api.tablaAntiguedad().catch(() => null),
+      api.calendario().catch(() => []),
+      aprueba ? api.pendientes().catch(() => []) : Promise.resolve([]),
+      resuelveAnulaciones ? api.anulacionesPendientes().catch(() => []) : Promise.resolve([]),
+      // `null` y no `[]` a propósito: hay que poder distinguir «el
+      // administrador no dejó ningún bloque» de «no se pudo preguntar».
+      api.misBloques().then((r) => r.bloques).catch(() => null),
+      // Reemplazos que Talento Humano asignó a su gente y que usted confirma.
+      aprueba ? api.reemplazosPorConfirmar().catch(() => []) : Promise.resolve([]),
+      // Lo que rechazó en los últimos 30 días, por si fue un error.
+      aprueba ? api.rechazadas().catch(() => []) : Promise.resolve([]),
+    ]);
+
+  estado.reglas = reglas ? {
+    anticipacion: reglas.parametros?.vacaciones_anticipacion_dias,
+    sugerido: reglas.parametros?.vacaciones_bloque_sugerido,
+    minimo: reglas.parametros?.vacaciones_bloque_minimo,
+    tabla: reglas.tabla, lineamientos: reglas.lineamientos,
+    avisos: reglas.avisos || [],
+  } : null;
+  Object.assign(estado, { saldo, solicitudes, calendario, pendientes, anulaciones, porConfirmar, rechazadas });
+  montarNavegacion($("barra"), {
+    activo: "panel",
+    contadores: { pendientes: pendientes.length + porConfirmar.length, anulaciones: anulaciones.length },
+  });
+
+  pintarResumen(perfil, saldo);
+  pintarAlertas(notificaciones);
+  pintarLogros(perfil.logros);
+  pintarSolicitudes();
+  montarPilares(catalogo);
+  pintarCalendario();
+  pintarPendientes();
+  pintarAnulaciones();
+  if (resuelveAnulaciones) {
+    // Para Talento Humano la pestaña es la gestión completa, no solo «por aprobar».
+    $("pestanas").querySelector('[data-pestana="aprobaciones"]').firstChild.textContent = "Solicitudes ";
+    $("vista-seguimiento").classList.toggle("hidden", !location.hash.startsWith("#aprobaciones"));
+    cargarSeguimiento().catch(() => {});
+  }
+  // No se espera: el panel no puede quedarse en blanco porque la lista de
+  // documentos tarde. Enciende su propia sección cuando llega.
+  cargarPapeles();
+  // Al final: los pintores de arriba encienden y apagan sus propias
+  // secciones, y quien decide lo que se ve tiene que hablar el último.
+  aplicarConfiguracionDelPanel(bloques);
+}
+
+/* ------------------------------------------------------------- pestañas */
+document.querySelectorAll("[data-pestana]").forEach((boton) =>
+  boton.addEventListener("click", () => mostrarPestana(boton.dataset.pestana))
+);
+
+function mostrarPestana(cual) {
+  document.querySelectorAll("[data-pestana]").forEach((b) => {
+    const activa = b.dataset.pestana === cual;
+    b.className = activa
+      ? "border-b-2 border-slate-900 px-4 py-3 text-sm font-medium"
+      : "border-b-2 border-transparent px-4 py-3 text-sm font-medium text-slate-500 hover:text-slate-900";
+  });
+  $("vista-panel").classList.toggle("hidden", cual !== "panel");
+  $("vista-aprobaciones").classList.toggle("hidden", cual !== "aprobaciones");
+  $("vista-seguimiento").classList.toggle("hidden", cual !== "aprobaciones" || !esTH());
+  $("vista-anulaciones").classList.toggle("hidden", cual !== "anulaciones");
+  location.hash = cual === "panel" ? "" : `#${cual}`;
+}
+
+/* El empleado no lee decimales. «8.75 días» no significa nada cuando uno
+   planifica una semana; y redondear hacia arriba prometería un día que no
+   existe, así que se trunca: lo que se muestra siempre se puede pedir.
+   Talento Humano sí ve la cifra exacta, en sus propias pantallas. */
+function diasEnteros(valor) {
+  return Math.floor(Number(valor || 0));
+}
+
+/* La cifra tal cual es, con coma decimal y sin ceros de relleno: 8,75 · 15 · 1,25.
+
+   Redondear hacia abajo parecía amable —«8 días» se lee mejor que «8,75»—,
+   pero le quitaba a la persona tres cuartos de día y dejaba de cuadrar con la
+   hoja que Talento Humano le muestra si pregunta. Una cifra que no cuadra con
+   la del departamento no genera confianza, genera un reclamo. El decimal se
+   explica en el desplegable de la tarjeta: son 1,25 días por mes. */
+function diasExactos(valor) {
+  const n = Number(valor || 0);
+  return n.toLocaleString("es-EC", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+function plural(n, singular, plural_) {
+  return `${n} ${n === 1 ? singular : plural_}`;
+}
+
+/* ------------------------------------------- qué se ve en esta pantalla
+
+   El administrador decide desde «Pantalla principal» qué bloques aparecen,
+   en qué orden y para qué roles. Aquí solo se obedece.
+
+   SI LA CONFIGURACIÓN NO LLEGA, SE MUESTRA TODO. Es la regla que hace que
+   esto no pueda romper nada: un fallo en lo accesorio —la red, el servidor,
+   una versión vieja del backend— no puede dejar a nadie mirando una pantalla
+   vacía. Ante la duda, el panel completo, que es como estaba antes de que
+   esto existiera. */
+function aplicarConfiguracionDelPanel(bloques) {
+  if (!Array.isArray(bloques) || !bloques.length) return;
+
+  const porClave = new Map(bloques.map((b) => [b.clave, b]));
+  document.querySelectorAll("[data-bloque]").forEach((nodo) => {
+    const config = porClave.get(nodo.dataset.bloque);
+    if (!config) {
+      // Oculto de verdad y no solo invisible: un bloque que sigue ocupando
+      // sitio deja un hueco que nadie se explica.
+      // En línea y no por clase: las clases de maquetación también fijan
+      // `display`, y cuál gana depende del orden de la hoja de estilos. Un
+      // bloque que el administrador apagó no puede quedar visible por eso.
+      nodo.hidden = true;
+      nodo.style.display = "none";
+      return;
+    }
+    // El orden viaja como número de la base; CSS lo respeta tanto en la
+    // columna del panel como dentro de la fila de tarjetas de arriba.
+    nodo.style.order = String(config.orden);
+  });
+
+  const anuncio = porClave.get("anuncio");
+  if (anuncio) {
+    $("anuncio-titulo").textContent = anuncio.titulo;
+    $("anuncio-cuerpo").textContent = anuncio.cuerpo || "";
+    $("anuncio").classList.remove("hidden");
+  }
+
+  // Si de la fila de tarjetas no queda ninguna, la fila sobra.
+  const resumen = $("resumen");
+  if (resumen && !resumen.querySelector("[data-bloque]:not([hidden])")) {
+    resumen.classList.add("hidden");
+  }
+}
+
+function pintarResumen(perfil, saldo) {
+  /* El número grande es EL SALDO: los días que la persona tiene, la misma
+     cifra que Talento Humano lleva en su hoja y la única que alguien
+     reconoce como suya.
+
+     Hubo dos versiones anteriores y las dos estaban mal por motivos
+     opuestos. La primera sumaba todo y mostraba «45 días» encima de un
+     detalle que decía «año 6 (8.75)». La segunda mostraba solo los días de
+     años cumplidos, y a quien ya había gozado todos sus años anteriores le
+     ponía un «0 días» enorme teniendo 8,75 disponibles. Un cero es peor que
+     un número raro: el número raro se pregunta, el cero se cree.
+
+     La distinción entre lo exigible y lo del año en marcha es real y sigue
+     estando —tomar lo del año en curso es un adelanto que autoriza Talento
+     Humano—, pero es un matiz del saldo, no un saldo distinto. Va debajo y
+     en palabras. */
+  const ganados = Number(saldo?.dias_ganados ?? 0);
+  const enCurso = Number(saldo?.dias_en_curso || 0);
+  const disponibles = saldo ? ganados + enCurso : Number(perfil.dias_vacaciones || 0);
+
+  $("saldo-dias").textContent = diasExactos(disponibles);
+  $("saldo-unidad").textContent = Number(disponibles) === 1 ? "día" : "días";
+
+  // Y se dice de qué se compone, que es lo que convierte una cifra en algo
+  // que la persona puede comprobar.
+  const composicion = $("saldo-composicion");
+  if (!saldo) {
+    composicion.textContent = "";
+  } else if (ganados > 0 && enCurso > 0) {
+    composicion.innerHTML =
+      `<strong>${diasExactos(ganados)}</strong> de años que ya cumplió y ` +
+      `<strong>${diasExactos(enCurso)}</strong> acumulados del año en marcha ` +
+      `(1,25 por mes).`;
+  } else if (ganados > 0) {
+    composicion.textContent =
+      `Todos de años que ya cumplió: puede pedirlos cuando quiera.`;
+  } else if (enCurso > 0) {
+    composicion.textContent =
+      `Acumulados del año en marcha, a razón de 1,25 por mes. Como el año ` +
+      `todavía no se cumple, tomarlos antes los autoriza Talento Humano.`;
+  } else {
+    composicion.textContent = "Todavía no ha acumulado días en este período.";
+  }
+  $("antiguedad").textContent =
+    perfil.anios_servicio === 1 ? "1 año" : `${perfil.anios_servicio} años`;
+  $("fecha-ingreso").textContent = `Ingresó el ${fecha(perfil.fecha_ingreso)}`;
+
+  /* Los fines de semana obligatorios, en voz baja.
+
+     Un período gozado por completo trae sus dos fines de semana dentro: no
+     hay forma de gastar quince días seguidos sin tomarlos. El contador los
+     pedía igual —784 períodos ya cerrados, 1.568 avisos imposibles de
+     atender— y un número grande sin nada que hacer es justo lo que enseña a
+     no volver a mirar la tarjeta. */
+  const fds = saldo ? saldo.fines_semana_pendientes : null;
+  const porConfirmar = fds !== null && fds > 0;
+
+  $("fds-pendientes").textContent = fds === null ? "—" : porConfirmar ? fds : "Al día";
+  $("fds-pendientes").className = `mt-2 text-2xl font-semibold ${
+    porConfirmar ? "text-amber-700" : "text-slate-900"}`;
+  if (fds !== null) {
+    $("fds-detalle").textContent = porConfirmar
+      ? `por confirmar: ${plural(fds * 2, "día", "días")} de un período que gozó a medias`
+      : "no hay nada que confirmar";
+    $("fds-nota").textContent = porConfirmar
+      ? "Aparece porque gozó parte de un período y no consta si esos fines de semana "
+        + "estaban dentro. Si ya los tomó, escríbale a Talento Humano: solo ellos pueden "
+        + "corregirlo."
+      : "Sus períodos completos los traen dentro, y los que todavía no ha empezado no "
+        + "pueden deberlos.";
+  }
+
+  const periodos = saldo?.periodos || [];
+  const ganadosVivos = periodos.filter((p) => !p.caducado && p.devengado && Number(p.saldo) > 0);
+  // El detalle por período solo se muestra cuando hay más de uno: con uno
+  // solo repetiría lo que ya dice la línea de arriba.
+  $("periodos-resumen").textContent = ganadosVivos.length > 1
+    ? `Vienen de ${plural(ganadosVivos.length, "año", "años")}: ` +
+      ganadosVivos.map((p) => `${p.periodo}º (${diasExactos(p.saldo)})`).join(", ")
+    : "";
+
+  // Lo del año en marcha, aparte y dicho como lo que es.
+  // Solo cuando hay de los dos tipos: si no, la línea de composición ya lo
+  // dijo y repetirlo hace que nadie lea ninguna de las dos.
+  const curso = $("saldo-en-curso");
+  const mezcla = ganados > 0 && enCurso > 0;
+  curso.classList.toggle("hidden", !mezcla);
+  if (mezcla) {
+    curso.textContent =
+      `Los del año en marcha se pueden tomar por adelantado, pero eso lo ` +
+      `autoriza Talento Humano.`;
+  }
+
+  // Lo que se pierde si no se toma: es la única cifra que exige actuar.
+  const porVencer = $("saldo-por-vencer");
+  const vence = saldo?.proximo_vence_en;
+  const enRiesgo = diasEnteros(saldo?.proximo_dias);
+  porVencer.classList.toggle("hidden", !vence || enRiesgo < 1);
+  if (vence && enRiesgo >= 1) {
+    // La cita del artículo ya no va escrita aquí: Talento Humano puede
+    // ocultarla desde Configuración porque el Art. 75 citado a secas arma
+    // discusiones. El HECHO —qué día vence y cuántos días— se dice siempre:
+    // es lo que la persona necesita para actuar.
+    const cita = saldo?.citar?.art_75 === false ? "" : " (Art. 75)";
+    porVencer.textContent =
+      `${plural(enRiesgo, "día vence", "días vencen")} el ${fecha(vence)}${cita}.`;
+  }
+
+  // Si el saldo guardado no cuadra con los períodos, el titular estaría
+  // mintiendo. Mejor decirlo que mostrar un número en el que no se puede
+  // confiar.
+  const aviso = $("saldo-aviso");
+  aviso.classList.toggle("hidden", !saldo?.saldo_desalineado);
+  if (saldo?.saldo_desalineado) {
+    aviso.textContent =
+      "Sus días registrados no cuadran con sus períodos. Talento Humano debe revisarlo " +
+      "antes de que usted solicite vacaciones.";
+  }
+}
+
+/* ------------------------------------------------------------------ alertas */
+const TONOS = {
+  critica: "bg-rose-50 text-rose-900 ring-rose-200",
+  advertencia: "bg-amber-50 text-amber-900 ring-amber-200",
+  info: "bg-sky-50 text-sky-900 ring-sky-200",
+};
+
+function pintarAlertas(notificaciones) {
+  const importantes = notificaciones.filter(
+    (n) => !n.leida_en && ["critica", "advertencia"].includes(n.severidad)
+  );
+  const caja = $("alertas");
+  caja.classList.toggle("hidden", importantes.length === 0);
+  caja.innerHTML = importantes
+    .slice(0, 3)
+    .map(
+      (n) => `
+      <article class="rounded-2xl px-4 py-3 ring-1 ${TONOS[n.severidad] || TONOS.info}">
+        <p class="font-medium">${esc(n.titulo)}</p>
+        <p class="mt-1 text-sm leading-relaxed">${esc(n.mensaje)}</p>
+        ${n.articulo ? `<p class="mt-2 text-xs opacity-75">${esc(n.norma)} · ${esc(n.articulo)}</p>` : ""}
+      </article>`
+    )
+    .join("");
+}
+
+
+function pintarLogros(logros) {
+  if (!logros?.length) return;
+  $("seccion-logros").classList.remove("hidden");
+  $("lista-logros").innerHTML = logros
+    .map(
+      (l) => `
+      <li class="flex items-start gap-3 rounded-xl bg-amber-50 px-3 py-2.5">
+        <span class="text-lg">🏅</span>
+        <span>
+          <span class="block text-sm font-medium">${esc(l.titulo)}</span>
+          <span class="block text-xs text-slate-600">${esc(l.detalle || "")} ${l.fecha ? "· " + fecha(l.fecha) : ""}</span>
+        </span>
+      </li>`
+    )
+    .join("");
+}
+
+/* -------------------------------------------------------------- solicitudes */
+function pintarSolicitudes() {
+  const termino = ($("filtro-solicitudes").value || "").trim().toLowerCase();
+  const solicitudes = termino
+    ? estado.solicitudes.filter((s) =>
+        [String(s.folio), s.tipo, s.categoria, s.descripcion, etiquetaEstado(s)]
+          .filter(Boolean).join(" ").toLowerCase().includes(termino))
+    : estado.solicitudes;
+
+  const caja = $("lista-solicitudes");
+  if (!solicitudes.length) {
+    caja.innerHTML = `<p class="rounded-2xl bg-white p-5 text-sm text-slate-500 ring-1 ring-slate-200">
+        ${termino ? "Ninguna solicitud coincide con la búsqueda." : "Todavía no ha enviado ninguna solicitud."}</p>`;
+    return;
+  }
+
+  caja.innerHTML = solicitudes
+    .map((s) => {
+      const e = ESTADOS[s.estado] || { etiqueta: s.estado, clase: "bg-slate-100 text-slate-600 ring-slate-200" };
+      const etiqueta = etiquetaEstado(s);
+      const rango =
+        s.fecha_inicio === s.fecha_fin ? fecha(s.fecha_inicio) : `${fecha(s.fecha_inicio, false)} – ${fecha(s.fecha_fin)}`;
+      const horas = s.hora_inicio ? ` · ${s.hora_inicio.slice(0, 5)} a ${s.hora_fin?.slice(0, 5)}` : "";
+      const vigente = ["pendiente_jefe", "pendiente_rrhh", "pendiente_anulacion", "aprobado"].includes(s.estado);
+      const respaldoPedido = s.respaldo_pedido_en && !s.respaldo_entregado_en && vigente;
+
+      return `
+      <article class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+        <div class="flex flex-wrap items-start justify-between gap-2">
+          <div class="min-w-0">
+            <p class="font-medium">
+              <span class="mr-1.5 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600">Nº ${s.folio}</span>
+              ${s.tipo === "vacacion" ? "🏖️ Vacaciones" : "📄 " + esc(s.categoria || "Permiso")}
+            </p>
+            <p class="mt-0.5 text-sm text-slate-600">${rango}${horas} · ${Number(s.dias_solicitados)} día(s)</p>
+          </div>
+          <span class="rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${e.clase}">${esc(etiqueta)}</span>
+        </div>
+
+        <p class="mt-2 text-sm text-slate-600">${esc(s.descripcion)}</p>
+        ${s.justificacion ? `<p class="mt-1.5 whitespace-pre-line rounded-lg bg-slate-50 p-2.5 text-xs text-slate-600">
+            <span class="font-medium">Justificación:</span> ${esc(s.justificacion)}</p>` : ""}
+        ${s.es_adelanto ? `<p class="mt-1.5 text-xs text-amber-700">Incluye días adelantados</p>` : ""}
+        ${s.motivo_rechazo ? `<p class="mt-2 rounded-lg bg-rose-50 p-2.5 text-sm text-rose-800">Motivo: ${esc(s.motivo_rechazo)}</p>` : ""}
+        ${s.jefe_no_disponible
+          ? `<div class="mt-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
+               <p>⚠ ${esc(s.jefe_no_disponible.texto)} Puede enviarla a un <strong>jefe alterno</strong> solo esta vez.</p>
+               <button type="button" data-jefe-alterno="${s.id}" data-folio="${s.folio}"
+                       class="mt-2 rounded-lg bg-amber-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-950">
+                 Elegir jefe alterno</button>
+             </div>` : ""}
+        ${s.jefe_original && s.estado === "pendiente_jefe"
+          ? `<p class="mt-1.5 text-xs text-slate-500">La decide <b>${esc(s.jefe || "")}</b> como jefe alterno
+               (su jefe directo, ${esc(s.jefe_original)}, no cambia).</p>` : ""}
+        ${respaldoPedido
+          ? `<div class="mt-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
+               <p><strong>Talento Humano le pide el respaldo:</strong> ${esc(s.respaldo_pedido_mensaje || "")}</p>
+               <button type="button" data-adjuntar-respaldo="${s.id}" data-folio="${s.folio}"
+                       data-pedido="${esc(s.respaldo_pedido_mensaje || "")}"
+                       class="mt-2 rounded-lg bg-amber-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-950">
+                 📎 Adjuntar respaldo</button>
+             </div>`
+          : s.tipo === "permiso" && vigente && !s.adjuntos && !s.respaldo_entregado_en
+            ? `<div class="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 p-2.5 text-xs text-slate-600 ring-1 ring-slate-200">
+                 <span>¿Ya tiene el respaldo o quiere agregar una justificación?</span>
+                 <button type="button" data-adjuntar-respaldo="${s.id}" data-folio="${s.folio}"
+                         class="rounded-lg bg-slate-900 px-3 py-1.5 font-medium text-white hover:bg-slate-800">
+                   📎 Adjuntar respaldo o justificación</button>
+               </div>` : ""}
+
+        <div class="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+          <span>Enviada ${fechaHora(s.created_at)}</span>
+          ${s.reemplazo ? `<span>🔁 Lo cubre ${esc(s.reemplazo)}</span>` : ""}
+          ${s.adjuntos ? `<button type="button" data-ver-respaldo="${s.id}" data-folio="${s.folio}"
+                                  data-puede-quitar="${vigente ? 1 : 0}"
+                                  class="hover:underline">📎 ${s.adjuntos} adjunto(s)</button>` : ""}
+          ${s.respaldo_entregado_en ? `<span class="text-emerald-700">✔ Respaldo entregado</span>` : ""}
+          ${s.tipo === "permiso" && vigente && !respaldoPedido && (s.adjuntos || s.respaldo_entregado_en)
+            ? `<button type="button" data-adjuntar-respaldo="${s.id}" data-folio="${s.folio}"
+                       class="font-medium text-sky-700 hover:underline">Agregar respaldo o justificación</button>` : ""}
+          ${s.tipo === "vacacion" && s.estado === "aprobado" && s.documento
+            ? `<span class="rounded-full px-2 py-0.5 ring-1 ${{
+                concluido: "bg-emerald-50 text-emerald-800 ring-emerald-200",
+                firmado: "bg-amber-50 text-amber-800 ring-amber-200",
+                sin_firmar: "bg-amber-50 text-amber-800 ring-amber-200" }[s.documento]}">${{
+                concluido: "✔ Registro concluido (firmado y archivado)",
+                firmado: "Firmado · Talento Humano archiva el escaneo",
+                sin_firmar: "Falta firmar el documento en Talento Humano" }[s.documento]}</span>` : ""}
+          ${s.qr_hash && s.estado === "aprobado"
+            ? `<button data-qr="${s.id}" data-hasta="${s.fecha_fin}"
+                       class="font-medium text-emerald-700 hover:underline">Ver código QR</button>`
+            : s.qr_hash ? `<span class="text-slate-400">QR anulado</span>` : ""}
+          ${s.estado === "aprobado"
+            ? `<button data-cancelar="${s.id}" data-aprobada="1"
+                       class="ml-auto font-medium text-rose-600 hover:underline">Pedir anulación</button>`
+            : s.estado !== "pendiente_anulacion"
+              ? `<button type="button" data-eliminar="${s.id}" data-folio="${s.folio}" data-estado="${s.estado}"
+                         data-propia="1" class="ml-auto font-medium text-rose-600 hover:underline">Eliminar</button>`
+              : ""}
+        </div>
+      </article>`;
+    })
+    .join("");
+}
+
+/* ---- Respaldos: verlos, adjuntarlos después, pedirlos (Talento Humano) ---- */
+const verAdj = { id: null, folio: null, quitar: false };
+async function verRespaldos(id, folio, puedeQuitar = false) {
+  Object.assign(verAdj, { id, folio, quitar: puedeQuitar });
+  try {
+    const lista = await api.adjuntosDe(id);
+    $("adjuntos-titulo").textContent = `Respaldos de la solicitud Nº ${folio}`;
+    $("adjuntos-lista").innerHTML = lista.length
+      ? lista.map((a) => `
+          <li class="flex items-center gap-3 px-3 py-2.5 text-sm">
+            <div class="min-w-0 flex-1">
+              <p class="truncate font-medium">${esc(a.nombre_archivo)}</p>
+              <p class="text-xs text-slate-500">${fechaHora(a.created_at)}${a.subido_por ? ` · ${esc(a.subido_por)}` : ""}</p>
+            </div>
+            <button type="button" data-abrir-adjunto="${a.id}" data-solicitud="${id}"
+                    class="rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-medium text-white">Abrir</button>
+            ${puedeQuitar ? `<button type="button" data-quitar-adjunto="${a.id}" data-nombre="${esc(a.nombre_archivo)}"
+                    class="rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-rose-700 ring-1 ring-rose-200 hover:bg-rose-50">Quitar</button>` : ""}
+          </li>`).join("")
+      : `<li class="px-3 py-4 text-center text-sm text-slate-500">Sin respaldos adjuntos.</li>`;
+    if (!$("modal-adjuntos").open) abrir("modal-adjuntos");
+  } catch (err) {
+    avisar(err.message, "error");
+  }
+}
+
+/* Quitar un adjunto subido por error. Se borra el archivo; la bitácora
+   guarda quién, cuándo, por qué y la huella del archivo. */
+async function quitarAdjunto(boton) {
+  const motivo = prompt(`¿Por qué quita «${boton.dataset.nombre}»? (queda en la bitácora; el archivo se borra)`);
+  if (motivo === null) return;
+  if (motivo.trim().length < 5) return avisar("Indique por qué lo quita (mínimo 5 caracteres).", "error");
+  try {
+    avisar((await api.quitarAdjunto(verAdj.id, boton.dataset.quitarAdjunto, motivo.trim())).mensaje);
+    await verRespaldos(verAdj.id, verAdj.folio, verAdj.quitar);
+    await cargar();
+  } catch (err) {
+    avisar(err.message, "error");
+  }
+}
+
+/* Eliminar con justificación: la persona, las suyas sin aprobar; Talento
+   Humano, cualquiera. No se borra de la base: deja de verse y queda en la
+   bitácora con el motivo. */
+const elim = { id: null };
+function abrirEliminar(boton) {
+  elim.id = boton.dataset.eliminar;
+  const estadoActual = boton.dataset.estado;
+  $("eliminar-que").textContent = `Solicitud Nº ${boton.dataset.folio}` +
+    (boton.dataset.empleado ? ` de ${boton.dataset.empleado}` : "") + ".";
+  $("eliminar-efecto").textContent =
+    ["aprobado", "pendiente_anulacion"].includes(estadoActual)
+      ? "Está aprobada: se cancela, se devuelven los días si se habían descontado y el código de salida deja de servir. A la persona le llega el aviso con el motivo."
+      : estadoActual.startsWith("pendiente")
+        ? "Se cancela y deja de esperar decisión. Ya no aparecerá en las listas."
+        : "Ya no aparecerá en las listas. Queda en la bitácora.";
+  $("form-eliminar").reset();
+  abrir("modal-eliminar");
+}
+
+$("form-eliminar").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    avisar((await api.eliminarSolicitud(elim.id, $("eliminar-motivo").value.trim())).mensaje);
+    $("modal-eliminar").close();
+    await cargar();
+  } catch (err) {
+    avisar(err.message, "error");
+  }
+});
+
+/* Jefe alterno: cuando el directo no tiene correo, está ausente o no
+   existe. Solo esa solicitud; la ficha no cambia. */
+const alterno = { id: null };
+async function abrirJefeAlterno(id, folio) {
+  alterno.id = id;
+  try {
+    const op = await api.opcionesJefeAlterno(id);
+    if (!op.motivo) return avisar("Su jefe directo ya puede atenderla: no hace falta un jefe alterno.");
+    $("alterno-que").textContent = `Solicitud Nº ${folio}.`;
+    $("alterno-motivo").textContent = op.motivo.texto;
+    const sugeridos = op.candidatos.filter((c) => c.sugerido);
+    const resto = op.candidatos.filter((c) => !c.sugerido);
+    const opcion = (c) => `<option value="${c.id}">${esc(c.nombre)}${c.cargo ? ` · ${esc(c.cargo)}` : ""}${
+      c.departamento ? ` (${esc(c.departamento)})` : ""}</option>`;
+    $("alterno-a").innerHTML = '<option value="">Elija a una persona…</option>' +
+      (sugeridos.length ? `<optgroup label="Sugeridos (su área o el jefe de su jefe)">${sugeridos.map(opcion).join("")}</optgroup>` : "") +
+      (resto.length ? `<optgroup label="Otras jefaturas">${resto.map(opcion).join("")}</optgroup>` : "");
+    abrir("modal-jefe-alterno");
+  } catch (err) {
+    avisar(err.message, "error");
+  }
+}
+
+$("form-jefe-alterno").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    avisar((await api.elegirJefeAlterno(alterno.id, $("alterno-a").value)).mensaje);
+    $("modal-jefe-alterno").close();
+    await cargar();
+  } catch (err) {
+    avisar(err.message, "error");
+  }
+});
+
+/* Completar una solicitud ya enviada: el respaldo que no se tenía al
+   pedirla, una justificación, o ambos. */
+const completar = { id: null, archivos: [] };
+function adjuntarRespaldo(boton) {
+  completar.id = boton.dataset.adjuntarRespaldo;
+  completar.archivos = [];
+  $("form-completar").reset();
+  $("completar-lista").innerHTML = "";
+  $("completar-error").classList.add("hidden");
+  $("completar-que").textContent = `Solicitud Nº ${boton.dataset.folio}.`;
+  const pedidoTH = boton.dataset.pedido || "";
+  $("completar-pedido").textContent = pedidoTH ? `Talento Humano le pide: ${pedidoTH}` : "";
+  $("completar-pedido").classList.toggle("hidden", !pedidoTH);
+  abrir("modal-completar");
+}
+
+$("completar-archivos").addEventListener("change", (e) => {
+  completar.archivos = [...e.target.files].slice(0, 5);
+  $("completar-lista").innerHTML = completar.archivos
+    .map((a) => `<li>📎 ${esc(a.name)} · ${(a.size / 1024 / 1024).toFixed(1)} MB</li>`).join("");
+});
+
+$("form-completar").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const error = $("completar-error");
+  const texto = $("completar-justificacion").value.trim();
+  error.classList.add("hidden");
+  if (!completar.archivos.length && !texto) {
+    error.textContent = "Elija un archivo o escriba la justificación.";
+    return error.classList.remove("hidden");
+  }
+  if (texto && texto.length < 10) {
+    error.textContent = "Escriba la justificación con al menos 10 caracteres.";
+    return error.classList.remove("hidden");
+  }
+  const boton = $("completar-enviar");
+  boton.disabled = true; boton.textContent = "Enviando…";
+  try {
+    const subidos = [];
+    for (const archivo of completar.archivos) subidos.push(await api.subirAdjunto(completar.id, archivo));
+    avisar((await api.entregarRespaldo(completar.id, subidos, texto || null)).mensaje);
+    $("modal-completar").close();
+    await cargar();
+  } catch (err) {
+    error.textContent = err.message;
+    error.classList.remove("hidden");
+  } finally {
+    boton.disabled = false; boton.textContent = "Enviar";
+  }
+});
+
+const pedido = { id: null };
+function pedirRespaldo(boton) {
+  pedido.id = boton.dataset.pedirRespaldo;
+  $("pedir-respaldo-que").textContent =
+    `Solicitud Nº ${boton.dataset.folio} de ${boton.dataset.empleado}${boton.dataset.categoria ? ` · ${boton.dataset.categoria}` : ""}.`;
+  $("pedir-respaldo-mensaje").value =
+    "Por favor adjunte el documento que respalde su permiso (certificado, turno o convocatoria) " +
+    "donde se lean la fecha y la institución.";
+  abrir("modal-pedir-respaldo");
+}
+
+$("form-pedir-respaldo").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    avisar((await api.pedirRespaldo(pedido.id, $("pedir-respaldo-mensaje").value.trim())).mensaje);
+    $("modal-pedir-respaldo").close();
+    await cargar();
+  } catch (err) {
+    avisar(err.message, "error");
+  }
+});
+
+document.addEventListener("click", async (e) => {
+  const ver = e.target.closest("[data-ver-respaldo]");
+  const abrirUno = e.target.closest("[data-abrir-adjunto]");
+  const adjuntar = e.target.closest("[data-adjuntar-respaldo]");
+  const pedir = e.target.closest("[data-pedir-respaldo]");
+  const quitar = e.target.closest("[data-quitar-adjunto]");
+  const eliminarB = e.target.closest("[data-eliminar]");
+  const altB = e.target.closest("[data-jefe-alterno]");
+  if (quitar) return quitarAdjunto(quitar);
+  if (eliminarB) return abrirEliminar(eliminarB);
+  if (altB) return abrirJefeAlterno(altB.dataset.jefeAlterno, altB.dataset.folio);
+  if (ver) await verRespaldos(ver.dataset.verRespaldo, ver.dataset.folio, ver.dataset.puedeQuitar === "1");
+  else if (abrirUno) {
+    try { await api.abrirAdjunto(abrirUno.dataset.solicitud, abrirUno.dataset.abrirAdjunto); }
+    catch (err) { avisar(err.message, "error"); }
+  } else if (adjuntar) adjuntarRespaldo(adjuntar);
+  else if (pedir) pedirRespaldo(pedir);
+});
+
+/* ---- Código QR ---- */
+document.addEventListener("click", async (e) => {
+  const boton = e.target.closest("[data-qr]");
+  if (!boton) return;
+
+  // La imagen va protegida por token, así que se pide con fetch y se
+  // muestra desde un blob: un <img src> normal no lleva la cabecera.
+  try {
+    const respuesta = await fetch(api.qrUrl(boton.dataset.qr), {
+      headers: { Authorization: `Bearer ${sesion.token}` },
+    });
+    if (!respuesta.ok) throw new Error("No se pudo obtener el código.");
+    const previo = $("imagen-qr").src;
+    if (previo.startsWith("blob:")) URL.revokeObjectURL(previo);
+    $("imagen-qr").src = URL.createObjectURL(await respuesta.blob());
+    $("qr-vigencia").textContent = `Válido hasta el ${fecha(boton.dataset.hasta)}`;
+    abrir("modal-qr");
+  } catch (err) {
+    avisar(err.message, "error");
+  }
+});
+
+/** El estado dice además QUIÉN decidió: no es lo mismo que rechace el jefe o RRHH. */
+function etiquetaEstado(s) {
+  const base = (ESTADOS[s.estado] || {}).etiqueta || s.estado;
+  if (s.estado !== "rechazado") return base;
+  return s.rechazado_en_etapa === "jefe"
+    ? "Rechazada por su jefe"
+    : s.rechazado_en_etapa === "rrhh"
+      ? "Rechazada por Talento Humano"
+      : base;
+}
+
+$("filtro-solicitudes").addEventListener("input", () => pintarSolicitudes());
+
+document.addEventListener("click", async (e) => {
+  const boton = e.target.closest("[data-cancelar]");
+  if (!boton) return;
+
+  // Una solicitud aprobada ya consumió saldo y tiene QR: anularla
+  // necesita motivo y el visto bueno de Talento Humano.
+  const aprobada = boton.dataset.aprobada === "1";
+  let motivo = null;
+  if (aprobada) {
+    motivo = prompt("¿Por qué necesita anular esta solicitud aprobada?\n" +
+                    "Talento Humano debe autorizarlo.");
+    if (motivo === null) return;
+    if (motivo.trim().length < 5) return avisar("Indique un motivo.", "error");
+  } else if (!confirm("¿Seguro que desea cancelar esta solicitud?")) {
+    return;
+  }
+
+  try {
+    avisar((await api.cancelar(boton.dataset.cancelar, motivo)).mensaje);
+    await cargar();
+  } catch (err) {
+    avisar(err.message, "error");
+  }
+});
+
+/* -------------------------------------------------------------- calendario */
+const DIAS_CORTOS = ["L", "M", "M", "J", "V", "S", "D"];
+const NOMBRE_MES = ["enero","febrero","marzo","abril","mayo","junio",
+                    "julio","agosto","septiembre","octubre","noviembre","diciembre"];
+
+function pintarCalendario() {
+  const inicio = estado.mes;
+  const fin = new Date(inicio.getFullYear(), inicio.getMonth() + 1, 0);
+  $("mes-actual").textContent = `${NOMBRE_MES[inicio.getMonth()]} ${inicio.getFullYear()}`;
+
+  const totalDias = fin.getDate();
+  const dias = Array.from({ length: totalDias }, (_, i) =>
+    new Date(inicio.getFullYear(), inicio.getMonth(), i + 1));
+
+  // Una fila por persona con alguna ausencia este mes
+  const porPersona = new Map();
+  for (const a of estado.calendario) {
+    const desde = new Date(a.fecha_inicio + "T12:00");
+    const hasta = new Date(a.fecha_fin + "T12:00");
+    if (hasta < inicio || desde > fin) continue;
+    if (!porPersona.has(a.user_id)) porPersona.set(a.user_id, { nombre: a.nombre, tramos: [] });
+    porPersona.get(a.user_id).tramos.push({
+      desde, hasta, estado: a.estado, motivo: a.motivo_general,
+      procedencia: a.procedencia,
+    });
+  }
+
+  const caja = $("calendario");
+  if (!porPersona.size) {
+    caja.innerHTML = `<p class="rounded-xl bg-slate-50 p-4 text-center text-sm text-slate-500">
+        Nadie de su equipo tiene ausencias registradas en ${NOMBRE_MES[inicio.getMonth()]}.</p>`;
+    return;
+  }
+
+  const hoy = new Date().toDateString();
+  const cabecera = dias.map((d) => {
+    const finde = d.getDay() === 0 || d.getDay() === 6;
+    return `<th class="w-6 px-0 pb-1 text-center text-[10px] font-medium
+                 ${finde ? "text-slate-300" : "text-slate-400"}
+                 ${d.toDateString() === hoy ? "text-slate-900" : ""}">
+              ${d.getDate()}<br><span class="text-[9px]">${DIAS_CORTOS[(d.getDay() + 6) % 7]}</span>
+            </th>`;
+  }).join("");
+
+  const filas = [...porPersona.values()].map((p) => {
+    const celdas = dias.map((d) => {
+      const tramo = p.tramos.find((t) => d >= t.desde && d <= t.hasta);
+      const finde = d.getDay() === 0 || d.getDay() === 6;
+      if (!tramo) return `<td class="h-7 border border-slate-100 ${finde ? "bg-slate-50" : ""}"></td>`;
+      // Lo que Talento Humano anotó antes de este sistema, en su propio
+      // tono: son vacaciones gozadas de verdad, pero no hay solicitud detrás.
+      const historico = tramo.procedencia === "historico";
+      const color = historico ? "bg-emerald-200/70 ring-1 ring-inset ring-emerald-500"
+        : tramo.estado === "aprobado" ? "bg-emerald-400"
+        : "bg-amber-300";
+      const cuando = historico ? "registro de Talento Humano"
+        : tramo.estado === "aprobado" ? "aprobada" : "en trámite";
+      return `<td class="h-7 border border-slate-100 p-0">
+                <div class="h-full w-full ${color}" title="${esc(p.nombre)} · ${
+                  esc(tramo.motivo)} · ${cuando}"></div>
+              </td>`;
+    }).join("");
+    return `<tr>
+      <th class="sticky left-0 z-10 bg-white pr-3 text-left text-xs font-medium whitespace-nowrap">
+        ${esc(p.nombre)}</th>${celdas}</tr>`;
+  }).join("");
+
+  caja.innerHTML = `
+    <table class="border-separate border-spacing-0 text-xs">
+      <thead><tr><th class="sticky left-0 z-10 bg-white"></th>${cabecera}</tr></thead>
+      <tbody>${filas}</tbody>
+    </table>
+    <div class="mt-3 flex flex-wrap gap-4 text-xs text-slate-500">
+      <span class="flex items-center gap-1.5"><i class="inline-block h-3 w-3 rounded-sm bg-emerald-400"></i> Aprobada</span>
+      <span class="flex items-center gap-1.5"><i class="inline-block h-3 w-3 rounded-sm bg-amber-300"></i> En trámite</span>
+      <span class="flex items-center gap-1.5"><i class="inline-block h-3 w-3 rounded-sm bg-emerald-200/70 ring-1 ring-inset ring-emerald-500"></i> Registro de Talento Humano</span>
+      <span>Solo se muestra quién falta y cuándo, no el motivo.</span>
+    </div>`;
+}
+
+$("mes-anterior").addEventListener("click", () => cambiarMes(-1));
+$("mes-siguiente").addEventListener("click", () => cambiarMes(1));
+
+async function cambiarMes(delta) {
+  estado.mes = new Date(estado.mes.getFullYear(), estado.mes.getMonth() + delta, 1);
+  const fin = new Date(estado.mes.getFullYear(), estado.mes.getMonth() + 1, 0);
+  const iso = (d) => d.toISOString().slice(0, 10);
+  try {
+    estado.calendario = await api.calendario(iso(estado.mes), iso(fin));
+  } catch { /* se mantiene lo ya cargado */ }
+  pintarCalendario();
+}
+
+/* ------------------------------------------------------------ aprobaciones */
+/* Reemplazos que Talento Humano asignó a gente de este jefe.
+
+   El jefe es quien sabe si esa persona ya tiene otras tareas; por eso se le
+   pide que confirme o elija a otro, en vez de enterarse cuando ya está hecho. */
+function pintarPorConfirmar() {
+  const lista = estado.porConfirmar || [];
+  if (!lista.length) return "";
+  return `
+    <section class="rounded-2xl bg-amber-50 p-5 ring-1 ring-amber-200">
+      <h3 class="font-semibold text-amber-950">Reemplazos por confirmar</h3>
+      <p class="mt-0.5 text-sm text-amber-900">
+        Talento Humano asignó estos reemplazos porque usted no había elegido a nadie.
+        Confírmelos o elija a otra persona.</p>
+      <div class="mt-3 space-y-2">${lista.map((r) => `
+        <div class="flex flex-wrap items-center gap-3 rounded-xl bg-white p-3 ring-1 ring-amber-200">
+          <div class="min-w-0 flex-1 text-sm">
+            <p class="font-medium">Nº ${r.folio} · ${esc(r.empleado)}</p>
+            <p class="text-slate-600">${fecha(r.fecha_inicio, false)} – ${fecha(r.fecha_fin)} ·
+              lo cubre <span class="font-medium">${esc(r.reemplazo || "—")}</span>
+              ${r.asignado_por ? `· asignó ${esc(r.asignado_por)}` : ""}</p>
+          </div>
+          <button data-cambiar-reemplazo="${r.id}"
+                  class="rounded-xl bg-white px-3 py-2 text-sm font-medium ring-1 ring-slate-300 hover:bg-slate-50">
+            Elegir a otro</button>
+          <button data-confirmar-reemplazo="${r.id}"
+                  class="rounded-xl bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700">
+            Confirmar</button>
+        </div>`).join("")}
+      </div>
+    </section>`;
+}
+
+function textoReemplazo(s) {
+  if (!s.reemplazo) return "—";
+  const origen = s.reemplazo_asignado_por === "rrhh"
+    ? (s.reemplazo_confirmado ? " (asignado por Talento Humano, confirmado por el jefe)"
+                              : " (asignado por Talento Humano, falta que el jefe lo confirme)")
+    : " (elegido por el jefe)";
+  return `${esc(s.reemplazo)}<span class="block text-xs font-normal text-slate-500">${origen}</span>`;
+}
+
+/* ------------------------------------- Talento Humano: todas las solicitudes */
+function esTH() { return ["rrhh", "admin"].includes(sesion.perfil?.rol); }
+const seg = { datos: null, sede: "todas", buscar: "", decididas: false, aprobadores: null };
+
+async function cargarSeguimiento() {
+  if (!esTH()) return;
+  seg.datos = await api.seguimiento(seg.sede);
+  const sel = $("seg-sede");
+  if (sel.options.length <= 2) {
+    sel.insertAdjacentHTML("beforeend", Object.entries(seg.datos.sedes || {})
+      .map(([c, n]) => `<option value="${esc(c)}">${esc(n)}</option>`).join(""));
+    sel.value = seg.sede;
+  }
+  pintarSeguimiento();
+}
+
+function hace(h) {
+  if (h < 1) return "menos de 1 h";
+  return h < 48 ? `${h} h` : `${Math.floor(h / 24)} días`;
+}
+const plano = (t) => String(t ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+const GRUPOS = [
+  ["pendiente_jefe", "Esperan al jefe", "bg-amber-50 text-amber-900 ring-amber-200"],
+  ["pendiente_rrhh", "Esperan a Talento Humano", "bg-sky-50 text-sky-900 ring-sky-200"],
+  ["pendiente_anulacion", "Anulación en trámite", "bg-orange-50 text-orange-900 ring-orange-200"],
+];
+const DECIDIDAS = { aprobado: ["Aprobada", "bg-emerald-100 text-emerald-800"],
+                    rechazado: ["Rechazada", "bg-rose-100 text-rose-800"],
+                    cancelado: ["Cancelada", "bg-slate-100 text-slate-700"] };
+
+function filaSeguimiento(s) {
+  const rango = s.fecha_inicio === s.fecha_fin
+    ? fecha(s.fecha_inicio) : `${fecha(s.fecha_inicio, false)} – ${fecha(s.fecha_fin)}`;
+  const cuanto = s.horas ? `${s.hora_inicio}–${s.hora_fin} (${s.horas} h)` : `${s.dias} día(s)`;
+  const pendiente = s.estado.startsWith("pendiente");
+  const marcas = [];
+  if (s.emergente) marcas.push(["amber", "Vacaciones emergentes"]);
+  if (s.adelanto) marcas.push(["amber", "Días adelantados"]);
+  if (s.estado === "pendiente_jefe" && s.tiene_jefe && !s.jefe_abrio_aviso) marcas.push(["rose", "El jefe no abrió el aviso"]);
+  if (s.estado === "pendiente_jefe" && s.tiene_jefe && !s.jefe_con_correo) marcas.push(["rose", "El jefe no tiene correo"]);
+  if (s.estado === "pendiente_jefe" && s.tiene_jefe && !s.jefe_activo) marcas.push(["rose", "Jefe inactivo"]);
+  if (s.recordado_en) marcas.push(["slate", `Recordada el ${fechaHora(s.recordado_en)}`]);
+  if (s.respaldo_pedido_en && !s.respaldo_entregado_en) marcas.push(["amber", `Respaldo pedido el ${fechaHora(s.respaldo_pedido_en)}`]);
+  if (s.respaldo_entregado_en) marcas.push(["slate", "Respaldo entregado"]);
+  if (s.estado === "pendiente_jefe" && s.jefe_ausente) marcas.push(["rose", "El jefe está ausente hoy"]);
+  if (s.jefe_original) marcas.push(["slate", `Jefe alterno (en lugar de ${s.jefe_original})`]);
+  const color = { amber: "bg-amber-100 text-amber-800", rose: "bg-rose-100 text-rose-800", slate: "bg-slate-100 text-slate-700" };
+  const demora = pendiente && s.horas_esperando >= 48;
+  const botones = [];
+  if (pendiente) botones.push(`<button type="button" data-seg-recordar="${s.id}" class="rounded-lg bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700">Recordar</button>`);
+  if (s.estado === "pendiente_jefe") botones.push(`<button type="button" data-seg-reasignar="${s.id}" data-folio="${s.folio}" data-empleado="${esc(s.empleado)}" class="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium hover:bg-slate-200">Reasignar</button>`);
+  if (document.getElementById(`sol-${s.id}`)) botones.push(`<button type="button" data-seg-ir="sol-${s.id}" class="rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-medium text-white">Decidir</button>`);
+  if (s.adjuntos) botones.push(`<button type="button" data-ver-respaldo="${s.id}" data-folio="${s.folio}" data-puede-quitar="1" class="rounded-lg bg-white px-2.5 py-1 text-xs font-medium ring-1 ring-slate-300 hover:bg-slate-50">📎 ${s.adjuntos}</button>`);
+  if (pendiente || s.estado === "aprobado") botones.push(`<button type="button" data-pedir-respaldo="${s.id}" data-folio="${s.folio}" data-empleado="${esc(s.empleado)}" data-categoria="${esc(s.categoria || "")}" class="rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-amber-800 ring-1 ring-amber-300 hover:bg-amber-50">Pedir respaldo</button>`);
+  if (s.estado === "rechazado") botones.push(`<button type="button" data-seg-ir="rechazadas" class="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white">Corregir</button>`);
+  botones.push(`<a href="persona.html?id=${s.user_id}" class="rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-sky-700 ring-1 ring-sky-200 hover:bg-sky-50">Ficha</a>`);
+  botones.push(`<button type="button" data-eliminar="${s.id}" data-folio="${s.folio}" data-estado="${s.estado}" data-empleado="${esc(s.empleado)}" class="rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-rose-700 ring-1 ring-rose-200 hover:bg-rose-50">Eliminar</button>`);
+  const decidida = DECIDIDAS[s.estado];
+  return `
+    <li class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-sm">
+      <div class="min-w-0 flex-1">
+        <p class="font-medium">
+          <span class="mr-1 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600">Nº ${s.folio}</span>
+          ${esc(s.empleado)} <span class="text-xs font-normal text-slate-500">${esc(s.cedula)}${s.departamento ? ` · ${esc(s.departamento)}` : ""} · ${esc(s.sede)}</span>
+        </p>
+        <p class="mt-0.5 text-xs text-slate-600">${s.tipo === "permiso" ? `${esc(s.categoria || "Permiso")} · ` : ""}${rango} · ${cuanto}</p>
+        <p class="mt-0.5 text-xs ${demora ? "font-medium text-rose-700" : "text-slate-600"}">
+          ${pendiente
+            ? `Con <b>${esc(s.quien || "—")}</b> desde hace ${hace(s.horas_esperando)}`
+            : `<span class="rounded-full px-2 py-0.5 font-medium ${decidida?.[1] || ""}">${decidida?.[0] || esc(s.estado)}</span>
+               ${s.quien ? `por ${esc(s.quien)}` : ""} · ${fechaHora(s.decidido_en)}
+               ${s.motivo_rechazo ? ` · <span class="text-rose-700">${esc(s.motivo_rechazo)}</span>` : ""}`}
+        </p>
+        ${marcas.length ? `<div class="mt-1 flex flex-wrap gap-1">${marcas.map(([c, t]) =>
+          `<span class="rounded-full px-2 py-0.5 text-[11px] font-medium ${color[c]}">${esc(t)}</span>`).join("")}</div>` : ""}
+      </div>
+      <div class="flex flex-wrap gap-1.5">${botones.join("")}</div>
+    </li>`;
+}
+
+function pintarSeguimiento() {
+  if (!seg.datos) return;
+  const q = plano(seg.buscar.trim());
+  const lista = seg.datos.solicitudes.filter((s) => !q || plano(
+    `${s.empleado} ${s.cedula} ${s.folio} ${s.departamento} ${s.categoria} ${s.quien}`).includes(q));
+  const cuenta = (tipo, estado) => lista.filter((s) => s.tipo === tipo && s.estado === estado).length;
+  $("seg-resumen").innerHTML = [...GRUPOS, ["decididas", "Decididas (30 días)", "bg-slate-50 text-slate-800 ring-slate-200"]]
+    .map(([estado, titulo, clase]) => {
+      const v = estado === "decididas" ? lista.filter((s) => s.tipo === "vacacion" && DECIDIDAS[s.estado]).length : cuenta("vacacion", estado);
+      const p = estado === "decididas" ? lista.filter((s) => s.tipo === "permiso" && DECIDIDAS[s.estado]).length : cuenta("permiso", estado);
+      return `<div class="rounded-xl px-3 py-2 ring-1 ${clase}">
+        <p class="text-xs font-medium">${titulo}</p>
+        <p class="mt-0.5 text-sm"><b class="text-lg">${v + p}</b> · ${v} vacaciones · ${p} permisos</p></div>`;
+    }).join("");
+
+  for (const [tipo, caja, titulo] of [["vacacion", "seg-vacaciones", "🏖️ Vacaciones"], ["permiso", "seg-permisos", "📄 Permisos"]]) {
+    const deTipo = lista.filter((s) => s.tipo === tipo);
+    const grupos = GRUPOS.map(([estado, nombre]) => [nombre, deTipo.filter((s) => s.estado === estado)]);
+    if (seg.decididas) {
+      grupos.push(["Decididas en los últimos 30 días",
+        deTipo.filter((s) => DECIDIDAS[s.estado]).sort((a, b) => String(b.decidido_en).localeCompare(String(a.decidido_en)))]);
+    }
+    const total = grupos.reduce((n, [, l]) => n + l.length, 0);
+    $(caja).innerHTML = `
+      <section class="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+        <h3 class="flex items-center justify-between border-b border-slate-200 px-5 py-3 font-semibold">
+          ${titulo} <span class="text-sm font-normal text-slate-500">${total} solicitud(es)</span></h3>
+        ${grupos.filter(([, l]) => l.length).map(([nombre, l]) => `
+          <div>
+            <p class="bg-slate-50 px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">${nombre} (${l.length})</p>
+            <ul class="divide-y divide-slate-100">${l.map(filaSeguimiento).join("")}</ul>
+          </div>`).join("") || `<p class="px-5 py-6 text-center text-sm text-slate-500">Nada ${seg.buscar ? "coincide con la búsqueda" : "en trámite"}.</p>`}
+      </section>`;
+  }
+}
+
+$("seg-sede").addEventListener("change", (e) => { seg.sede = e.target.value; cargarSeguimiento().catch((err) => avisar(err.message, "error")); });
+$("seg-buscar").addEventListener("input", (e) => { seg.buscar = e.target.value; pintarSeguimiento(); });
+$("seg-decididas").addEventListener("change", (e) => { seg.decididas = e.target.checked; pintarSeguimiento(); });
+$("seg-actualizar").addEventListener("click", () => cargarSeguimiento().catch((err) => avisar(err.message, "error")));
+
+$("vista-seguimiento").addEventListener("click", async (e) => {
+  const recordar = e.target.closest("[data-seg-recordar]");
+  const reasignar = e.target.closest("[data-seg-reasignar]");
+  const ir = e.target.closest("[data-seg-ir]");
+  if (recordar) {
+    recordar.disabled = true;
+    try {
+      const r = await api.recordar(recordar.dataset.segRecordar);
+      // Si el correo no salió, se dice en rojo: «se le recordó» no basta.
+      avisar(r.mensaje, r.correo_enviado === false ? "error" : undefined);
+      await cargarSeguimiento();
+    } catch (err) { avisar(err.message, "error"); recordar.disabled = false; }
+  } else if (reasignar) {
+    seg.reasignando = reasignar.dataset.segReasignar;
+    $("reasignar-que").textContent = `Solicitud Nº ${reasignar.dataset.folio} de ${reasignar.dataset.empleado}.`;
+    $("form-reasignar").reset();
+    try {
+      seg.aprobadores = seg.aprobadores || await api.aprobadores();
+      $("reasignar-a").innerHTML = '<option value="">Elija a una persona…</option>' + seg.aprobadores.map((a) =>
+        `<option value="${a.id}">${esc(a.nombre)}${a.cargo ? ` · ${esc(a.cargo)}` : ""}${a.con_correo ? "" : " (sin correo)"}</option>`).join("");
+      abrir("modal-reasignar");
+    } catch (err) { avisar(err.message, "error"); }
+  } else if (ir) {
+    const destino = document.getElementById(ir.dataset.segIr);
+    if (destino?.tagName === "DETAILS") destino.open = true;
+    destino?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+});
+
+$("form-reasignar").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    avisar((await api.reasignar(seg.reasignando, $("reasignar-a").value, $("reasignar-motivo").value.trim())).mensaje);
+    $("modal-reasignar").close();
+    await cargar();
+  } catch (err) { avisar(err.message, "error"); }
+});
+
+/* Rechazadas en los últimos 30 días, por si alguna fue un error: plegado,
+   para que no compita con lo que sí espera decisión. «Corregir y aprobar»
+   la devuelve a la etapa en que se rechazó y la aprueba, con un motivo que
+   queda en la bitácora. */
+function pintarRechazadas() {
+  const lista = estado.rechazadas || [];
+  if (!lista.length) return "";
+  return `
+    <details id="rechazadas" ${estado.rechazadasAbierto ? "open" : ""}
+             class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+      <summary class="cursor-pointer select-none px-5 py-3 text-sm font-medium">
+        Rechazadas en los últimos 30 días (${lista.length})
+        <span class="font-normal text-slate-500">· ¿se equivocó? Corríjalo aquí</span>
+      </summary>
+      <ul class="divide-y divide-slate-100 border-t border-slate-100">
+        ${lista.map((s) => `
+          <li class="flex flex-wrap items-center gap-3 px-5 py-3 text-sm">
+            <div class="min-w-0 flex-1">
+              <p class="font-medium">
+                <span class="mr-1.5 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600">Nº ${s.folio}</span>
+                ${esc(s.empleado)} · ${s.tipo === "vacacion" ? "Vacaciones" : esc(s.categoria || "Permiso")}
+              </p>
+              <p class="text-xs text-slate-500">${fecha(s.fecha_inicio, false)} – ${fecha(s.fecha_fin)} ·
+                ${Number(s.dias_solicitados)} día(s) · rechazada por ${esc(s.rechazado_por || "—")}
+                el ${fecha(String(s.rechazado_en).slice(0, 10))}</p>
+              ${s.motivo_rechazo ? `<p class="mt-0.5 text-xs text-rose-700">Motivo: ${esc(s.motivo_rechazo)}</p>` : ""}
+            </div>
+            <button type="button" data-corregir="${s.id}" data-folio="${s.folio}"
+                    class="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">
+              Corregir y aprobar
+            </button>
+          </li>`).join("")}
+      </ul>
+    </details>`;
+}
+
+// El panel se vuelve a pintar al refrescar: se recuerda si estaba abierto.
+$("vista-aprobaciones").addEventListener("toggle", (e) => {
+  if (e.target.id === "rechazadas") estado.rechazadasAbierto = e.target.open;
+}, true);
+
+$("vista-aprobaciones").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-corregir]");
+  if (!b) return;
+  const motivo = prompt(
+    `¿Por qué corrige el rechazo de la solicitud Nº ${b.dataset.folio}? ` +
+    "Queda en la bitácora y la solicitud se aprueba en su etapa (mínimo 10 caracteres).");
+  if (motivo === null) return;
+  if (motivo.trim().length < 10) { avisar("Escriba el motivo con al menos 10 caracteres.", "error"); return; }
+  b.disabled = true;
+  try {
+    avisar((await api.corregirRechazo(b.dataset.corregir, motivo.trim())).mensaje);
+    await cargar();
+  } catch (err) {
+    avisar(err.message, "error");
+    b.disabled = false;
+  }
+});
+
+function pintarPendientes() {
+  const caja = $("vista-aprobaciones");
+  const cuenta = $("cuenta-pendientes");
+  const total = estado.pendientes.length + (estado.porConfirmar || []).length;
+  cuenta.textContent = total;
+  cuenta.classList.toggle("hidden", total === 0);
+
+  if (!estado.pendientes.length) {
+    caja.innerHTML = (pintarPorConfirmar() || `<p class="rounded-2xl bg-white p-8 text-center text-sm text-slate-500 ring-1 ring-slate-200">
+        No tiene solicitudes por aprobar. 🎉</p>`) + pintarRechazadas();
+    return;
+  }
+
+  caja.innerHTML = pintarPorConfirmar() + pintarRechazadas() + estado.pendientes.map((s) => {
+    const rango = s.fecha_inicio === s.fecha_fin
+      ? fecha(s.fecha_inicio)
+      : `${fecha(s.fecha_inicio, false)} – ${fecha(s.fecha_fin)}`;
+    const horas = s.hora_inicio ? ` · ${s.hora_inicio} a ${s.hora_fin}` : "";
+
+    const banderas = [];
+    // Primero el que cambia QUIÉN decide: quien lee esta tarjeta está a punto
+    // de firmar en lugar de un jefe que no existe, y tiene que saberlo antes
+    // de pulsar. Las demás banderas hablan de la solicitud; esta, del
+    // expediente de la persona, y se arregla en la ficha, no aquí.
+    if (s.sin_jefe) {
+      banderas.push(["rose",
+        "Sin jefe asignado: usted decide la etapa de jefatura. " +
+        "Asígnele un jefe en su ficha para que las próximas no queden sueltas"]);
+    }
+    if (s.es_adelanto) banderas.push(["amber", "Supera su saldo: días adelantados"]);
+    // «Emergente» es para conocimiento de Talento Humano: el colaborador no
+    // la ve así, y el jefe tampoco necesita la etiqueta para confirmar.
+    if (s.bloque_menor_justificado && ["rrhh", "admin"].includes(sesion.perfil?.rol)) {
+      banderas.push(["amber", "Vacaciones emergentes: menos días que el bloque mínimo"]);
+    }
+    if (s.respaldo_pedido_en && !s.respaldo_entregado_en) {
+      banderas.push(["amber", `Respaldo pedido el ${fechaHora(s.respaldo_pedido_en)}: aún no llega`]);
+    } else if (s.respaldo_entregado_en) {
+      banderas.push(["slate", `Respaldo entregado el ${fechaHora(s.respaldo_entregado_en)}`]);
+    } else if (s.tipo === "permiso" && !s.adjuntos) {
+      banderas.push(["slate", "Sin respaldo adjunto (puede pedirlo)"]);
+    }
+    if (!s.reemplazo) banderas.push(["slate", "Sin reemplazo asignado"]);
+    // Otra persona de Talento Humano la tomó en «Pendientes»: no duplicar.
+    if (s.en_revision_por) banderas.unshift(["amber", `En revisión por ${s.en_revision_por}`]);
+
+    return `
+    <article id="sol-${s.id}" class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <p class="font-semibold">
+            <span class="mr-1.5 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600">Nº ${s.folio}</span>
+            ${esc(s.empleado)}
+          </p>
+          <p class="text-sm text-slate-500">${esc(s.cedula)}${s.departamento ? " · " + esc(s.departamento) : ""}</p>
+        </div>
+        <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+          ${s.tipo === "vacacion" ? "🏖️ Vacaciones" : "📄 " + esc(s.categoria || "Permiso")}
+        </span>
+      </div>
+
+      <dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
+        <div><dt class="text-xs text-slate-500">Fechas</dt><dd class="font-medium">${rango}${horas}</dd></div>
+        <div><dt class="text-xs text-slate-500">Días</dt><dd class="font-medium">${s.dias_solicitados}</dd></div>
+        <div><dt class="text-xs text-slate-500">Saldo</dt><dd class="font-medium">${s.saldo_actual} días</dd></div>
+        <div><dt class="text-xs text-slate-500">Lo cubre</dt>
+             <dd class="font-medium">${textoReemplazo(s)}</dd></div>
+      </dl>
+
+      ${s.jefe_original
+        ? `<p class="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-900 ring-1 ring-sky-200">
+             Jefe alterno: la decide ${esc(s.jefe_nombre || "")} en lugar de ${esc(s.jefe_original)}.
+             ${s.jefe_alterno_motivo ? esc(s.jefe_alterno_motivo) : ""}</p>` : ""}
+      <p class="mt-3 text-sm text-slate-700">${esc(s.descripcion)}</p>
+      ${s.justificacion
+        ? `<p class="mt-2 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
+             <span class="font-medium">Justificación:</span> ${esc(s.justificacion)}</p>` : ""}
+
+      ${banderas.length
+        ? `<div class="mt-3 flex flex-wrap gap-2">${banderas.map(([t, texto]) =>
+            `<span class="rounded-lg px-2.5 py-1 text-xs font-medium ${
+              t === "amber" ? "bg-amber-50 text-amber-800 ring-1 ring-amber-200"
+              : t === "rose" ? "bg-rose-50 text-rose-800 ring-1 ring-rose-200"
+              : "bg-slate-50 text-slate-600 ring-1 ring-slate-200"}">${esc(texto)}</span>`
+          ).join("")}</div>` : ""}
+
+      ${s.adjuntos || ["rrhh", "admin"].includes(sesion.perfil?.rol)
+        ? `<div class="mt-3 flex flex-wrap gap-2">
+             ${s.adjuntos ? `<button type="button" data-ver-respaldo="${s.id}" data-folio="${s.folio}"
+                 data-puede-quitar="${["rrhh", "admin"].includes(sesion.perfil?.rol) ? 1 : 0}"
+                 class="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50">
+                 📎 Ver respaldo (${s.adjuntos})</button>` : ""}
+             ${["rrhh", "admin"].includes(sesion.perfil?.rol)
+               ? `<button type="button" data-pedir-respaldo="${s.id}" data-folio="${s.folio}"
+                   data-empleado="${esc(s.empleado)}" data-categoria="${esc(s.categoria || "")}"
+                   class="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-amber-800 ring-1 ring-amber-300 hover:bg-amber-50">
+                   ${s.respaldo_pedido_en ? "Volver a pedir respaldo" : "Pedir respaldo"}</button>
+                 <button type="button" data-eliminar="${s.id}" data-folio="${s.folio}" data-estado="${s.estado}"
+                   data-empleado="${esc(s.empleado)}"
+                   class="ml-auto rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-rose-700 ring-1 ring-rose-200 hover:bg-rose-50">
+                   Eliminar</button>` : ""}
+           </div>` : ""}
+      ${s.tipo === "vacacion" && ["rrhh", "admin"].includes(sesion.perfil?.rol)
+        ? `<button type="button" data-docs-solicitud="${s.id}" data-region="${esc(s.region || "sierra")}"
+                   class="mt-4 w-full rounded-xl bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700
+                          ring-1 ring-slate-200 hover:bg-slate-100">
+             📄 Solicitud y constancia para imprimir</button>` : ""}
+      <div class="mt-4 flex gap-3">
+        <button data-rechazar="${s.id}" data-nombre="${esc(s.empleado)}" data-folio="${s.folio}"
+                class="flex-1 rounded-xl bg-white px-4 py-2.5 font-medium text-rose-700 ring-1 ring-rose-200 hover:bg-rose-50">
+          Rechazar
+        </button>
+        <button data-aprobar="${s.id}"
+                class="flex-1 rounded-xl bg-emerald-600 px-4 py-2.5 font-medium text-white hover:bg-emerald-700">
+          Aprobar
+        </button>
+      </div>
+    </article>`;
+  }).join("");
+}
+
+document.addEventListener("click", async (e) => {
+  const docs = e.target.closest("[data-docs-solicitud]");
+  if (docs) {
+    try {
+      const papel = await api.papelDeLaSolicitud(docs.dataset.docsSolicitud);
+      const op = await prepararImpresion(papel.id, docs.dataset.region);
+      if (op !== null) await api.abrirPapel(papel.id, op.firmante, op);
+    } catch (err) {
+      avisar(err.message, "error");
+    }
+    return;
+  }
+  const aprobar = e.target.closest("[data-aprobar]");
+  if (aprobar) {
+    /* Antes de aprobar, el jefe decide quién cubre el puesto. Es el momento
+       en que tiene el caso delante y conoce la carga del equipo; el
+       solicitante no tiene por qué saber quién está disponible. */
+    await abrirReemplazo(aprobar.dataset.aprobar);
+    return;
+  }
+
+  const confirmarR = e.target.closest("[data-confirmar-reemplazo]");
+  if (confirmarR) {
+    try {
+      avisar((await api.confirmarReemplazo(confirmarR.dataset.confirmarReemplazo, "confirmar")).mensaje);
+    } catch (err) { avisar(err.message, "error"); }
+    await cargar();
+    mostrarPestana("aprobaciones");
+    return;
+  }
+  const cambiarR = e.target.closest("[data-cambiar-reemplazo]");
+  if (cambiarR) {
+    await abrirReemplazo(cambiarR.dataset.cambiarReemplazo, "cambiar");
+    return;
+  }
+
+  const rechazar = e.target.closest("[data-rechazar]");
+  if (rechazar) {
+    $("form-rechazo").dataset.id = rechazar.dataset.rechazar;
+    $("rechazo-de").textContent = `Solicitud Nº ${rechazar.dataset.folio} de ${rechazar.dataset.nombre}`;
+    $("motivo-rechazo").value = "";
+    abrir("modal-rechazo");
+    $("motivo-rechazo").focus();
+  }
+});
+
+/* Quién elige el reemplazo depende de quién está aprobando.
+
+   El jefe inmediato elige. Talento Humano ve lo que eligió el jefe y lo
+   confirma para el registro, sin poder cambiarlo. Si nadie eligió, Talento
+   Humano puede asignar a alguien, y se le avisa al jefe para que lo confirme
+   o lo cambie. Con modo «cambiar», es el jefe corrigiendo esa asignación. */
+async function abrirReemplazo(solicitudId, modo = "aprobar") {
+  const select = $("reemplazo-jefe");
+  const s = estado.pendientes.find((p) => p.id === solicitudId);
+  const esJefe = modo === "cambiar" || (s && String(s.jefe_id) === String(sesion.perfil.id));
+  const fijo = modo === "aprobar" && !esJefe && s?.reemplazo && s.reemplazo_asignado_por !== "rrhh";
+
+  $("form-reemplazo").dataset.id = solicitudId;
+  $("form-reemplazo").dataset.modo = modo;
+  $("form-reemplazo").dataset.fijo = fijo ? "1" : "";
+  $("reemplazo-titulo").textContent = modo === "cambiar" ? "Elegir otro reemplazo" : "¿Quién cubre el puesto?";
+  $("reemplazo-ayuda").textContent = fijo
+    ? "Lo eligió el jefe inmediato. Talento Humano lo confirma para el registro."
+    : esJefe ? "Usted conoce la carga del equipo. Puede dejarlo sin asignar y decidirlo después."
+             : "Elija a quien cubrirá el puesto, o déjelo sin asignar.";
+  $("reemplazo-fijo").classList.toggle("hidden", !fijo);
+  $("reemplazo-elegir").classList.toggle("hidden", !!fijo);
+  $("reemplazo-aviso-jefe").classList.toggle("hidden", fijo || esJefe || !s?.jefe_id);
+  $("reemplazo-enviar").textContent = modo === "cambiar" ? "Guardar reemplazo" : "Aprobar solicitud";
+  if (fijo) {
+    $("reemplazo-fijo").textContent =
+      `Lo cubre ${s.reemplazo}, elegido por el jefe inmediato. Si hace falta otra persona, coordínelo con el jefe.`;
+    abrir("modal-reemplazo");
+    return;
+  }
+  select.innerHTML = `<option value="">Cargando…</option>`;
+  abrir("modal-reemplazo");
+
+  try {
+    const candidatos = await api.candidatosReemplazo(solicitudId);
+    select.innerHTML =
+      `<option value="">Nadie por ahora</option>` +
+      candidatos.map((c) => `<option value="${c.id}"${c.tambien_ausente ? " disabled" : ""}>` +
+        `${esc(c.nombre)}${c.cargo ? " · " + esc(c.cargo) : ""}` +
+        `${c.tambien_ausente ? " — también estará ausente" : ""}</option>`).join("");
+  } catch {
+    select.innerHTML = `<option value="">No se pudo cargar el equipo</option>`;
+  }
+}
+
+$("form-reemplazo").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const id = $("form-reemplazo").dataset.id;
+  $("modal-reemplazo").close();
+  try {
+    const form = $("form-reemplazo");
+    const elegido = form.dataset.fijo ? null : ($("reemplazo-jefe").value || null);
+    const r = form.dataset.modo === "cambiar"
+      ? await api.confirmarReemplazo(id, "cambiar", elegido)
+      : await api.decidir(id, "aprobar", null, elegido);
+    avisar(r.mensaje);
+  } catch (err) {
+    avisar(err.message, "error");
+  }
+  await cargar();
+  mostrarPestana("aprobaciones");
+});
+
+$("form-rechazo").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const motivo = $("motivo-rechazo").value.trim();
+  if (motivo.length < 5) return $("motivo-rechazo").focus();
+  $("modal-rechazo").close();
+  try {
+    avisar((await api.decidir($("form-rechazo").dataset.id, "rechazar", motivo)).mensaje);
+  } catch (err) {
+    avisar(err.message, "error");
+  }
+  await cargar();
+  mostrarPestana("aprobaciones");
+});
+
+/* ------------------------------------------------------------- anulaciones */
+function pintarAnulaciones() {
+  const caja = $("vista-anulaciones");
+  const cuenta = $("cuenta-anulaciones");
+  if (!caja) return;
+  cuenta.textContent = estado.anulaciones.length;
+  cuenta.classList.toggle("hidden", estado.anulaciones.length === 0);
+
+  if (!estado.anulaciones.length) {
+    caja.innerHTML = `<p class="rounded-2xl bg-white p-8 text-center text-sm text-slate-500 ring-1 ring-slate-200">
+        No hay pedidos de anulación pendientes.</p>`;
+    return;
+  }
+
+  caja.innerHTML = estado.anulaciones.map((a) => `
+    <article class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-orange-200">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p class="font-semibold">
+            <span class="mr-1.5 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600">Nº ${a.folio}</span>
+            ${esc(a.empleado)}
+          </p>
+          <p class="text-sm text-slate-500">${esc(a.cedula)}${a.departamento ? " · " + esc(a.departamento) : ""}</p>
+        </div>
+        <span class="rounded-full bg-orange-100 px-2.5 py-1 text-xs font-medium text-orange-800">
+          Pide anular
+        </span>
+      </div>
+
+      <p class="mt-3 text-sm text-slate-700">
+        ${a.tipo === "vacacion" ? "Vacaciones" : esc(a.categoria || "Permiso")} del
+        <strong>${fecha(a.fecha_inicio, false)}</strong> al <strong>${fecha(a.fecha_fin)}</strong>
+        · ${a.dias_solicitados} día(s)
+      </p>
+      <p class="mt-2 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
+        <span class="font-medium">Motivo:</span> ${esc(a.anulacion_motivo || "no indicado")}
+      </p>
+      ${a.qr_usado_en
+        ? `<p class="mt-2 rounded-xl bg-rose-50 p-3 text-sm text-rose-800">
+             Atención: el código QR ya se usó en garita el ${fechaHora(a.qr_usado_en)}.</p>`
+        : ""}
+
+      <div class="mt-4 flex gap-3">
+        <button data-anul-rechazar="${a.id}"
+                class="flex-1 rounded-xl bg-white px-4 py-2.5 font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50">
+          No autorizar
+        </button>
+        <button data-anul-aprobar="${a.id}"
+                class="flex-1 rounded-xl bg-orange-600 px-4 py-2.5 font-medium text-white hover:bg-orange-700">
+          Autorizar anulación
+        </button>
+      </div>
+    </article>`).join("");
+}
+
+document.addEventListener("click", async (e) => {
+  const aprobar = e.target.closest("[data-anul-aprobar]");
+  if (aprobar) {
+    if (!confirm("¿Autorizar la anulación? Se devuelven los días y el código QR deja de servir.")) return;
+    try {
+      avisar((await api.resolverAnulacion(aprobar.dataset.anulAprobar, "aprobar", null)).mensaje);
+    } catch (err) { avisar(err.message, "error"); }
+    await cargar();
+    mostrarPestana("anulaciones");
+    return;
+  }
+
+  const rechazar = e.target.closest("[data-anul-rechazar]");
+  if (rechazar) {
+    const motivo = prompt("¿Por qué no se autoriza la anulación? El empleado lo verá.");
+    if (motivo === null) return;
+    if (motivo.trim().length < 5) return avisar("Indique un motivo.", "error");
+    try {
+      avisar((await api.resolverAnulacion(rechazar.dataset.anulRechazar, "rechazar", motivo)).mensaje);
+    } catch (err) { avisar(err.message, "error"); }
+    await cargar();
+    mostrarPestana("anulaciones");
+  }
+});
+
+/* --------------------------------------------------------------- del saldo */
+$("btn-detalle-periodos").addEventListener("click", () => {
+  const d = estado.saldo;
+  if (!d) return avisar("No se pudo obtener el detalle.", "error");
+
+  $("contenido-saldo").innerHTML = `
+    <section class="rounded-xl bg-slate-50 p-4">
+      <p class="text-sm leading-relaxed text-slate-700">${esc(d.regla_antiguedad)}</p>
+      <p class="mt-2 text-sm leading-relaxed text-slate-700">${esc(d.regla_fines_semana)}</p>
+    </section>
+
+    ${
+      d.proximo_vencimiento
+        ? `<section class="rounded-xl bg-amber-50 p-4 ring-1 ring-amber-200">
+             <p class="text-sm text-amber-900">
+               Su período ${d.proximo_vencimiento.periodo} vence el
+               <strong>${fecha(d.proximo_vencimiento.vence_en)}</strong> con
+               <strong>${Number(d.proximo_vencimiento.dias_en_riesgo)} día(s)</strong> en riesgo.
+             </p>
+           </section>`
+        : ""
+    }
+
+    <section>
+      <h3 class="mb-2 text-sm font-medium">Sus períodos</h3>
+      <div class="overflow-x-auto rounded-xl ring-1 ring-slate-200">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th class="px-3 py-2">Año</th><th class="px-3 py-2">Asignados</th>
+              <th class="px-3 py-2">Usados</th><th class="px-3 py-2">Saldo</th><th class="px-3 py-2">Estado</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            ${d.periodos
+              .map(
+                (p) => `<tr class="${p.caducado ? "text-slate-400 line-through" : ""}">
+                  <td class="px-3 py-2">${p.periodo}</td>
+                  <td class="px-3 py-2 tabular-nums">${Number(p.asignados)}</td>
+                  <td class="px-3 py-2 tabular-nums">${Number(p.consumidos)}</td>
+                  <td class="px-3 py-2 font-medium tabular-nums">${Number(p.saldo)}</td>
+                  <td class="px-3 py-2 text-xs">${esc(p.explicacion)}</td>
+                </tr>`
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h3 class="mb-2 text-sm font-medium">Base legal</h3>
+      <div class="space-y-2">
+        ${d.base_legal
+          .map(
+            (a) => `<details class="rounded-xl bg-slate-50 p-3">
+              <summary class="cursor-pointer text-sm font-medium">${esc(a.articulo)} — ${esc(a.titulo)}</summary>
+              <p class="mt-2 text-xs leading-relaxed text-slate-600">${esc(a.texto)}</p>
+              <p class="mt-1.5 text-xs text-slate-400">${esc(a.norma)}${
+                a.modo === "resumen"
+                  ? " · resumen de la empresa, no el texto literal de la norma"
+                  : ""}</p>
+            </details>`
+          )
+          .join("")}
+      </div>
+    </section>`;
+  abrir("modal-saldo");
+});
+
+
+
+/* ---------------------------------------------------- papeles para firmar
+   Dos documentos distintos con reglas de emisión opuestas, y la pantalla
+   tiene que explicar la diferencia sin obligar a nadie a leer el reglamento:
+
+     Constancia de goce   el historial completo. Se firma UNA vez. Si hace
+                          falta otra, la autoriza Talento Humano.
+     Solicitud            lo pedido en esa sesión. Sale con cada solicitud y
+                          se puede reimprimir cuantas veces haga falta.
+
+   La firma manuscrita no es burocracia: es lo único que acredita que quien
+   pidió es la persona y no un tercero que encontró la sesión abierta. */
+const PAPELES = {
+  trazabilidad: {
+    nombre: "Constancia de goce de vacaciones",
+    que_es: "Su historial completo de vacaciones. Revíselo antes de firmar: " +
+            "si algo no cuadra, dígalo en Talento Humano antes de firmarlo.",
+    una_vez: true,
+  },
+  solicitud: {
+    nombre: "Solicitud y constancia de vacaciones",
+    que_es: "Lo que pidió en esta solicitud. Su firma a mano es lo que " +
+            "confirma en Talento Humano que la pidió usted.",
+    una_vez: false,
+  },
+};
+
+function filaDePapel(p, destacado = false) {
+  const d = PAPELES[p.tipo] || { nombre: p.tipo, que_es: "" };
+  const veces = Number(p.impresiones || 0);
+  return `
+    <div class="flex flex-wrap items-start justify-between gap-3 px-5 py-4
+                ${destacado ? "bg-slate-50" : ""}">
+      <div class="min-w-0 flex-1">
+        <p class="font-medium">${esc(d.nombre)}</p>
+        <p class="mt-0.5 text-sm text-slate-600">${esc(d.que_es)}</p>
+        <p class="mt-1 text-xs text-slate-400">
+          Folio ${esc(p.folio)} · emitido el ${fecha(p.emitido_en)}
+          ${p.es_reemision ? " · reemisión autorizada" : ""}
+          ${veces ? ` · impreso ${veces} ${veces === 1 ? "vez" : "veces"}` : ""}
+          ${p.firmado_en ? ` · <span class="text-emerald-700">firmado el ${fecha(p.firmado_en)}</span>` : ""}
+        </p>
+      </div>
+      ${p.tiene_escaneo ? `<button type="button" data-ver-escaneo="${esc(p.id)}"
+              class="shrink-0 rounded-xl bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-800
+                     ring-1 ring-emerald-200 hover:bg-emerald-100">Ver el firmado</button>` : ""}
+      <button type="button" data-imprimir="${esc(p.id)}"
+              class="shrink-0 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white
+                     hover:bg-slate-800">
+        ${veces ? "Volver a imprimir" : "Imprimir"}</button>
+    </div>`;
+}
+
+async function imprimirPapel(id, boton) {
+  const antes = boton.textContent;
+  boton.disabled = true;
+  boton.textContent = "Preparando…";
+  try {
+    await api.abrirPapel(id);
+  } catch (err) {
+    avisar(err.message, "error");
+  } finally {
+    boton.disabled = false;
+    boton.textContent = antes;
+  }
+}
+
+document.addEventListener("click", (e) => {
+  const boton = e.target.closest("[data-imprimir]");
+  if (boton) imprimirPapel(boton.dataset.imprimir, boton);
+  const firmado = e.target.closest("[data-ver-escaneo]");
+  if (firmado) api.abrirEscaneo(firmado.dataset.verEscaneo).catch((err) => avisar(err.message, "error"));
+});
+
+async function cargarPapeles() {
+  let cuerpo;
+  try {
+    cuerpo = await api.misPapeles();
+  } catch {
+    // Un fallo aquí no puede tumbar el panel: son documentos para imprimir,
+    // no el saldo.
+    return;
+  }
+  const papeles = cuerpo.papeles || [];
+  const seccion = $("seccion-papeles");
+  if (!seccion) return;
+  seccion.classList.toggle("hidden", papeles.length === 0);
+  if (!papeles.length) return;
+
+  // Solo el vigente de cada tipo, y de las solicitudes las cinco últimas: la
+  // lista completa de alguien con veinte solicitudes no ayuda a nadie.
+  const traza = papeles.filter((p) => p.tipo === "trazabilidad").slice(0, 1);
+  const solicitudes = papeles.filter((p) => p.tipo === "solicitud").slice(0, 5);
+  $("lista-papeles").innerHTML =
+    [...traza, ...solicitudes].map((p) => filaDePapel(p)).join("") +
+    (cuerpo.trazabilidad_reemision === "autorizada"
+      ? `<p class="px-5 pt-3 text-xs text-slate-400">
+           La constancia de goce se emite una sola vez. Si necesita otra
+           —porque extravió la firmada o porque se corrigió un registro—,
+           Talento Humano la autoriza y queda con su propio folio.</p>`
+      : "");
+}
+
+/* Lo que se muestra al terminar de pedir vacaciones. El momento importa: es
+   cuando la persona sigue frente a la pantalla. */
+async function ofrecerPapeles(solicitudId) {
+  try {
+    const [cuerpo, dePedido] = await Promise.all([
+      api.misPapeles(),
+      api.papelDeLaSolicitud(solicitudId),
+    ]);
+    const papeles = cuerpo.papeles || [];
+    const traza = papeles.find((p) => p.tipo === "trazabilidad");
+    const suyo = papeles.find((p) => p.id === dePedido.id) || dePedido;
+
+    // La constancia de goce solo se ofrece la primera vez: si ya se firmó,
+    // volver a sacarla en cada solicitud enseña a ignorar el aviso.
+    const primeraVez = traza && Number(traza.impresiones || 0) === 0;
+    const mostrar = primeraVez ? [suyo, traza] : [suyo];
+
+    $("papeles-emitidos").innerHTML =
+      mostrar.map((p, i) => filaDePapel(p, i === 0)).join("") +
+      (primeraVez
+        ? `<p class="px-5 py-3 text-xs text-slate-500">
+             La constancia de goce se emite <b>una sola vez</b>, y esta es la
+             suya. Revísela antes de firmarla.</p>`
+        : "");
+    abrir("modal-papeles");
+  } catch {
+    // Si no se pudo, la solicitud ya quedó registrada igual y los documentos
+    // siguen en el panel. No se avisa de un fallo que no bloquea nada.
+  }
+}
+
+/* ------------------------------------------------------- historial de vacaciones
+   «¿Cuándo tomé vacaciones la última vez?» es la pregunta que cualquiera se
+   hace, y hasta hoy el sistema no podía responderla: tenía el saldo pero no
+   el detalle de cómo se llegó a él. Ahora están las 3.303 vacaciones que
+   Talento Humano llevaba en su hoja, junto con lo tramitado aquí.
+
+   Cada registro dice de dónde viene. Mezclarlas sin distinguir sería el
+   error a evitar: quien ve «15 días en marzo de 2019» tiene derecho a saber
+   si eso lo tramitó por este sistema o si viene de la hoja del
+   departamento. */
+/* Ahora el historial se ve por AÑO, como lo lleva Talento Humano en su hoja:
+   cuántos días se asignaron, cuántos se tomaron y si quedaron sobrantes o se
+   adelantaron, con el detalle de cada registro. Cada registro se puede
+   refutar con evidencia (va por correo al departamento) y todo se descarga
+   en Excel o PDF para revisarlo con Talento Humano. */
+const hist = { datos: null, abiertos: new Set(), todos: false, refutando: null };
+const num = (v) => Number(v).toLocaleString("es-EC", { maximumFractionDigits: 2 });
+// Como en la hoja de Talento Humano: 22/01/2024.
+const dmy = (v) => (v ? `${String(v).slice(8, 10)}/${String(v).slice(5, 7)}/${String(v).slice(0, 4)}` : "");
+const REV = {
+  pendiente: ["En revisión por Talento Humano", "bg-amber-100 text-amber-800"],
+  aceptada: ["Revisión aceptada", "bg-emerald-100 text-emerald-800"],
+  rechazada: ["Revisión no aceptada", "bg-slate-200 text-slate-700"],
+};
+
+function badgeBalance(b) {
+  if (b < 0) return [`−${num(-b)} (${-b === 1 ? "Día adelantado" : "Días adelantados"})`, "bg-red-500"];
+  if (b > 0) return [`+${num(b)} (${b === 1 ? "Día sobrante" : "Días sobrantes"})`, "bg-emerald-500"];
+  return ["0 (Balance exacto)", "bg-slate-500"];
+}
+
+function pintarHistorialAnual() {
+  const d = hist.datos;
+  if (!d) return;
+  const r = d.resumen;
+  $("hist-generados").textContent = num(r.generados);
+  $("hist-tomados").textContent = num(r.tomados);
+  $("hist-saldo").textContent = num(r.saldo);
+  // Si el saldo oficial no es generados − tomados, se dice cuánto y por qué.
+  const calculado = Math.round((r.generados - r.tomados) * 100) / 100;
+  const hayNota = Boolean(r.caducados || r.diferencia || r.con_diferencias?.length);
+  $("hist-nota").textContent = hayNota
+    ? (r.caducados || r.diferencia ? `Generados − tomados = ${num(calculado)} días; su saldo oficial es ${num(r.saldo)}.` : "")
+      + (r.caducados ? ` ${num(r.caducados)} día(s) caducaron.` : "")
+      + (r.diferencia ? ` La diferencia de ${num(Math.abs(r.diferencia))} día(s) corresponde a ajustes de Talento Humano`
+        + " o al saldo con que se cargó su ficha." : "")
+      + (r.con_diferencias?.length ? ` Revise los años de servicio ${r.con_diferencias.join(", ")}: los días registrados no `
+        + "coinciden con la tabla de antigüedad (marcados en ámbar)." : "")
+      + " Si no está de acuerdo, refute el registro o escriba a Talento Humano."
+    : "";
+  $("hist-nota").classList.toggle("hidden", !hayNota);
+  $("historial-persona").textContent = [d.persona.nombre, d.persona.fecha_ingreso
+    ? `ingreso ${fecha(d.persona.fecha_ingreso)} · ${d.persona.anios_servicio} año(s) de servicio` : ""]
+    .filter(Boolean).join(" · ");
+
+  // Lo que le corresponde por su antigüedad en el año de servicio en curso.
+  const da = r.derecho_actual;
+  $("hist-derecho").classList.toggle("hidden", !da);
+  if (da) {
+    $("hist-derecho").innerHTML = `
+      <p>En su <b>${da.periodo}.º año de servicio</b> le corresponden <b>${da.total} días</b>:
+        <b>${da.base}</b> base${da.adicionales ? ` + <b>${da.adicionales}</b> adicional${da.adicionales === 1 ? "" : "es"} por antigüedad` : ""}
+        ${da.laborables ? `(${da.laborables} laborables y ${da.no_laborables} no laborables incluidos)` : ""}.</p>
+      <p class="mt-0.5 text-xs text-sky-800">${da.devengado ? "" : `Se van acumulando: lleva ${num(da.asignados)} y lo completa el ${dmy(da.hasta)}. `}
+        ${r.adicionales ? `En total ha recibido <b>${r.adicionales}</b> día(s) adicionales por antigüedad.` :
+          "Los días adicionales empiezan desde el sexto año de servicio."}</p>`;
+  }
+
+  $("historial-anios").innerHTML = d.anios.length ? d.anios.map((a) => {
+    const [texto, color] = badgeBalance(a.balance);
+    const abierto = hist.todos || hist.abiertos.has(a.anio);
+    const desglose = a.total
+      ? `Base: <b class="text-slate-800">${a.base}</b> · Adicionales: <b class="${a.adicionales ? "text-emerald-700" : "text-slate-800"}">${a.adicionales}</b> · Total: <b class="text-slate-800">${a.total}</b>`
+      : `Acumulados: <b class="text-slate-800">${num(a.asignados_del_anio)}</b>`;
+    const filas = a.movimientos.map((m) => {
+      if (m.tipo === "asignacion") {
+        return `<tr class="bg-emerald-50/70">
+          <td class="px-4 py-2.5 tabular-nums">${dmy(m.fecha)}</td>
+          <td class="px-4 py-2.5 text-xs text-emerald-900" colspan="2">
+            ${m.devengado ? `<b>Cumplió su ${m.periodo}.º año de servicio</b>` : `<b>Acumulado hasta hoy del ${m.periodo}.º año de servicio</b> (lo completa el ${dmy(m.hasta)})`}
+            · ${m.base} base${m.adicionales ? ` + ${m.adicionales} adicional${m.adicionales === 1 ? "" : "es"}` : ""} = ${m.total} días
+            ${m.nota ? `<span class="mt-0.5 block rounded bg-amber-100 px-1.5 py-0.5 text-amber-900">⚠ ${esc(m.nota)}</span>` : ""}</td>
+          <td class="px-4 py-2.5 text-center font-semibold tabular-nums text-emerald-700">+${num(m.dias)}</td>
+          <td class="px-4 py-2.5 text-center font-semibold tabular-nums">${num(m.quedan)}</td><td></td></tr>`;
+      }
+      if (m.tipo === "caducidad") {
+        return `<tr class="bg-slate-100/70"><td class="px-4 py-2.5 tabular-nums">${dmy(m.fecha)}</td>
+          <td class="px-4 py-2.5 text-xs text-slate-600" colspan="2">Caducaron los días no gozados del ${m.periodo}.º año de servicio</td>
+          <td class="px-4 py-2.5 text-center tabular-nums text-slate-600">${num(m.dias)}</td>
+          <td class="px-4 py-2.5 text-center font-semibold tabular-nums">${num(m.quedan)}</td><td></td></tr>`;
+      }
+      const reg = a.registros[m.registro];
+      const rv = reg.revision;
+      return `<tr>
+        <td class="px-4 py-2.5 tabular-nums">${dmy(reg.fecha_inicio)}</td>
+        <td class="px-4 py-2.5 tabular-nums">${dmy(reg.fecha_fin)}</td>
+        <td class="px-4 py-2.5 text-xs text-slate-600">${reg.folio ? `Solicitud Nº ${reg.folio}` : "Hoja de Talento Humano"}
+          ${rv ? `<span class="mt-1 block w-fit rounded-full px-2 py-0.5 text-[11px] font-medium ${REV[rv.estado][1]}">${REV[rv.estado][0]}</span>
+                 ${rv.respuesta ? `<span class="mt-0.5 block text-[11px] text-slate-500">«${esc(rv.respuesta)}»</span>` : ""}` : ""}</td>
+        <td class="px-4 py-2.5 text-center font-medium tabular-nums text-rose-700">−${num(reg.dias)}</td>
+        <td class="px-4 py-2.5 text-center font-semibold tabular-nums ${m.quedan < 0 ? "text-rose-700" : ""}">${num(m.quedan)}</td>
+        <td class="px-2 py-2.5 text-right">${!rv || rv.estado !== "pendiente"
+          ? `<button type="button" data-refutar="${a.anio}:${m.registro}"
+               class="rounded-lg px-2 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50">Refutar</button>` : ""}</td>
+      </tr>`;
+    }).join("");
+    return `
+    <section class="overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
+      <button type="button" data-hist-anio="${a.anio}" aria-expanded="${abierto}"
+              class="flex w-full flex-wrap items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-slate-50 ${abierto ? "bg-slate-50" : ""}">
+        <span class="flex items-center gap-2 text-base font-semibold text-[#1C58D7]">
+          <span aria-hidden="true">📅</span> Año ${a.anio}
+          ${a.en_curso ? '<span class="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-800">en curso</span>' : ""}
+        </span>
+        <span class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-600">
+          <span>${desglose}</span>
+          <span class="text-slate-300">|</span>
+          <span>Tomados: <b class="text-slate-800">${num(a.tomados)}</b></span>
+          <span class="rounded-full px-3 py-1 text-xs font-semibold text-white ${color}">${texto}</span>
+          <span class="text-slate-400">${abierto ? "▴" : "▾"}</span>
+        </span>
+      </button>
+      ${abierto ? `
+      <div class="border-t border-slate-200">
+        <p class="bg-slate-50 px-4 py-2 text-xs text-slate-600">Traía de años anteriores: <b>${num(a.saldo_inicio)}</b> día(s)
+          · Le quedaron al cierre${a.anio === new Date().getFullYear() ? " (hoy)" : ""}: <b>${num(a.saldo_cierre)}</b></p>
+        <div class="overflow-x-auto">
+        <table class="w-full min-w-[40rem] text-sm">
+          <thead><tr class="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <th class="px-4 py-2.5">Fecha de inicio</th><th class="px-4 py-2.5">Fecha de fin</th><th class="px-4 py-2.5">Origen</th>
+            <th class="px-4 py-2.5 text-center">Días</th><th class="px-4 py-2.5 text-center">Quedan</th><th class="px-2 py-2.5"></th></tr></thead>
+          <tbody class="divide-y divide-slate-100">${filas ||
+            `<tr><td colspan="6" class="px-4 py-4 text-center text-sm text-slate-500">Sin movimientos este año.</td></tr>`}</tbody>
+          <tfoot><tr class="bg-slate-200/70 font-semibold">
+            <td colspan="3" class="px-4 py-2.5 text-right">Total días tomados:</td>
+            <td class="px-4 py-2.5 text-center tabular-nums">${num(a.tomados)}</td>
+            <td class="px-4 py-2.5 text-center tabular-nums">${num(a.saldo_cierre)}</td><td></td></tr></tfoot>
+        </table></div>
+      </div>` : ""}
+    </section>`;
+  }).join("") : `<p class="rounded-xl bg-white px-4 py-8 text-center text-sm text-slate-500 ring-1 ring-slate-200">
+      Todavía no hay períodos ni vacaciones registradas a su nombre.</p>`;
+}
+
+$("btn-detalle-saldo").addEventListener("click", async () => {
+  $("historial-persona").textContent = "Cargando…";
+  $("historial-anios").innerHTML = "";
+  abrir("modal-historial");
+  try {
+    const [datosHist, tabla] = await Promise.all([api.historialAnual(), api.tablaAntiguedad().catch(() => null)]);
+    hist.datos = datosHist;
+    const actual = hist.datos.resumen.derecho_actual?.periodo;
+    $("hist-tabla-filas").innerHTML = (tabla?.tabla || []).map((t) => {
+      const suya = actual && actual >= t.anios_desde && (t.anios_hasta == null || actual <= t.anios_hasta);
+      return `<tr class="${suya ? "bg-amber-100 font-semibold" : ""}">
+        <td class="px-3 py-1.5">${esc(t.rango)}${suya ? " ← usted" : ""}</td>
+        <td class="px-3 py-1.5 text-center">${t.dias_gozar} días</td>
+        <td class="px-3 py-1.5 text-center">${t.dias_laborables} días</td>
+        <td class="px-3 py-1.5 text-center">${t.dias_no_laborables} días</td></tr>`;
+    }).join("");
+    // El año en curso, abierto: es lo que la persona viene a mirar.
+    const ultimo = hist.datos.anios.filter((a) => a.anio <= new Date().getFullYear()).at(-1);
+    hist.abiertos = new Set(ultimo ? [ultimo.anio] : []);
+    hist.todos = false;
+    $("hist-expandir").textContent = "Ver todo el detalle";
+    pintarHistorialAnual();
+  } catch (err) {
+    $("historial-persona").textContent = "";
+    $("historial-anios").innerHTML =
+      `<p class="rounded-xl bg-white px-4 py-8 text-center text-sm text-rose-700">${esc(err.message)}</p>`;
+  }
+});
+
+$("historial-anios").addEventListener("click", (e) => {
+  const anio = e.target.closest("[data-hist-anio]");
+  const refutar = e.target.closest("[data-refutar]");
+  if (anio) {
+    const n = Number(anio.dataset.histAnio);
+    if (hist.todos) { hist.todos = false; hist.abiertos = new Set(hist.datos.anios.map((a) => a.anio)); }
+    hist.abiertos.has(n) ? hist.abiertos.delete(n) : hist.abiertos.add(n);
+    pintarHistorialAnual();
+  } else if (refutar) {
+    const [anioR, k] = refutar.dataset.refutar.split(":").map(Number);
+    const reg = hist.datos.anios.find((a) => a.anio === anioR).registros[k];
+    hist.refutando = reg;
+    $("form-refutar").reset();
+    $("refutar-error").classList.add("hidden");
+    $("refutar-que").textContent = `${dmy(reg.fecha_inicio)} – ${dmy(reg.fecha_fin)} · ${num(reg.dias)} día(s) · `
+      + (reg.folio ? `Solicitud Nº ${reg.folio}` : "Hoja de Talento Humano");
+    abrir("modal-refutar");
+  }
+});
+
+$("hist-expandir").addEventListener("click", () => {
+  hist.todos = !hist.todos;
+  if (!hist.todos) hist.abiertos = new Set();
+  $("hist-expandir").textContent = hist.todos ? "Plegar todo" : "Ver todo el detalle";
+  pintarHistorialAnual();
+});
+
+document.querySelectorAll("[data-descargar-historial]").forEach((b) => b.addEventListener("click", async () => {
+  b.disabled = true;
+  try { await api.descargarHistorial(b.dataset.descargarHistorial); }
+  catch (err) { avisar(err.message, "error"); }
+  finally { b.disabled = false; }
+}));
+
+$("form-refutar").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const error = $("refutar-error");
+  const motivo = $("refutar-motivo").value.trim();
+  const archivos = [...$("refutar-archivos").files];
+  error.classList.add("hidden");
+  if (motivo.length < 15) { error.textContent = "Explique qué no corresponde (mínimo 15 caracteres)."; return error.classList.remove("hidden"); }
+  if (!archivos.length) { error.textContent = "Adjunte la evidencia: es obligatoria."; return error.classList.remove("hidden"); }
+  const boton = $("refutar-enviar");
+  boton.disabled = true; boton.textContent = "Enviando…";
+  try {
+    const r = await api.refutarRegistro(hist.refutando.origen, hist.refutando.ref, motivo, archivos);
+    $("modal-refutar").close();
+    avisar(r.mensaje);
+    hist.datos = await api.historialAnual();
+    pintarHistorialAnual();
+  } catch (err) {
+    error.textContent = err.message;
+    error.classList.remove("hidden");
+  } finally {
+    boton.disabled = false; boton.textContent = "Enviar a Talento Humano";
+  }
+});
+
+
+/* -------------------------------------------------------- nueva solicitud */
+/* Pilares y subtipos.
+
+   Antes eran veinte opciones planas en un desplegable: para elegir bien
+   había que leerlas todas. Ahora se responde una pregunta —emergencia del
+   hogar, salud o asunto propio— y se afina dentro de ese grupo. */
+/* Cómo se ve una tarjeta de pilar, elegida o no.
+
+   En un solo sitio a propósito. Estaba en tres —al dibujarlas, al elegir una
+   y al limpiar el formulario— y el tercero se quedó con las clases viejas:
+   la tarjeta perdía su comentario flotante justo al abrir el formulario, que
+   es siempre. */
+function pintarPilar(boton, elegido) {
+  boton.className = `con-ayuda ayuda-abajo rounded-xl p-3 text-left ring-1 ${elegido
+    ? "bg-slate-900 text-white ring-slate-900"
+    : "ring-slate-200 hover:ring-slate-400"} focus:outline-none focus-visible:ring-2
+    focus-visible:ring-slate-900`;
+  const titulo = boton.querySelector("span");
+  if (titulo) {
+    titulo.className = `block text-sm font-medium ${elegido ? "text-white" : "text-slate-900"}`;
+  }
+  // La explicación solo se dibuja en pantallas sin cursor: donde hay cursor
+  // vive en el comentario flotante y aquí sobra.
+  const detalle = boton.querySelectorAll("span")[1];
+  if (detalle) {
+    detalle.className =
+      `mt-0.5 block text-xs leading-snug sm:hidden ${elegido ? "text-slate-300" : "text-slate-500"}`;
+  }
+}
+
+function montarPilares(catalogo) {
+  estado.catalogo = catalogo;
+  estado.tipos = (catalogo.pilares || []).flatMap((p) => p.subtipos);
+  // Sin texto no se deja un desplegable que promete algo y no tiene nada.
+  $("mandato-texto").textContent = catalogo.mandato || "";
+  $("mandato").classList.toggle("hidden", !catalogo.mandato);
+
+  /* Un catálogo vacío significa que la base no tiene la migración de los
+     pilares. Antes el formulario salía mudo —sin tipo, sin subtipo y sin
+     horas— y no había forma de saber por qué. Ahora lo dice. */
+  if (!(catalogo.pilares || []).length) {
+    $("pilares").innerHTML = `
+      <div class="sm:col-span-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-800 ring-1 ring-rose-200">
+        <p class="font-medium">No se pudo cargar el catálogo de permisos.</p>
+        <p class="mt-1 text-xs leading-relaxed">
+          Falta aplicar una migración en la base de datos. Quien administre el
+          sistema debe ejecutar <code class="font-mono">supabase/migrations/</code>
+          hasta la última. Mientras tanto no es posible solicitar permisos.
+        </p>
+      </div>`;
+    return;
+  }
+
+  /* Tres botones con el nombre solo, y la explicación al pasar el cursor.
+
+     Antes cada tarjeta llevaba debajo su párrafo: tres párrafos que el
+     operativo tiene delante cada vez que pide un permiso, y que deja de leer
+     a la segunda. Con el nombre solo, las tres opciones se comparan de un
+     vistazo; quien duda cuál es la suya pasa el cursor y lo lee.
+
+     En el teléfono no hay cursor, así que la explicación va debajo: ahí el
+     comentario flotante no se puede invocar y esconderlo dejaría la tarjeta
+     sin decir nada. Lo resuelve el CSS, no un condicional aquí. */
+  $("pilares").innerHTML = (catalogo.pilares || []).map((p) => `
+    <button type="button" data-pilar="${esc(p.codigo)}"
+            data-ayuda="${esc(p.descripcion)}"
+            class="con-ayuda ayuda-abajo rounded-xl p-3 text-left ring-1 ring-slate-200
+                   hover:ring-slate-400 focus:outline-none focus-visible:ring-2
+                   focus-visible:ring-slate-900">
+      <span class="block text-sm font-medium text-slate-900">${esc(p.nombre)}</span>
+      <span class="mt-0.5 block text-xs leading-snug text-slate-500 sm:hidden">
+        ${esc(p.descripcion)}</span>
+    </button>`).join("");
+
+  $("pilares").querySelectorAll("[data-pilar]").forEach((boton) => {
+    pintarPilar(boton, false);
+    boton.addEventListener("click", () => elegirPilar(boton.dataset.pilar));
+  });
+}
+
+function elegirPilar(codigo) {
+  const pilar = (estado.catalogo?.pilares || []).find((p) => p.codigo === codigo);
+  estado.pilarActual = pilar || null;
+  estado.tipoActual = null;
+
+  $("pilares").querySelectorAll("[data-pilar]")
+    .forEach((b) => pintarPilar(b, b.dataset.pilar === codigo));
+
+  $("tipo-permiso").innerHTML =
+    `<option value="">Seleccione…</option>` +
+    (pilar?.subtipos || []).map((t) => `<option value="${t.id}">${esc(t.nombre)}</option>`).join("");
+  $("campo-subtipo").classList.toggle("hidden", !pilar);
+  $("info-permiso").classList.add("hidden");
+  $("ejemplo-descripcion").classList.add("hidden");
+  $("campo-adjuntos").classList.add("hidden");
+  pedirJustificacion(false);
+}
+
+document.querySelectorAll("[data-nueva]").forEach((boton) =>
+  boton.addEventListener("click", () => abrirFormulario(boton.dataset.nueva))
+);
+
+/* Mostrar u ocultar la justificación SIEMPRE por aquí.
+
+   Un campo oculto y a la vez `required` deja el formulario mudo: el
+   navegador se niega a enviarlo —no puede poner el foco en algo que no se
+   ve— y no muestra ningún error. El botón se pulsa y no pasa nada, que es
+   el peor de los fallos posibles porque no deja ni dónde mirar. */
+function pedirJustificacion(hace_falta, opcional = false) {
+  $("campo-justificacion").classList.toggle("hidden", !hace_falta);
+  $("justificacion").required = !!hace_falta && !opcional;
+  $("justificacion").minLength = opcional ? 0 : 10;
+  $("justificacion-requisito").textContent = opcional ? "(opcional)" : "(obligatoria)";
+  $("justificacion-requisito").className = opcional ? "font-normal text-slate-500" : "font-normal text-rose-600";
+  $("justificacion").placeholder = opcional
+    ? "Si quiere, agregue lo que ayude a decidir"
+    : "Explique el motivo con al menos 10 caracteres";
+}
+
+/* Quien pide uno o dos días de vacaciones casi siempre tiene un asunto
+   puntual: le corresponde un permiso de día completo, que se registra
+   como permiso. Se cambia el formulario conservando las fechas y se deja
+   elegido «Permiso personal» y la modalidad de días completos. */
+function pasarAPermiso() {
+  const inicio = $("fecha-inicio").value, fin = $("fecha-fin").value;
+  $("modal-solicitud").close();
+  abrirFormulario("permiso");
+  $("fecha-inicio").value = inicio;
+  $("fecha-fin").value = fin;
+  const personal = (estado.catalogo?.pilares || []).find((p) => p.codigo === "permiso_personal");
+  if (personal) {
+    elegirPilar(personal.codigo);
+    const asunto = personal.subtipos.find((t) => t.codigo === "permiso_personal") || personal.subtipos[0];
+    if (asunto) {
+      $("tipo-permiso").value = String(asunto.id);
+      $("tipo-permiso").dispatchEvent(new Event("change"));
+      elegirModalidad("dias");
+      $("fecha-inicio").value = inicio;
+      $("fecha-fin").value = fin;
+      previsualizar();
+    }
+  }
+}
+
+function abrirFormulario(tipo) {
+  const f = $("form-solicitud");
+  f.reset();
+  f.dataset.tipo = tipo;
+  estado.adjuntos = [];
+  estado.tipoActual = null;
+
+  $("titulo-solicitud").textContent = tipo === "vacacion" ? "Solicitar vacaciones" : "Solicitar permiso";
+  $("campo-tipo-permiso").classList.toggle("hidden", tipo !== "permiso");
+  $("campo-horas").classList.add("hidden");
+  $("campo-horas").classList.remove("grid");
+  $("campo-adjuntos").classList.add("hidden");
+  pedirJustificacion(false);
+  $("info-permiso").classList.add("hidden");
+  $("ejemplo-descripcion").classList.add("hidden");
+  $("campo-subtipo").classList.add("hidden");
+  $("campo-excepcion").classList.add("hidden");
+  $("excepcion-bloque").checked = false;
+  $("campo-modalidad").classList.add("hidden");
+  $("campo-cita").classList.add("hidden");
+  $("total-horas").classList.add("hidden");
+  $("fecha-fin").disabled = false;
+  $("fecha-fin").parentElement.classList.remove("opacity-50");
+  estado.modalidad = null;
+  estado.pilarActual = null;
+  $("pilares").querySelectorAll("[data-pilar]").forEach((b) => pintarPilar(b, false));
+  $("previsualizacion").classList.add("hidden");
+  $("error-solicitud").classList.add("hidden");
+  $("lista-adjuntos").innerHTML = "";
+  $("contador-desc").textContent = "0/200";
+
+  /* La anticipación mínima no es una molestia administrativa: es el tiempo
+     que la jefatura necesita para organizar quién cubre el puesto.
+
+     Pero solo vale para VACACIONES. Un permiso es casi siempre de hoy: la
+     cita que dieron esta mañana, el trámite que no espera, la calamidad.
+     Exigir un día de anticipación convertía justo esos casos —los más— en
+     imposibles de registrar, y la ausencia terminaba arreglándose por
+     teléfono, sin quedar en ninguna parte. */
+  /* La anticipación es una SUGERENCIA: la fecha que se propone sale de
+     ella, pero se pueden pedir vacaciones que empiecen mañana. */
+  const aviso = tipo === "vacacion" ? Number(estado.reglas?.anticipacion || 10) : 0;
+  const primera = new Date(Date.now() + aviso * 86400000).toISOString().slice(0, 10);
+  const minima = tipo === "vacacion"
+    ? new Date(Date.now() + 86400000).toISOString().slice(0, 10) : primera;
+  $("fecha-inicio").min = minima;
+  $("fecha-fin").min = minima;
+
+  if (tipo === "vacacion") {
+    // Se propone el período completo: la regla general es tomarlo entero,
+    // no fraccionarlo. Quien quiera menos, lo acorta.
+    const bloque = Number(estado.reglas?.sugerido || 15);
+    const fin = new Date(Date.now() + (aviso + bloque - 1) * 86400000);
+    $("fecha-inicio").value = primera;
+    $("fecha-fin").value = fin.toISOString().slice(0, 10);
+    pintarLineamientos("vacacion");
+    setTimeout(previsualizar, 50);
+  } else {
+    pintarLineamientos("permiso");
+  }
+
+
+  abrir("modal-solicitud");
+}
+
+$("descripcion").addEventListener("input", (e) => {
+  $("contador-desc").textContent = `${e.target.value.length}/200`;
+});
+
+$("tipo-permiso").addEventListener("change", (e) => {
+  const tipo = (estado.pilarActual?.subtipos || estado.tipos)
+    .find((t) => String(t.id) === e.target.value);
+  estado.tipoActual = tipo || null;
+
+  const info = $("info-permiso");
+  const ejemplo = $("ejemplo-descripcion");
+  if (!tipo) {
+    info.classList.add("hidden");
+    ejemplo.classList.add("hidden");
+    $("campo-adjuntos").classList.add("hidden");
+    return;
+  }
+
+  const requisitos = [
+    tipo.requiere_adjunto ? "lleva respaldo (puede adjuntarlo ahora o después)" : null,
+    tipo.descuenta_vacaciones ? "se descuenta de sus vacaciones" : null,
+    tipo.max_dias ? `máximo ${Number(tipo.max_dias)} día(s)` : null,
+    tipo.max_horas ? `máximo ${Number(tipo.max_horas)} hora(s)` : null,
+  ].filter(Boolean);
+
+  info.innerHTML = requisitos.length
+    ? `<strong>Este permiso ${requisitos.join(", ")}.</strong>`
+    : `<strong>${esc(tipo.descripcion || tipo.nombre)}</strong>`;
+  info.classList.remove("hidden");
+
+  /* El ejemplo es la pieza que evita el «permiso personal» a secas, que
+     obliga a devolver la solicitud y le cuesta un día al solicitante. */
+  if (tipo.guia_ejemplo) {
+    ejemplo.innerHTML =
+      `<span class="font-medium">Así se redacta una solicitud que se aprueba:</span><br>` +
+      esc(tipo.guia_ejemplo);
+    ejemplo.classList.remove("hidden");
+    $("descripcion").placeholder = "Motivo, lugar, hora y cuánto tiempo estará ausente";
+  } else {
+    ejemplo.classList.add("hidden");
+  }
+
+  /* El respaldo se ofrece SIEMPRE y se sugiere donde corresponde, pero no
+     bloquea: el certificado de una cita médica se emite después de la cita,
+     así que exigirlo antes es pedir un documento que todavía no existe. */
+  $("guia-adjuntos").textContent = tipo.guia_adjuntos || "";
+  $("campo-adjuntos").classList.remove("hidden");
+  $("etiqueta-adjuntos").innerHTML = tipo.requiere_adjunto
+    ? 'Respaldo <span class="font-normal text-slate-500">(se sugiere adjuntarlo)</span>'
+    : 'Respaldo <span class="font-normal text-slate-500">(opcional)</span>';
+
+  /* La justificación es opcional en un permiso: el motivo ya va en la
+     descripción. Si Talento Humano necesita más, pide el respaldo desde el
+     sistema y la persona lo adjunta en «Mis solicitudes». */
+  pedirJustificacion(true, true);
+
+  /* Una cita a las 13:00 no es «un día de permiso», son tres horas. Los
+     subtipos que admiten esa modalidad la ofrecen; los que por naturaleza
+     ocupan el día —un reposo, un duelo— no la muestran. */
+  $("campo-modalidad").classList.toggle("hidden", !tipo.admite_horas);
+  if (!tipo.admite_horas) elegirModalidad("dias");
+  else if (!estado.modalidad) elegirModalidad("horas");
+  else elegirModalidad(estado.modalidad);
+
+  previsualizar();
+});
+
+/* ------------------------------------------- días completos u horas sueltas */
+/* Los lineamientos que se leen antes de enviar.
+
+   Los escribe Talento Humano desde su módulo: son reglas internas de la
+   empresa —cuántos días de anticipación, si el período se toma entero— y
+   cambian por una circular, no por una versión del sistema. Estaban escritas
+   dentro del HTML, que es tanto como decir que para cambiar una coma hacía
+   falta un programador. */
+function pintarLineamientos(ambito) {
+  const caja = $("aviso-vacaciones");
+  const suyos = (estado.reglas?.avisos || [])
+    .filter((a) => a.ambito === ambito || a.ambito === "ambos");
+
+  // Sin lineamientos no se deja un recuadro vacío con un título prometiendo
+  // algo: simplemente no aparece.
+  caja.classList.toggle("hidden", suyos.length === 0);
+  if (!suyos.length) return;
+
+  $("aviso-titulo").textContent =
+    `Antes de enviar, tenga presente (${suyos.length})`;
+  $("aviso-lista").innerHTML = suyos.map((a) => `<li>${esc(a.texto)}</li>`).join("");
+  // Plegado cada vez que se abre el formulario: quien ya lo leyó una vez no
+  // tiene que volver a cerrarlo.
+  caja.open = false;
+}
+
+function elegirModalidad(modo) {
+  estado.modalidad = modo;
+  const porHoras = modo === "horas";
+
+  document.querySelectorAll("[data-modalidad]").forEach((b) => {
+    const activo = b.dataset.modalidad === modo;
+    b.className = `rounded-xl px-3 py-2.5 text-sm ring-1 ${activo
+      ? "bg-slate-900 text-white ring-slate-900"
+      : "ring-slate-200 hover:ring-slate-400"}`;
+  });
+
+  $("campo-cita").classList.toggle("hidden", !porHoras);
+  $("campo-horas").classList.toggle("hidden", !porHoras);
+  $("campo-horas").classList.toggle("grid", porHoras);
+
+  // Por horas es siempre el mismo día: la fecha de fin sigue a la de inicio
+  // y se bloquea, porque un permiso de 13:00 a 15:00 del martes al jueves
+  // no significa nada.
+  $("fecha-fin").disabled = porHoras;
+  if (porHoras && $("fecha-inicio").value) $("fecha-fin").value = $("fecha-inicio").value;
+  $("fecha-fin").parentElement.classList.toggle("opacity-50", porHoras);
+  if (porHoras) calcularHorario();
+}
+
+document.querySelectorAll("[data-modalidad]").forEach((b) =>
+  b.addEventListener("click", () => elegirModalidad(b.dataset.modalidad))
+);
+
+/* Del horario de la cita sale el rango del permiso: antes hay que llegar y
+   después hay que volver. Los márgenes dependen del subtipo —un trámite en
+   una entidad pública no se resuelve en una hora como una consulta—. */
+function calcularHorario() {
+  const tipo = estado.tipoActual;
+  const cita = $("hora-cita").value;
+  if (!tipo || !cita) return mostrarTotalHoras();
+
+  const [h, m] = cita.split(":").map(Number);
+  const enMinutos = h * 60 + m;
+  const antes = Math.round((tipo.horas_antes ?? 1) * 60);
+  const despues = Math.round((tipo.horas_despues ?? 2) * 60);
+
+  const reloj = (min) => {
+    const acotado = Math.max(0, Math.min(23 * 60 + 59, min));
+    return `${String(Math.floor(acotado / 60)).padStart(2, "0")}:${
+      String(acotado % 60).padStart(2, "0")}`;
+  };
+
+  $("hora-inicio").value = reloj(enMinutos - antes);
+  $("hora-fin").value = reloj(enMinutos + despues);
+  mostrarTotalHoras();
+}
+
+function mostrarTotalHoras() {
+  const caja = $("total-horas");
+  const ini = $("hora-inicio").value, fin = $("hora-fin").value;
+  if (!ini || !fin) return caja.classList.add("hidden");
+
+  const min = (t) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+  const total = min(fin) - min(ini);
+  if (total <= 0) {
+    caja.textContent = "La hora de fin debe ser posterior a la de inicio.";
+    caja.className = "col-span-2 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-800";
+    return caja.classList.remove("hidden");
+  }
+
+  const horas = Math.floor(total / 60), minutos = total % 60;
+  const tope = estado.tipoActual?.max_horas;
+  const texto = `Permiso de ${horas} hora(s)${minutos ? ` y ${minutos} minutos` : ""}` +
+                ` el ${$("fecha-inicio").value || "día indicado"}.`;
+  const excede = tope && total / 60 > Number(tope);
+  caja.textContent = excede
+    ? `${texto} Este permiso admite hasta ${Number(tope)} horas: revise el rango.`
+    : texto;
+  caja.className = `col-span-2 rounded-xl px-3 py-2 text-xs ${excede
+    ? "bg-amber-50 text-amber-900" : "bg-cyan-50 text-cyan-900"}`;
+  caja.classList.remove("hidden");
+}
+
+$("hora-cita").addEventListener("change", calcularHorario);
+["hora-inicio", "hora-fin"].forEach((id) =>
+  $(id).addEventListener("change", mostrarTotalHoras)
+);
+
+/* ---- Previsualización en vivo ---- */
+let esperando;
+["fecha-inicio", "fecha-fin"].forEach((id) =>
+  $(id).addEventListener("change", () => {
+    // Un permiso por horas ocurre dentro de un mismo día. Si la fecha de
+    // inicio se elige DESPUÉS de activar la modalidad, la de fin quedaba
+    // vacía y el envío fallaba sin explicación.
+    if (estado.modalidad === "horas" && $("fecha-inicio").value) {
+      $("fecha-fin").value = $("fecha-inicio").value;
+      mostrarTotalHoras();
+    }
+    clearTimeout(esperando);
+    esperando = setTimeout(previsualizar, 250);
+  })
+);
+
+async function previsualizar() {
+  const inicio = $("fecha-inicio").value, fin = $("fecha-fin").value;
+  const caja = $("previsualizacion");
+  if (!inicio || !fin) return caja.classList.add("hidden");
+
+  try {
+    const p = await api.previsualizar({
+      tipo: $("form-solicitud").dataset.tipo,
+      fecha_inicio: inicio,
+      fecha_fin: fin,
+      permission_type_id: estado.tipoActual?.id ?? null,
+    });
+
+    // En permisos la justificación va siempre; en vacaciones, cuando la
+    // previsualización dice que hace falta (adelanto, bloque menor).
+    if ($("form-solicitud").dataset.tipo === "vacacion") {
+      pedirJustificacion(p.requiere_justificacion);
+    }
+
+    const tono = p.valido ? "bg-slate-50 text-slate-700" : "bg-amber-50 text-amber-900 ring-1 ring-amber-200";
+    const d = p.desglose || {};
+    // Desglose explícito: de dónde sale el número de días que se descuenta
+    const lineas = [
+      `${d.total_calendario ?? Number(p.dias)} día(s) en el rango`,
+      d.fines_de_semana ? `${d.fines_de_semana} de fin de semana` : null,
+      d.dias_no_laborables ? `${d.dias_no_laborables} no laborable(s)` : null,
+    ].filter(Boolean);
+
+    // Por debajo del bloque mínimo esto NO son vacaciones ordinarias, y
+    // mostrar «2 días a descontar · saldo después: 6.75» hace creer que basta
+    // con enviar el formulario. Es una excepción a la política: la resuelve
+    // Talento Humano, puede negarla, y hasta entonces no se descuenta nada.
+    const minimo = Number(estado.reglas?.minimo || 0);
+    const diasEnRango = Number(d.total_calendario ?? p.dias);
+    const esExcepcion =
+      $("form-solicitud").dataset.tipo === "vacacion" && minimo > 0 && diasEnRango < minimo;
+
+    caja.className = `rounded-xl p-3 text-sm ${esExcepcion
+      ? "bg-amber-50 text-amber-900 ring-1 ring-amber-200" : tono}`;
+    /* Un permiso no toca las vacaciones (salvo los «con cargo a
+       vacaciones»): decir «1 día a descontar · le quedarían 11» a quien
+       pide un permiso de estudios le hace creer que pierde un día. */
+    const esPermiso = $("form-solicitud").dataset.tipo === "permiso";
+    // Por horas, el total lo muestra el propio campo de horas (cambia sin
+    // volver a pedir la previsualización).
+    const porHoras = esPermiso && estado.modalidad === "horas";
+    const duracion = porHoras ? "por horas" : `de ${plural(diasEnteros(p.dias), "día", "días")}`;
+    const resumenPermiso = p.descuenta_vacaciones
+      ? `<p><strong>Permiso ${duracion}, con cargo a sus vacaciones</strong>` + (porHoras
+          ? " · se descuenta la fracción de día que corresponda a las horas</p>"
+          : ` · le quedarían <strong>${diasEnteros(p.saldo_despues)}</strong></p>`)
+      : `<p><strong>Permiso ${duracion}</strong> · no se descuenta de sus vacaciones</p>`;
+    caja.innerHTML =
+      (esPermiso ? resumenPermiso : esExcepcion
+        ? `<p><strong>${plural(diasEnRango, "día", "días")}: menos que el bloque de ${minimo}</strong></p>
+           <p class="mt-1">Esta solicitud la revisa primero Talento Humano: cuénteles el motivo.
+           Si es un asunto puntual, también puede pedirlo como <strong>permiso de día completo</strong>.</p>`
+        : `<p><strong>${plural(diasEnteros(p.dias), "día a descontar", "días a descontar")}</strong>` +
+          ` · le quedarían <strong>${diasEnteros(p.saldo_despues)}</strong></p>`) +
+      `<p class="mt-1 text-xs opacity-75">${esc(lineas.join(" · "))}</p>` +
+      ((d.feriados || []).length
+        ? `<p class="mt-1.5 text-xs">Feriados en el rango: ${
+            d.feriados.map((f) => `${esc(f.nombre)} (${fecha(f.fecha, false)})`).join(", ")}${
+            esPermiso ? "" : d.feriados_cuentan ? " · cuentan como días de vacaciones (Art. 69)" : " · no se descuentan"}</p>`
+        : "") +
+      // En una excepción se callan los avisos del descanso anual completo: la
+      // previsualización no sabe que esto va por otra vía, y le respondía
+      // «use del 7 al 10» —cuatro días— a quien pide dos porque no puede más.
+      (() => {
+        const avisos = (p.avisos || []).filter(
+          (a) => !esExcepcion || !/fin\(es\) de semana obligatorio|bloques? de/i.test(a));
+        return avisos.length
+          ? `<ul class="mt-2 list-disc space-y-1 pl-4">${avisos.map((a) => `<li>${esc(a)}</li>`).join("")}</ul>`
+          : "";
+      })() +
+      (!p.valido && p.rango_sugerido?.fin !== fin
+        ? `<button type="button" id="btn-corregir"
+                   class="mt-2 rounded-lg bg-amber-900 px-3 py-1.5 text-xs font-medium text-white">
+             Usar ${fecha(p.rango_sugerido.inicio, false)} – ${fecha(p.rango_sugerido.fin)}
+           </button>`
+        : "") +
+      (esExcepcion
+        ? `<div class="mt-2.5 flex flex-wrap gap-2">
+             <button type="button" id="btn-pedir-excepcion"
+                     class="rounded-lg bg-amber-900 px-3 py-1.5 text-xs font-medium text-white">
+               Enviar a Talento Humano
+             </button>
+             <button type="button" id="btn-como-permiso"
+                     class="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-amber-900 ring-1 ring-amber-300">
+               Pedirlo como permiso
+             </button>
+           </div>`
+        : "");
+    caja.classList.remove("hidden");
+
+    // Se ofrece de entrada y no después de un envío rechazado: el colaborador
+    // no tiene por qué chocar con un error para enterarse de que su caso tiene
+    // otro camino.
+    $("btn-pedir-excepcion")?.addEventListener("click", () => {
+      estado.bloqueMinimo = minimo;
+      abrirExcepcion(diasEnRango, minimo);
+    });
+    $("btn-como-permiso")?.addEventListener("click", () => pasarAPermiso());
+
+    $("btn-corregir")?.addEventListener("click", () => {
+      $("fecha-inicio").value = p.rango_sugerido.inicio;
+      $("fecha-fin").value = p.rango_sugerido.fin;
+      previsualizar();
+    });
+  } catch {
+    caja.classList.add("hidden");
+  }
+}
+
+/* ---- Adjuntos ---- */
+$("adjuntos").addEventListener("change", (e) => {
+  estado.adjuntos = [...e.target.files];
+  $("lista-adjuntos").innerHTML = estado.adjuntos
+    .map(
+      (a) => `<li class="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+        <span>📎</span><span class="truncate">${esc(a.name)}</span>
+        <span class="ml-auto shrink-0 text-xs text-slate-500">${(a.size / 1024).toFixed(0)} KB</span>
+      </li>`
+    )
+    .join("");
+});
+
+/* ------------------------------------------- vacaciones emergentes (excepción)
+   Pedir menos días de los que fija la política no es un trámite ordinario: lo
+   resuelve Talento Humano. Este modal arma la solicitud formal con el respaldo
+   y la manda al equipo de la región, con copia al correo del propio
+   solicitante para que le quede constancia. */
+const excepcion = { adjuntos: [], dias: 0 };
+
+async function abrirExcepcion(dias, minimo) {
+  excepcion.dias = dias;
+  excepcion.adjuntos = [];
+  $("excepcion-lista-adjuntos").innerHTML = "";
+  $("excepcion-adjuntos").value = "";
+  $("excepcion-motivo").value = "";
+  $("excepcion-contador").textContent = "0";
+  $("excepcion-error").classList.add("hidden");
+
+  $("excepcion-encabezado").textContent =
+    `Pide ${plural(dias, "día", "días")}; el bloque habitual es de ${minimo}.`;
+  $("excepcion-desde").textContent = fecha($("fecha-inicio").value);
+  $("excepcion-hasta").textContent = fecha($("fecha-fin").value);
+  $("excepcion-dias").textContent = plural(dias, "día", "días");
+  $("excepcion-mi-correo").textContent = sesion.perfil?.email || "su correo";
+
+  abrir("modal-excepcion");
+
+  // Quién lo va a resolver, con nombre: una solicitud que se manda «a un
+  // departamento» se siente perdida; saber a qué personas llega, no.
+  try {
+    const { equipo, region, sede } = await api.chatContactos();
+    $("excepcion-area").textContent = `Talento Humano ${sede || ""}`.trim();
+    $("excepcion-destinatarios").textContent = equipo?.length
+      ? `${region}: ${equipo.map((p) => p.nombre).join(", ")}.`
+      : "No hay personal de Talento Humano registrado en su región. " +
+        "Avise a administración: su solicitud quedará registrada pero nadie recibirá el aviso.";
+  } catch {
+    $("excepcion-destinatarios").textContent =
+      "No se pudo consultar el equipo de su región; la solicitud se registra igual.";
+  }
+}
+
+$("excepcion-motivo").addEventListener("input", (e) => {
+  $("excepcion-contador").textContent = e.target.value.length;
+});
+
+$("excepcion-adjuntos").addEventListener("change", (e) => {
+  excepcion.adjuntos = [...e.target.files];
+  $("excepcion-lista-adjuntos").innerHTML = excepcion.adjuntos
+    .map((a) => `<li class="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+        <span>📎</span><span class="truncate">${esc(a.name)}</span>
+        <span class="ml-auto shrink-0 text-xs text-slate-500">${Math.round(a.size / 1024)} KB</span>
+      </li>`)
+    .join("");
+});
+
+$("form-excepcion").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const boton = $("btn-enviar-excepcion");
+  const error = $("excepcion-error");
+  error.classList.add("hidden");
+
+  const motivo = $("excepcion-motivo").value.trim();
+  if (motivo.length < 15) {
+    error.textContent =
+      "Cuéntele a Talento Humano el motivo en al menos 15 caracteres: es lo único con lo que puede decidir.";
+    error.classList.remove("hidden");
+    return;
+  }
+  // El respaldo es opcional: si lo tiene, ayuda; si no, se envía igual.
+
+  boton.disabled = true;
+  boton.textContent = "Enviando…";
+  const solicitudId = uuid();
+  try {
+    const adjuntosSubidos = [];
+    for (const archivo of excepcion.adjuntos) {
+      adjuntosSubidos.push(await api.subirAdjunto(solicitudId, archivo));
+    }
+
+    // Va por la misma vía que cualquier solicitud: así hereda el folio, la
+    // bitácora, el control de solapes y el descuento de días si se aprueba.
+    // Lo único distinto es la marca de excepción, que es la que hace que la
+    // base la mande a Talento Humano antes que al jefe.
+    const respuesta = await api.crearSolicitud({
+      id: solicitudId,
+      tipo: "vacacion",
+      fecha_inicio: $("fecha-inicio").value,
+      fecha_fin: $("fecha-fin").value,
+      descripcion: motivo.slice(0, 200),
+      justificacion: motivo,
+      bloque_menor_justificado: true,
+      adjuntos: adjuntosSubidos,
+    });
+
+    $("modal-excepcion").close();
+    $("modal-solicitud").close();
+    avisar(respuesta.mensaje);
+    await cargar();
+  } catch (err) {
+    error.innerHTML = esc(err.message);
+    error.classList.remove("hidden");
+  } finally {
+    boton.disabled = false;
+    boton.textContent = "Enviar a Talento Humano";
+  }
+});
+
+/* ---- Envío ---- */
+$("form-solicitud").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const boton = $("btn-enviar-solicitud");
+  const error = $("error-solicitud");
+  error.classList.add("hidden");
+
+  const tipo = $("form-solicitud").dataset.tipo;
+  const solicitudId = uuid();
+
+  boton.disabled = true;
+  boton.textContent = "Enviando…";
+  try {
+    /* Los adjuntos se suben primero: la solicitud viaja con sus rutas.
+
+       Si alguno falla, la solicitud SE ENVÍA IGUAL. Antes se abortaba todo:
+       el colaborador escribía su justificación, elegía su archivo, pulsaba
+       enviar y se quedaba sin permiso por un problema del almacenamiento
+       que no es suyo ni puede arreglar. Perder la solicitud es peor que
+       quedarse sin el documento, que además puede entregarse después. */
+    const adjuntosSubidos = [];
+    const noSubieron = [];
+    for (const archivo of estado.adjuntos) {
+      try {
+        adjuntosSubidos.push(await api.subirAdjunto(solicitudId, archivo));
+      } catch {
+        noSubieron.push(archivo.name);
+      }
+    }
+
+    const respuesta = await api.crearSolicitud({
+      id: solicitudId,
+      tipo,
+      permission_type_id: estado.tipoActual?.id ?? null,
+      fecha_inicio: $("fecha-inicio").value,
+      fecha_fin: $("fecha-fin").value,
+      hora_inicio: $("hora-inicio").value || null,
+      hora_fin: $("hora-fin").value || null,
+      descripcion: $("descripcion").value.trim(),
+      justificacion: $("justificacion").value.trim() || null,
+      bloque_menor_justificado: $("excepcion-bloque").checked,
+      adjuntos: adjuntosSubidos,
+    });
+
+    $("modal-solicitud").close();
+    avisar(noSubieron.length
+      ? `${respuesta.mensaje} No se pudo guardar ${noSubieron.length === 1
+          ? "el archivo" : "los archivos"}: vuelva a adjuntarlo desde «Mis solicitudes».`
+      : tipo === "permiso" && !adjuntosSubidos.length && !respuesta.jefe_no_disponible
+        ? `${respuesta.mensaje} Si después tiene el respaldo, adjúntelo desde «Mis solicitudes».`
+        : respuesta.mensaje);
+    await cargar();
+    if (respuesta.jefe_no_disponible) {
+      await abrirJefeAlterno(respuesta.id ?? solicitudId, respuesta.folio);
+      return;
+    }
+    // El papel que hay que firmar, en el único momento en que la persona
+    // todavía está mirando la pantalla.
+    if (tipo === "vacacion") await ofrecerPapeles(respuesta.id ?? solicitudId);
+  } catch (err) {
+    error.innerHTML = esc(err.message);
+    // Si la base sugiere otras fechas, se ofrecen con un clic
+    if (err instanceof ErrorApi && err.detalle?.bloque_minimo) {
+      /* Quedarse en «no se puede» deja al colaborador sin saber qué hacer.
+         Se le ofrecen las dos salidas reales: alargar el bloque o pedirlo
+         como excepción, que es un camino distinto y más lento. */
+      estado.bloqueMinimo = Number(err.detalle.bloque_minimo);
+      $("texto-excepcion").textContent =
+        `Menos de ${estado.bloqueMinimo} días: cuente el motivo (el respaldo es opcional). ` +
+        `La revisa primero Talento Humano y después su jefe.`;
+      $("campo-excepcion").classList.remove("hidden");
+      pedirJustificacion(true);
+      $("campo-adjuntos").classList.remove("hidden");
+      const inicio = $("fecha-inicio").value;
+      if (inicio) {
+        const fin = new Date(`${inicio}T00:00:00`);
+        fin.setDate(fin.getDate() + estado.bloqueMinimo - 1);
+        error.innerHTML += `<button type="button" id="btn-aplicar-sugerido"
+            class="mt-2 block rounded-lg bg-rose-900 px-3 py-1.5 text-xs font-medium text-white">
+            Usar ${estado.bloqueMinimo} días: hasta ${fecha(fin.toISOString().slice(0, 10))}</button>`;
+        $("btn-aplicar-sugerido").addEventListener("click", () => {
+          $("fecha-fin").value = fin.toISOString().slice(0, 10);
+          error.classList.add("hidden");
+          previsualizar();
+        });
+      }
+    } else if (err instanceof ErrorApi && err.detalle?.rango_sugerido) {
+      const { inicio, fin } = err.detalle.rango_sugerido;
+      error.innerHTML += `<button type="button" id="btn-aplicar-sugerido"
+          class="mt-2 block rounded-lg bg-rose-900 px-3 py-1.5 text-xs font-medium text-white">
+          Usar ${fecha(inicio, false)} – ${fecha(fin)}</button>`;
+      error.classList.remove("hidden");
+      $("btn-aplicar-sugerido").addEventListener("click", () => {
+        $("fecha-inicio").value = inicio;
+        $("fecha-fin").value = fin;
+        error.classList.add("hidden");
+        previsualizar();
+      });
+      return;
+    }
+    error.classList.remove("hidden");
+  } finally {
+    boton.disabled = false;
+    boton.textContent = "Enviar solicitud";
+  }
+});
+
+/* ------------------------------------------------------------------- salir */
+/* El fragmento de la dirección elige la pestaña, al cargar y al cambiar.
+
+   Sin lo segundo, «Por autorizar» y «Anulaciones» de la barra lateral solo
+   funcionaban viniendo de otra pantalla: estando ya en el panel, el navegador
+   cambiaba el «#» sin recargar y el enlace no hacía nada. */
+function pestanaDelFragmento() {
+  const destino = location.hash.slice(1);
+  if (["aprobaciones", "anulaciones"].includes(destino) &&
+      !$("pestanas").classList.contains("hidden")) {
+    mostrarPestana(destino);
+  }
+}
+
+window.addEventListener("hashchange", pestanaDelFragmento);
+
+cargar()
+  .then(pestanaDelFragmento)
+  .catch((err) => avisar(err.message || "No se pudo cargar su panel.", "error"));

@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#06122B">
+<title>Complete su ficha</title>
+<link rel="icon" type="image/png" href="img/icono.png">
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="vendor/tailwind.css">
+<script src="config.js"></script>
+<script src="config.local.js"></script>
+</head>
+
+<!-- Ficha inicial: lo que se pide antes de usar el sistema. Solo aparecen las
+     secciones que faltan (y que Talento Humano decidió pedir). -->
+<body class="min-h-dvh bg-slate-100 text-slate-900 antialiased">
+<main class="mx-auto max-w-xl px-4 py-8 pb-24">
+  <header class="mb-5 text-center">
+    <img src="img/logo.png" alt="" class="mx-auto mb-3 h-10" onerror="this.remove()">
+    <h1 class="text-xl font-semibold">Bienvenido<span id="b-nombre"></span></h1>
+    <p class="mt-1 text-sm text-slate-600">
+      Antes de empezar, confirme o complete estos datos. Lo hace una sola vez.
+    </p>
+  </header>
+
+  <form id="form-bienvenida" novalidate class="space-y-4">
+
+    <section data-seccion="fecha_nacimiento" class="hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <h2 class="font-medium">Fecha de nacimiento</h2>
+      <p class="mt-0.5 text-sm text-slate-600">
+        Su expediente no la tiene. Con ella se comprueba su identidad si alguna
+        vez necesita entrar sin su correo.
+      </p>
+      <input id="b-nacimiento" type="date"
+             class="mt-3 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+    </section>
+
+    <section data-seccion="fecha_ingreso" class="hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <h2 class="font-medium">Su fecha de ingreso a la empresa</h2>
+      <p class="mt-0.5 text-sm text-slate-600">
+        De ella dependen sus días de vacaciones. Según el registro de Talento Humano es:
+      </p>
+      <p id="b-ingreso-actual" class="mt-2 text-lg font-semibold">—</p>
+      <div class="mt-3 space-y-2 text-sm">
+        <label class="flex items-center gap-2">
+          <input type="radio" name="ingreso-ok" value="si" class="h-4 w-4"> Es correcta
+        </label>
+        <label class="flex items-center gap-2">
+          <input type="radio" name="ingreso-ok" value="no" class="h-4 w-4"> No es correcta
+        </label>
+      </div>
+      <div id="b-ingreso-otra" class="mt-3 hidden space-y-2 rounded-xl bg-amber-50 p-3 ring-1 ring-amber-200">
+        <p class="text-sm text-amber-900">
+          Indique la fecha que usted considera (aproximada si no la recuerda exacta).
+          Talento Humano revisará su caso; mientras tanto, rige la registrada.
+        </p>
+        <input id="b-ingreso-propuesta" type="date"
+               class="w-full rounded-xl border-0 bg-white px-4 py-2.5 ring-1 ring-slate-300
+                      focus:ring-2 focus:ring-slate-900">
+        <textarea id="b-ingreso-motivo" rows="2" maxlength="300"
+                  placeholder="Opcional: por qué (por ejemplo, entró por un proveedor antes de pasar a nómina)"
+                  class="w-full rounded-xl border-0 bg-white px-4 py-2.5 text-sm ring-1 ring-slate-300
+                         focus:ring-2 focus:ring-slate-900"></textarea>
+      </div>
+    </section>
+
+    <section data-seccion="jefe" class="hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <h2 class="font-medium">Su jefe inmediato</h2>
+      <p class="mt-0.5 text-sm text-slate-600">Es quien aprueba sus permisos y vacaciones.</p>
+      <p id="b-jefe-actual" class="mt-2 font-semibold">—</p>
+      <div class="mt-3 space-y-2 text-sm">
+        <label class="flex items-center gap-2"><input type="radio" name="jefe-ok" value="si" class="h-4 w-4"> Es correcto</label>
+        <label class="flex items-center gap-2"><input type="radio" name="jefe-ok" value="no" class="h-4 w-4"> No es mi jefe actual</label>
+      </div>
+      <div id="b-jefe-otro" class="mt-3 hidden">
+        <label for="b-jefe-buscar" class="text-sm font-medium text-slate-700">¿Quién es su jefe actual?</label>
+        <input id="b-jefe-buscar" autocomplete="off" maxlength="120"
+               placeholder="Escriba su nombre o apellido"
+               class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+        <ul id="b-jefe-sugerencias" class="mt-1 hidden max-h-56 overflow-y-auto rounded-xl bg-white ring-1 ring-slate-200"></ul>
+        <p id="b-jefe-estado" class="mt-1.5 text-xs text-slate-500">
+          Mientras escribe le mostramos las jefaturas registradas.</p>
+      </div>
+    </section>
+
+    <!-- Cargo y área: solo se piden si no constan. Se eligen del catálogo
+         oficial que administra Talento Humano; si no está, se escribe y
+         Talento Humano lo valida. De ahí en adelante los administra Talento
+         Humano. -->
+    <section data-seccion="cargo" class="hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <h2 class="font-medium">Su área y su cargo</h2>
+      <p id="b-cargo-actual" class="mt-0.5 text-sm text-slate-600">Elíjalos de la lista. Talento Humano los confirma.</p>
+      <div class="mt-3 space-y-3">
+        <div>
+          <label for="b-area" class="text-sm font-medium text-slate-700">Área donde trabaja</label>
+          <select id="b-area" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-itsa-azul"><option value="">Elija su área…</option></select>
+          <input id="b-area-otra" maxlength="120" placeholder="Escriba el nombre de su área"
+                 class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-itsa-azul mt-2 hidden">
+        </div>
+        <div>
+          <label for="b-cargo" class="text-sm font-medium text-slate-700">Su cargo</label>
+          <select id="b-cargo" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-itsa-azul" disabled><option value="">Primero elija el área…</option></select>
+          <input id="b-cargo-otro-texto" maxlength="120" placeholder="Escriba su cargo"
+                 class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 text-sm ring-1 ring-slate-300 focus:bg-white focus:ring-2 focus:ring-itsa-azul mt-2 hidden">
+          <p class="mt-1.5 text-xs text-slate-500">
+            Si su cargo o su área no están en la lista, elija «No está en la lista» y escríbalo.
+            Talento Humano lo revisa antes de que rija.</p>
+        </div>
+      </div>
+    </section>
+
+    <section data-seccion="telefono" class="hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <h2 class="font-medium">Teléfono personal</h2>
+      <p class="mt-0.5 text-sm text-slate-600">Para ubicarlo si hay una urgencia con su solicitud.</p>
+      <input id="b-telefono" type="tel" inputmode="numeric" maxlength="13"
+             class="mt-3 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 ring-1 ring-slate-300
+                    focus:bg-white focus:ring-2 focus:ring-slate-900">
+    </section>
+
+    <section data-seccion="emergencia" class="hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <h2 class="font-medium">Contacto de emergencia</h2>
+      <p class="mt-0.5 text-sm text-slate-600">A quién avisamos si algo ocurre en la jornada.</p>
+      <input id="b-emer-nombre" maxlength="120" placeholder="Nombre completo"
+             class="mt-3 w-full rounded-xl border-0 bg-slate-50 px-4 py-2.5 text-sm ring-1
+                    ring-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-900">
+      <div class="mt-2 grid grid-cols-2 gap-2">
+        <select id="b-emer-parentesco"
+                class="rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm ring-1 ring-slate-300
+                       focus:bg-white focus:ring-2 focus:ring-slate-900">
+          <option value="">Parentesco…</option>
+          <option value="conyuge">Cónyuge</option><option value="conviviente">Conviviente</option>
+          <option value="madre">Madre</option><option value="padre">Padre</option>
+          <option value="hijo">Hijo/a</option><option value="hermano">Hermano/a</option>
+          <option value="abuelo">Abuelo/a</option><option value="nieto">Nieto/a</option>
+          <option value="suegro">Suegro/a</option><option value="cunado">Cuñado/a</option>
+          <option value="otro">Otro</option>
+        </select>
+        <input id="b-emer-telefono" type="tel" inputmode="numeric" maxlength="13" placeholder="Teléfono"
+               class="rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm ring-1 ring-slate-300
+                      focus:bg-white focus:ring-2 focus:ring-slate-900">
+      </div>
+    </section>
+
+    <p class="px-1 text-xs leading-relaxed text-slate-500">
+      Sus datos se tratan conforme a la Ley Orgánica de Protección de Datos
+      Personales: solo los ven usted y Talento Humano, y se usan para su
+      relación laboral.
+    </p>
+    <p id="b-error" class="hidden rounded-xl bg-rose-50 p-3 text-sm text-rose-800" role="alert"></p>
+    <button type="submit" id="b-enviar"
+            class="w-full rounded-xl bg-slate-900 px-4 py-3 font-medium text-white hover:bg-slate-800
+                   disabled:opacity-50">Guardar y continuar</button>
+    <button type="button" id="b-salir"
+            class="w-full rounded-xl px-4 py-2 text-sm text-slate-500 hover:text-slate-900">
+      Cerrar sesión</button>
+  </form>
+</main>
+<script type="module" src="js/bienvenida.js"></script>
+</body>
+</html>
