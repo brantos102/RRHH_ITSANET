@@ -114,3 +114,14 @@ async def leer_adjunto(ruta: str) -> bytes | None:
         return await asyncio.to_thread(destino.read_bytes)
     except FileNotFoundError:
         return None
+
+
+async def borrar_adjunto(ruta: str) -> bool:
+    """Borra un adjunto del disco. Devuelve si estaba. Quien lo llama ya
+    comprobó el permiso y deja la constancia en la bitácora."""
+    destino = ruta_absoluta(ruta)
+    try:
+        await asyncio.to_thread(destino.unlink)
+        return True
+    except FileNotFoundError:
+        return False

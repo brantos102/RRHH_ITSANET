@@ -642,3 +642,22 @@ async def avisar_respaldo_pedido(destino: str, nombre: str, solicitud: dict, men
              + "\n".join(f"{e}: {v}" for e, v in filas)
              + f"\n\nAdjúntelo desde «Mis solicitudes» en el sistema:\n{url}\n")
     await correo.enviar(destino, titulo, texto, _marco(titulo, cuerpo, ("Adjuntar respaldo", url)))
+
+
+async def avisar_solicitud_eliminada(destino: str, nombre: str, folio, motivo: str, quien: str) -> None:
+    """A la persona: Talento Humano eliminó su solicitud, y por qué."""
+    from html import escape
+    titulo = f"Su solicitud Nº {folio} fue eliminada"
+    cuerpo = (
+        f'<p style="margin:0 0 16px;font-size:14px;color:#475569">Hola {escape(nombre)}: '
+        f"{escape(quien)}, de Talento Humano, eliminó su solicitud Nº {escape(str(folio))}.</p>"
+        + _tabla([("Motivo", escape(motivo))])
+        + '<p style="margin:16px 0 0;font-size:13px;color:#707171">Si no corresponde, responda por el chat '
+          "del sistema. Si la solicitud estaba aprobada, los días se devolvieron a su saldo.</p>"
+    )
+    texto = (f"{titulo}\n\n{quien}, de Talento Humano, eliminó su solicitud Nº {folio}.\nMotivo: {motivo}\n\n"
+             "Si no corresponde, responda por el chat del sistema.\n")
+    try:
+        await correo.enviar(destino, titulo, texto, _marco(titulo, cuerpo))
+    except Exception:  # noqa: BLE001
+        log.exception("No se pudo avisar la eliminación de la solicitud Nº %s", folio)

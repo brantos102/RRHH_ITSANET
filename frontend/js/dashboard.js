@@ -389,7 +389,6 @@ function pintarSolicitudes() {
       const rango =
         s.fecha_inicio === s.fecha_fin ? fecha(s.fecha_inicio) : `${fecha(s.fecha_inicio, false)} – ${fecha(s.fecha_fin)}`;
       const horas = s.hora_inicio ? ` · ${s.hora_inicio.slice(0, 5)} a ${s.hora_fin?.slice(0, 5)}` : "";
-      const cancelable = ["pendiente_jefe", "pendiente_rrhh", "aprobado"].includes(s.estado);
       const vigente = ["pendiente_jefe", "pendiente_rrhh", "pendiente_anulacion", "aprobado"].includes(s.estado);
       const respaldoPedido = s.respaldo_pedido_en && !s.respaldo_entregado_en && vigente;
 
@@ -411,6 +410,16 @@ function pintarSolicitudes() {
             <span class="font-medium">Justificación:</span> ${esc(s.justificacion)}</p>` : ""}
         ${s.es_adelanto ? `<p class="mt-1.5 text-xs text-amber-700">Incluye días adelantados</p>` : ""}
         ${s.motivo_rechazo ? `<p class="mt-2 rounded-lg bg-rose-50 p-2.5 text-sm text-rose-800">Motivo: ${esc(s.motivo_rechazo)}</p>` : ""}
+        ${s.jefe_no_disponible
+          ? `<div class="mt-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
+               <p>⚠ ${esc(s.jefe_no_disponible.texto)} Puede enviarla a un <strong>jefe alterno</strong> solo esta vez.</p>
+               <button type="button" data-jefe-alterno="${s.id}" data-folio="${s.folio}"
+                       class="mt-2 rounded-lg bg-amber-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-950">
+                 Elegir jefe alterno</button>
+             </div>` : ""}
+        ${s.jefe_original && s.estado === "pendiente_jefe"
+          ? `<p class="mt-1.5 text-xs text-slate-500">La decide <b>${esc(s.jefe || "")}</b> como jefe alterno
+               (su jefe directo, ${esc(s.jefe_original)}, no cambia).</p>` : ""}
         ${respaldoPedido
           ? `<div class="mt-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
                <p><strong>Talento Humano le pide el respaldo:</strong> ${esc(s.respaldo_pedido_mensaje || "")}</p>
@@ -431,6 +440,7 @@ function pintarSolicitudes() {
           <span>Enviada ${fechaHora(s.created_at)}</span>
           ${s.reemplazo ? `<span>🔁 Lo cubre ${esc(s.reemplazo)}</span>` : ""}
           ${s.adjuntos ? `<button type="button" data-ver-respaldo="${s.id}" data-folio="${s.folio}"
+                                  data-puede-quitar="${vigente ? 1 : 0}"
                                   class="hover:underline">📎 ${s.adjuntos} adjunto(s)</button>` : ""}
           ${s.respaldo_entregado_en ? `<span class="text-emerald-700">✔ Respaldo entregado</span>` : ""}
           ${s.tipo === "permiso" && vigente && !respaldoPedido && (s.adjuntos || s.respaldo_entregado_en)
@@ -448,11 +458,13 @@ function pintarSolicitudes() {
             ? `<button data-qr="${s.id}" data-hasta="${s.fecha_fin}"
                        class="font-medium text-emerald-700 hover:underline">Ver código QR</button>`
             : s.qr_hash ? `<span class="text-slate-400">QR anulado</span>` : ""}
-          ${cancelable
-            ? `<button data-cancelar="${s.id}" data-aprobada="${s.estado === "aprobado" ? 1 : 0}"
-                       class="ml-auto font-medium text-rose-600 hover:underline">${
-                 s.estado === "aprobado" ? "Pedir anulación" : "Cancelar"}</button>`
-            : ""}
+          ${s.estado === "aprobado"
+            ? `<button data-cancelar="${s.id}" data-aprobada="1"
+                       class="ml-auto font-medium text-rose-600 hover:underline">Pedir anulación</button>`
+            : s.estado !== "pendiente_anulacion"
+              ? `<button type="button" data-eliminar="${s.id}" data-folio="${s.folio}" data-estado="${s.estado}"
+                         data-propia="1" class="ml-auto font-medium text-rose-600 hover:underline">Eliminar</button>`
+              : ""}
         </div>
       </article>`;
     })
@@ -460,10 +472,11 @@ function pintarSolicitudes() {
 }
 
 /* ---- Respaldos: verlos, adjuntarlos después, pedirlos (Talento Humano) ---- */
-async function verRespaldos(id, folio) {
+const verAdj = { id: null, folio: null, quitar: false };
+async function verRespaldos(id, folio, puedeQuitar = false) {
+  Object.assign(verAdj, { id, folio, quitar: puedeQuitar });
   try {
     const lista = await api.adjuntosDe(id);
-    if (lista.length === 1) return await api.abrirAdjunto(id, lista[0].id);
     $("adjuntos-titulo").textContent = `Respaldos de la solicitud Nº ${folio}`;
     $("adjuntos-lista").innerHTML = lista.length
       ? lista.map((a) => `
@@ -474,13 +487,94 @@ async function verRespaldos(id, folio) {
             </div>
             <button type="button" data-abrir-adjunto="${a.id}" data-solicitud="${id}"
                     class="rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-medium text-white">Abrir</button>
+            ${puedeQuitar ? `<button type="button" data-quitar-adjunto="${a.id}" data-nombre="${esc(a.nombre_archivo)}"
+                    class="rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-rose-700 ring-1 ring-rose-200 hover:bg-rose-50">Quitar</button>` : ""}
           </li>`).join("")
       : `<li class="px-3 py-4 text-center text-sm text-slate-500">Sin respaldos adjuntos.</li>`;
-    abrir("modal-adjuntos");
+    if (!$("modal-adjuntos").open) abrir("modal-adjuntos");
   } catch (err) {
     avisar(err.message, "error");
   }
 }
+
+/* Quitar un adjunto subido por error. Se borra el archivo; la bitácora
+   guarda quién, cuándo, por qué y la huella del archivo. */
+async function quitarAdjunto(boton) {
+  const motivo = prompt(`¿Por qué quita «${boton.dataset.nombre}»? (queda en la bitácora; el archivo se borra)`);
+  if (motivo === null) return;
+  if (motivo.trim().length < 5) return avisar("Indique por qué lo quita (mínimo 5 caracteres).", "error");
+  try {
+    avisar((await api.quitarAdjunto(verAdj.id, boton.dataset.quitarAdjunto, motivo.trim())).mensaje);
+    await verRespaldos(verAdj.id, verAdj.folio, verAdj.quitar);
+    await cargar();
+  } catch (err) {
+    avisar(err.message, "error");
+  }
+}
+
+/* Eliminar con justificación: la persona, las suyas sin aprobar; Talento
+   Humano, cualquiera. No se borra de la base: deja de verse y queda en la
+   bitácora con el motivo. */
+const elim = { id: null };
+function abrirEliminar(boton) {
+  elim.id = boton.dataset.eliminar;
+  const estadoActual = boton.dataset.estado;
+  $("eliminar-que").textContent = `Solicitud Nº ${boton.dataset.folio}` +
+    (boton.dataset.empleado ? ` de ${boton.dataset.empleado}` : "") + ".";
+  $("eliminar-efecto").textContent =
+    ["aprobado", "pendiente_anulacion"].includes(estadoActual)
+      ? "Está aprobada: se cancela, se devuelven los días si se habían descontado y el código de salida deja de servir. A la persona le llega el aviso con el motivo."
+      : estadoActual.startsWith("pendiente")
+        ? "Se cancela y deja de esperar decisión. Ya no aparecerá en las listas."
+        : "Ya no aparecerá en las listas. Queda en la bitácora.";
+  $("form-eliminar").reset();
+  abrir("modal-eliminar");
+}
+
+$("form-eliminar").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    avisar((await api.eliminarSolicitud(elim.id, $("eliminar-motivo").value.trim())).mensaje);
+    $("modal-eliminar").close();
+    await cargar();
+  } catch (err) {
+    avisar(err.message, "error");
+  }
+});
+
+/* Jefe alterno: cuando el directo no tiene correo, está ausente o no
+   existe. Solo esa solicitud; la ficha no cambia. */
+const alterno = { id: null };
+async function abrirJefeAlterno(id, folio) {
+  alterno.id = id;
+  try {
+    const op = await api.opcionesJefeAlterno(id);
+    if (!op.motivo) return avisar("Su jefe directo ya puede atenderla: no hace falta un jefe alterno.");
+    $("alterno-que").textContent = `Solicitud Nº ${folio}.`;
+    $("alterno-motivo").textContent = op.motivo.texto;
+    const sugeridos = op.candidatos.filter((c) => c.sugerido);
+    const resto = op.candidatos.filter((c) => !c.sugerido);
+    const opcion = (c) => `<option value="${c.id}">${esc(c.nombre)}${c.cargo ? ` · ${esc(c.cargo)}` : ""}${
+      c.departamento ? ` (${esc(c.departamento)})` : ""}</option>`;
+    $("alterno-a").innerHTML = '<option value="">Elija a una persona…</option>' +
+      (sugeridos.length ? `<optgroup label="Sugeridos (su área o el jefe de su jefe)">${sugeridos.map(opcion).join("")}</optgroup>` : "") +
+      (resto.length ? `<optgroup label="Otras jefaturas">${resto.map(opcion).join("")}</optgroup>` : "");
+    abrir("modal-jefe-alterno");
+  } catch (err) {
+    avisar(err.message, "error");
+  }
+}
+
+$("form-jefe-alterno").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    avisar((await api.elegirJefeAlterno(alterno.id, $("alterno-a").value)).mensaje);
+    $("modal-jefe-alterno").close();
+    await cargar();
+  } catch (err) {
+    avisar(err.message, "error");
+  }
+});
 
 /* Completar una solicitud ya enviada: el respaldo que no se tenía al
    pedirla, una justificación, o ambos. */
@@ -560,7 +654,13 @@ document.addEventListener("click", async (e) => {
   const abrirUno = e.target.closest("[data-abrir-adjunto]");
   const adjuntar = e.target.closest("[data-adjuntar-respaldo]");
   const pedir = e.target.closest("[data-pedir-respaldo]");
-  if (ver) await verRespaldos(ver.dataset.verRespaldo, ver.dataset.folio);
+  const quitar = e.target.closest("[data-quitar-adjunto]");
+  const eliminarB = e.target.closest("[data-eliminar]");
+  const altB = e.target.closest("[data-jefe-alterno]");
+  if (quitar) return quitarAdjunto(quitar);
+  if (eliminarB) return abrirEliminar(eliminarB);
+  if (altB) return abrirJefeAlterno(altB.dataset.jefeAlterno, altB.dataset.folio);
+  if (ver) await verRespaldos(ver.dataset.verRespaldo, ver.dataset.folio, ver.dataset.puedeQuitar === "1");
   else if (abrirUno) {
     try { await api.abrirAdjunto(abrirUno.dataset.solicitud, abrirUno.dataset.abrirAdjunto); }
     catch (err) { avisar(err.message, "error"); }
@@ -808,16 +908,19 @@ function filaSeguimiento(s) {
   if (s.recordado_en) marcas.push(["slate", `Recordada el ${fechaHora(s.recordado_en)}`]);
   if (s.respaldo_pedido_en && !s.respaldo_entregado_en) marcas.push(["amber", `Respaldo pedido el ${fechaHora(s.respaldo_pedido_en)}`]);
   if (s.respaldo_entregado_en) marcas.push(["slate", "Respaldo entregado"]);
+  if (s.estado === "pendiente_jefe" && s.jefe_ausente) marcas.push(["rose", "El jefe está ausente hoy"]);
+  if (s.jefe_original) marcas.push(["slate", `Jefe alterno (en lugar de ${s.jefe_original})`]);
   const color = { amber: "bg-amber-100 text-amber-800", rose: "bg-rose-100 text-rose-800", slate: "bg-slate-100 text-slate-700" };
   const demora = pendiente && s.horas_esperando >= 48;
   const botones = [];
   if (pendiente) botones.push(`<button type="button" data-seg-recordar="${s.id}" class="rounded-lg bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700">Recordar</button>`);
   if (s.estado === "pendiente_jefe") botones.push(`<button type="button" data-seg-reasignar="${s.id}" data-folio="${s.folio}" data-empleado="${esc(s.empleado)}" class="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium hover:bg-slate-200">Reasignar</button>`);
   if (document.getElementById(`sol-${s.id}`)) botones.push(`<button type="button" data-seg-ir="sol-${s.id}" class="rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-medium text-white">Decidir</button>`);
-  if (s.adjuntos) botones.push(`<button type="button" data-ver-respaldo="${s.id}" data-folio="${s.folio}" class="rounded-lg bg-white px-2.5 py-1 text-xs font-medium ring-1 ring-slate-300 hover:bg-slate-50">📎 ${s.adjuntos}</button>`);
+  if (s.adjuntos) botones.push(`<button type="button" data-ver-respaldo="${s.id}" data-folio="${s.folio}" data-puede-quitar="1" class="rounded-lg bg-white px-2.5 py-1 text-xs font-medium ring-1 ring-slate-300 hover:bg-slate-50">📎 ${s.adjuntos}</button>`);
   if (pendiente || s.estado === "aprobado") botones.push(`<button type="button" data-pedir-respaldo="${s.id}" data-folio="${s.folio}" data-empleado="${esc(s.empleado)}" data-categoria="${esc(s.categoria || "")}" class="rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-amber-800 ring-1 ring-amber-300 hover:bg-amber-50">Pedir respaldo</button>`);
   if (s.estado === "rechazado") botones.push(`<button type="button" data-seg-ir="rechazadas" class="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white">Corregir</button>`);
   botones.push(`<a href="persona.html?id=${s.user_id}" class="rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-sky-700 ring-1 ring-sky-200 hover:bg-sky-50">Ficha</a>`);
+  botones.push(`<button type="button" data-eliminar="${s.id}" data-folio="${s.folio}" data-estado="${s.estado}" data-empleado="${esc(s.empleado)}" class="rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-rose-700 ring-1 ring-rose-200 hover:bg-rose-50">Eliminar</button>`);
   const decidida = DECIDIDAS[s.estado];
   return `
     <li class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-sm">
@@ -1048,6 +1151,10 @@ function pintarPendientes() {
              <dd class="font-medium">${textoReemplazo(s)}</dd></div>
       </dl>
 
+      ${s.jefe_original
+        ? `<p class="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-900 ring-1 ring-sky-200">
+             Jefe alterno: la decide ${esc(s.jefe_nombre || "")} en lugar de ${esc(s.jefe_original)}.
+             ${s.jefe_alterno_motivo ? esc(s.jefe_alterno_motivo) : ""}</p>` : ""}
       <p class="mt-3 text-sm text-slate-700">${esc(s.descripcion)}</p>
       ${s.justificacion
         ? `<p class="mt-2 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
@@ -1064,13 +1171,18 @@ function pintarPendientes() {
       ${s.adjuntos || ["rrhh", "admin"].includes(sesion.perfil?.rol)
         ? `<div class="mt-3 flex flex-wrap gap-2">
              ${s.adjuntos ? `<button type="button" data-ver-respaldo="${s.id}" data-folio="${s.folio}"
+                 data-puede-quitar="${["rrhh", "admin"].includes(sesion.perfil?.rol) ? 1 : 0}"
                  class="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50">
                  📎 Ver respaldo (${s.adjuntos})</button>` : ""}
              ${["rrhh", "admin"].includes(sesion.perfil?.rol)
                ? `<button type="button" data-pedir-respaldo="${s.id}" data-folio="${s.folio}"
                    data-empleado="${esc(s.empleado)}" data-categoria="${esc(s.categoria || "")}"
                    class="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-amber-800 ring-1 ring-amber-300 hover:bg-amber-50">
-                   ${s.respaldo_pedido_en ? "Volver a pedir respaldo" : "Pedir respaldo"}</button>` : ""}
+                   ${s.respaldo_pedido_en ? "Volver a pedir respaldo" : "Pedir respaldo"}</button>
+                 <button type="button" data-eliminar="${s.id}" data-folio="${s.folio}" data-estado="${s.estado}"
+                   data-empleado="${esc(s.empleado)}"
+                   class="ml-auto rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-rose-700 ring-1 ring-rose-200 hover:bg-rose-50">
+                   Eliminar</button>` : ""}
            </div>` : ""}
       ${s.tipo === "vacacion" && ["rrhh", "admin"].includes(sesion.perfil?.rol)
         ? `<button type="button" data-docs-solicitud="${s.id}" data-region="${esc(s.region || "sierra")}"
@@ -2249,10 +2361,14 @@ $("form-solicitud").addEventListener("submit", async (e) => {
     avisar(noSubieron.length
       ? `${respuesta.mensaje} No se pudo guardar ${noSubieron.length === 1
           ? "el archivo" : "los archivos"}: vuelva a adjuntarlo desde «Mis solicitudes».`
-      : tipo === "permiso" && !adjuntosSubidos.length
+      : tipo === "permiso" && !adjuntosSubidos.length && !respuesta.jefe_no_disponible
         ? `${respuesta.mensaje} Si después tiene el respaldo, adjúntelo desde «Mis solicitudes».`
         : respuesta.mensaje);
     await cargar();
+    if (respuesta.jefe_no_disponible) {
+      await abrirJefeAlterno(respuesta.id ?? solicitudId, respuesta.folio);
+      return;
+    }
     // El papel que hay que firmar, en el único momento en que la persona
     // todavía está mirando la pantalla.
     if (tipo === "vacacion") await ofrecerPapeles(respuesta.id ?? solicitudId);

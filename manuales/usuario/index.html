@@ -175,6 +175,7 @@
     <a href="#vacaciones">Pedir vacaciones</a>
     <a href="#permisos">Pedir un permiso</a>
     <a href="#seguimiento">Seguir y cancelar</a>
+    <a href="#avisos">Avisos y notificaciones</a>
     <a href="#qr">Código de salida (QR)</a>
     <a href="#firmar">Documentos para firmar</a>
     <a href="#mi-ficha">Mi ficha</a>
@@ -373,7 +374,13 @@
     <figure><img src="img/u06_solicitudes.webp" alt="Lista de documentos para firmar y de mis solicitudes" loading="lazy">
       <figcaption>«Mis solicitudes» con su estado, y arriba los documentos que debe firmar.</figcaption></figure>
     <ul>
-      <li><b>Mientras no está aprobada</b>, puede <b>cancelarla</b> desde «Mis solicitudes».</li>
+      <li><b>Mientras no está aprobada</b> (o si fue rechazada), puede <b>eliminarla</b> desde «Mis solicitudes»:
+        pulse <b>«Eliminar»</b> y escriba por qué (queda en la bitácora). Deja de verse en sus listas.</li>
+      <li>Si subió un <b>archivo equivocado</b>, abra «📎 adjunto(s)» y pulse <b>«Quitar»</b> indicando por qué: el
+        archivo se borra.</li>
+      <li><b>¿Su jefe no tiene correo, está de vacaciones o no tiene jefe registrado?</b> Al enviar la solicitud el
+        sistema se lo dice y le ofrece <b>«Elegir jefe alterno»</b>: otra jefatura la decide <b>solo esa vez</b>. Su
+        jefe directo no cambia y queda informado. La opción también aparece en la tarjeta mientras espera al jefe.</li>
       <li><b>Si ya está aprobada</b> y no la va a usar, pulse <b>«Pedir anulación»</b> y explique por qué. Talento
         Humano la revisa; si la autoriza, <b>se le devuelven los días</b> y el código de salida deja de servir.</li>
       <li>Si la rechazan, verá el <b>motivo del rechazo</b> en la solicitud y en el correo.</li>
@@ -381,6 +388,24 @@
         <b>«Adjuntar respaldo»</b> y elija la foto o el PDF.</li>
     </ul>
     <p>Los estados posibles están en la <a href="#estados">tabla de estados</a>.</p>
+  </section>
+
+  <section class="capitulo" id="avisos">
+    <span class="chip">Todos</span>
+    <h2>Avisos: la campana, el navegador y el correo</h2>
+    <p class="bajada">Lo nuevo le llega sin tener que recargar la página.</p>
+    <ul>
+      <li>La <b>campana</b> se actualiza sola cada minuto y la pestaña muestra cuántos avisos tiene sin leer, por
+        ejemplo «(3) Mi panel».</li>
+      <li><b>Avisos del navegador:</b> abra la campana y pulse <b>«🔔 Activar avisos»</b>, y luego «Permitir». Desde
+        entonces, cuando llega algo nuevo, el navegador muestra un aviso en la pantalla aunque esté en otra pestaña o en
+        otro programa (con el sistema abierto). Al pulsarlo, lo lleva a lo que tiene que atender.</li>
+      <li>Si dice que el navegador <b>no permite avisos desde esta dirección</b>, la campana igual se actualiza sola;
+        TI puede habilitarlo con un certificado de seguridad válido.</li>
+      <li><b>Jefes y Talento Humano</b> reciben además, de lunes a viernes a primera hora, un <b>correo de resumen</b>
+        con lo que espera su decisión. A Talento Humano le incluye lo que está atascado con un jefe (más de dos días,
+        jefe sin correo, ausente o sin jefe) para que lo recuerde o lo reasigne.</li>
+    </ul>
   </section>
 
   <section class="capitulo" id="qr">
@@ -536,6 +561,12 @@
       <li><b>Pedir respaldo:</b> escriba qué documento necesita; a la persona le llega por correo y lo adjunta desde
         «Mis solicitudes». La solicitud no cambia de estado. La fila muestra «Respaldo pedido» hasta que llega, y
         después «Respaldo entregado» con el botón 📎 para abrirlo (cada apertura queda registrada).</li>
+      <li><b>Eliminar:</b> para una solicitud registrada por error (duplicada, con datos equivocados), con el motivo.
+        Si estaba aprobada, se devuelven los días y el código de salida deja de servir; la persona recibe el aviso con
+        el motivo. No se borra de la base: queda en la bitácora.</li>
+      <li><b>📎 → Quitar:</b> quita un respaldo equivocado (por ejemplo, el documento de otra persona). El archivo se
+        borra; la bitácora guarda quién, cuándo, por qué y la huella del archivo.</li>
+      <li>La fila avisa si el jefe <b>está ausente hoy</b> o si la decide un <b>jefe alterno</b>.</li>
       <li><b>Decidir</b> lleva a la tarjeta de arriba; <b>Corregir</b>, a las rechazadas; <b>Ficha</b>, a la persona.</li>
       <li>Filtre por sede o busque por persona, cédula o número.</li>
     </ul>

@@ -456,6 +456,7 @@ function montarNotificaciones(contenedor) {
         <input type="search" id="nav-buscar-notif" placeholder="Buscar en sus notificaciones"
                class="w-full rounded-lg border-slate-300 text-sm focus:border-slate-900 focus:ring-slate-900">
       </div>
+      <div id="nav-avisos-navegador" class="hidden border-b border-slate-100 bg-sky-50 px-5 py-3 text-sm text-sky-900"></div>
       <div id="nav-lista-notif" class="divide-y divide-slate-100"></div>
     </div>`;
   document.body.appendChild(dialogo);
@@ -531,6 +532,83 @@ function montarNotificaciones(contenedor) {
   // Al abrir la pantalla se consulta una vez, para que el punto sea fiable
   // desde el primer momento y no solo después de pulsar la campana.
   refrescar();
+
+  /* ---- En vivo: la campana se enciende sola y el navegador avisa ----
+
+     Antes la campana solo se consultaba al abrir una pantalla: el jefe con
+     el sistema abierto no se enteraba de una solicitud nueva hasta
+     recargar. Ahora se pregunta cada minuto (una consulta liviana) y, si
+     la persona lo permitió, el navegador muestra el aviso aunque esté en
+     otra pestaña o en otro programa. No usa servicios externos (ni
+     Firebase ni otros): el aviso sale del propio navegador, y el texto no
+     sale del servidor de la empresa. */
+  const CLAVE_VISTAS = "rrhh.notif.avisadas";
+  const tituloBase = document.title.replace(/^\(\d+\)\s*/, "");
+  const leerVistas = () => { try { return new Set(JSON.parse(localStorage.getItem(CLAVE_VISTAS) || "[]")); } catch { return null; } };
+  const guardarVistas = (set) => { try { localStorage.setItem(CLAVE_VISTAS, JSON.stringify([...set].slice(-200))); } catch { /* sin memoria */ } };
+  const puedeAvisar = () => "Notification" in window && window.isSecureContext;
+
+  const pintarAvisosNavegador = () => {
+    const caja = dialogo.querySelector("#nav-avisos-navegador");
+    if (!puedeAvisar()) {
+      caja.innerHTML = "Este navegador no permite avisos desde esta dirección. La campana se actualiza sola cada minuto.";
+      caja.classList.remove("hidden");
+      return;
+    }
+    if (Notification.permission === "granted") { caja.classList.add("hidden"); return; }
+    caja.innerHTML = Notification.permission === "denied"
+      ? "Los avisos del navegador están bloqueados para este sitio. Para activarlos, pulse el candado junto a la dirección › Notificaciones › Permitir."
+      : `<div class="flex flex-wrap items-center justify-between gap-2">
+           <span>Reciba un aviso en la pantalla cuando llegue algo nuevo, aunque esté en otra pestaña.</span>
+           <button type="button" id="nav-activar-avisos"
+                   class="rounded-lg bg-sky-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-950">
+             🔔 Activar avisos</button></div>`;
+    caja.classList.remove("hidden");
+    caja.querySelector("#nav-activar-avisos")?.addEventListener("click", async () => {
+      try { await Notification.requestPermission(); } catch { /* navegadores antiguos */ }
+      pintarAvisosNavegador();
+    });
+  };
+  botones.forEach((b) => b.addEventListener("click", pintarAvisosNavegador));
+
+  const mostrarAviso = (n) => {
+    if (!puedeAvisar() || Notification.permission !== "granted") return;
+    try {
+      // La misma etiqueta en todas las pestañas: el navegador muestra uno solo.
+      const aviso = new Notification(n.titulo, {
+        body: n.mensaje, tag: `rrhh-${n.id}`, icon: "img/icono.png", lang: "es",
+      });
+      aviso.onclick = () => {
+        window.focus();
+        if (n.accion_url) location.href = n.accion_url;
+        aviso.close();
+      };
+    } catch { /* algunos móviles solo permiten avisos desde un service worker */ }
+  };
+
+  const sondear = async () => {
+    const { api } = await import("./api.js");
+    let datos;
+    try { datos = await api.notificacionesNuevas(); } catch { return; }
+    const n = datos.sin_leer;
+    puntos.forEach((p) => p.classList.toggle("hidden", n === 0));
+    botones.forEach((b) => b.setAttribute("aria-label", n ? `Notificaciones: ${n} sin leer` : "Notificaciones"));
+    document.title = n ? `(${n}) ${tituloBase}` : tituloBase;
+    const vistas = leerVistas();
+    if (vistas === null) return;
+    // La primera vez en este navegador solo se toma nota: no se avisa de golpe
+    // todo lo que ya estaba en la campana.
+    let primera = false;
+    try { primera = !localStorage.getItem(CLAVE_VISTAS); } catch { return; }
+    for (const aviso of [...datos.recientes].reverse()) {
+      if (vistas.has(aviso.id)) continue;
+      vistas.add(aviso.id);
+      if (!primera) mostrarAviso(aviso);
+    }
+    guardarVistas(vistas);
+  };
+  sondear();
+  setInterval(sondear, 60000);
 }
 
 export const ROL_TEXTO = {

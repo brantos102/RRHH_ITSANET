@@ -181,5 +181,12 @@ async def tarea_diaria() -> dict[str, Any]:
     caducados = await periodos.caducar_periodos_vencidos()
     avisos = await generar_alertas_vacaciones()
     avisos.append({"tipo": "escaneos_pendientes", "generadas": await avisar_escaneos_pendientes()})
+    # Resumen por correo de lo que espera decisión (lunes a viernes). Si el
+    # correo falla, la tarea sigue: los avisos ya quedaron en la campana.
+    from .resumen_pendientes import enviar_resumen
+    try:
+        avisos.append({"tipo": "resumen_pendientes", **await enviar_resumen()})
+    except Exception as exc:  # noqa: BLE001
+        avisos.append({"tipo": "resumen_pendientes", "error": str(exc)})
     return {"fecha": dt.date.today().isoformat(), "devengo": devengo,
             "periodos_caducados": caducados, "avisos": avisos}

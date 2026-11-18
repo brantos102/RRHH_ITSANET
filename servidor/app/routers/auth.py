@@ -348,6 +348,22 @@ async def mis_notificaciones(usuario: Annotated[dict, Depends(usuario_actual)]) 
     )
 
 
+@router.get("/mis-notificaciones/nuevas")
+async def notificaciones_nuevas(usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
+    """Consulta liviana que la pantalla hace cada minuto: cuántas sin leer y
+    las últimas, para encender la campana y mostrar el aviso del navegador
+    sin esperar a que la persona recargue."""
+    filas = await obtener_todos(
+        """SELECT id, titulo, mensaje, accion_url, severidad, created_at
+             FROM notifications
+            WHERE user_id = %s AND leida_en IS NULL
+              AND created_at > NOW(6) - INTERVAL 7 DAY
+            ORDER BY created_at DESC LIMIT 10""", (usuario["id"],))
+    total = await obtener_uno(
+        "SELECT COUNT(*) AS n FROM notifications WHERE user_id = %s AND leida_en IS NULL", (usuario["id"],))
+    return {"sin_leer": int(total["n"]), "recientes": [{**f, "id": str(f["id"])} for f in filas]}
+
+
 @router.post("/mis-notificaciones/leidas")
 async def marcar_notificaciones_leidas(
     usuario: Annotated[dict, Depends(usuario_actual)],

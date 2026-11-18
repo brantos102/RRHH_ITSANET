@@ -13,12 +13,12 @@ from pydantic import BaseModel, Field, field_validator
 
 from .. import notificaciones
 from ..audit import registrar
-from ..db import ejecutar, obtener_todos, obtener_uno, para_json
+from ..db import ejecutar, obtener_todos, obtener_uno, para_json, transaccion
 from ..deps import exigir_rol, usuario_actual
 from ..errores import traducir
-from ..reglas import personal
+from ..reglas import jefe_alterno, personal
 from ..reglas import solicitudes as reglas_solicitudes
-from ..storage import leer_adjunto, nombre_seguro, subir_adjunto
+from ..storage import borrar_adjunto, leer_adjunto, nombre_seguro, subir_adjunto
 
 log = logging.getLogger("rrhh.solicitudes")
 router = APIRouter(tags=["Solicitudes"])
@@ -453,7 +453,17 @@ async def crear_solicitud(
     elif completa:
         log.warning("La solicitud %s no tiene jefe asignado: nadie recibió el aviso", datos.id)
 
+    # Si el jefe directo no puede atenderla (sin correo, ausente hoy, sin
+    # jefe), se dice ya, cuando la persona todavía está mirando la pantalla,
+    # y se le ofrece elegir un jefe alterno solo para esta solicitud.
+    no_disponible = (await jefe_alterno.situacion({"estado": completa["estado"], "jefe_id": creada["jefe_id"]})
+                     if completa else None)
+    mensaje = f"Solicitud Nº {creada['folio']} enviada a {destino}."
+    if no_disponible:
+        mensaje = (f"Solicitud Nº {creada['folio']} registrada. {no_disponible['texto']} "
+                   "Elija un jefe alterno para que reciba el aviso y la decida.")
     return {
+        "jefe_no_disponible": no_disponible,
         "id": str(creada["id"]),
         "folio": creada["folio"],
         "estado": creada["estado"],
@@ -462,14 +472,14 @@ async def crear_solicitud(
         "fines_semana": creada["fines_semana"],
         "es_adelanto": creada["es_adelanto"],
         # «Emergente» es una marca para Talento Humano, no para el colaborador.
-        "mensaje": f"Solicitud Nº {creada['folio']} enviada a {destino}.",
+        "mensaje": mensaje,
     }
 
 
 # --------------------------------------------------------------- consultas
 @router.get("/solicitudes/mias")
 async def mis_solicitudes(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[dict]:
-    return await obtener_todos(
+    filas = await obtener_todos(
         """
         select r.id, r.folio, r.tipo, pt.nombre as categoria, r.fecha_inicio, r.fecha_fin,
                r.hora_inicio, r.hora_fin, r.dias_solicitados, r.horas_solicitadas,
@@ -480,6 +490,7 @@ async def mis_solicitudes(usuario: Annotated[dict, Depends(usuario_actual)]) -> 
                r.jefe_aprobado_en, r.rrhh_aprobado_en,
                (select count(*) from request_attachments a where a.request_id = r.id) as adjuntos,
                r.respaldo_pedido_en, r.respaldo_pedido_mensaje, r.respaldo_entregado_en,
+               r.jefe_id, r.jefe_alterno_motivo, jo.nombre as jefe_original,
                -- El registro de unas vacaciones termina con el papel firmado
                -- y escaneado: sin_firmar, firmado (falta el escaneo) o concluido.
                (select case when i.escaneo_ruta is not null then 'concluido'
@@ -489,13 +500,21 @@ async def mis_solicitudes(usuario: Annotated[dict, Depends(usuario_actual)]) -> 
         from requests r
         left join users j on j.id = r.jefe_id
         left join users rp on rp.id = r.reemplazo_id
+        left join users jo on jo.id = r.jefe_original_id and r.jefe_original_id <> r.jefe_id
         left join permission_types pt on pt.id = r.permission_type_id
-        where r.user_id = %s
+        where r.user_id = %s and r.eliminada_en is null
         order by r.created_at desc
         limit 100
         """,
         (usuario["id"],),
     )
+    # Si su jefe no puede atender una que espera (sin correo, ausente, sin
+    # jefe), la tarjeta lo dice y ofrece elegir un jefe alterno.
+    for f in filas:
+        f["jefe_no_disponible"] = (await jefe_alterno.situacion({**f, "user_id": usuario["id"]})
+                                   if f["estado"] == "pendiente_jefe" else None)
+        f["jefe_id"] = None  # no hace falta en la pantalla
+    return filas
 
 
 class Anulacion(BaseModel):
@@ -632,6 +651,208 @@ async def entregar_respaldo(solicitud_id: uuid.UUID, datos: EntregaRespaldo, req
                     detalle={"folio": sol["folio"], "archivos": [a.nombre_archivo for a in datos.adjuntos],
                              "justificacion": bool(datos.justificacion)})
     return {"mensaje": "Listo: su jefe y Talento Humano ya pueden verlo en la solicitud."}
+
+
+# ------------------------------------------------- eliminar una solicitud
+class Eliminacion(BaseModel):
+    motivo: str = Field(..., max_length=500)
+
+
+ES_TH = ("rrhh", "admin")
+
+
+@router.post("/solicitudes/{solicitud_id}/eliminar")
+async def eliminar(solicitud_id: uuid.UUID, datos: Eliminacion, request: Request,
+                   tareas: BackgroundTasks, usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
+    """Elimina una solicitud registrada por error, con una justificación.
+
+    No se borra la fila (borrado lógico): la bitácora y el saldo tienen que
+    poder explicarse siempre. Deja de verse en las listas de trabajo y, si
+    estaba en trámite o aprobada, se cancela (devuelve los días que ya se
+    hubieran descontado y el QR deja de servir).
+
+    El colaborador elimina las suyas mientras no estén aprobadas; una
+    aprobada se anula pidiéndolo a Talento Humano, porque devuelve días.
+    Talento Humano y administración eliminan cualquiera.
+    """
+    motivo = (datos.motivo or "").strip()
+    if len(motivo) < 10:
+        raise HTTPException(status_code=422, detail={
+            "mensaje": "Explique por qué se elimina, con al menos 10 caracteres: queda en la bitácora."})
+    sol = await obtener_uno(
+        """SELECT r.id, r.folio, r.estado, r.tipo, r.user_id, r.jefe_id, r.eliminada_en,
+                  r.dias_solicitados, u.nombre AS empleado, u.email,
+                  COALESCE(pt.descuenta_vacaciones, r.tipo = 'vacacion') AS descuenta
+             FROM requests r JOIN users u ON u.id = r.user_id
+             LEFT JOIN permission_types pt ON pt.id = r.permission_type_id
+            WHERE r.id = %s""", (str(solicitud_id),))
+    es_th = usuario["rol"] in ES_TH
+    propia = sol is not None and str(sol["user_id"]) == str(usuario["id"])
+    if sol is None or not (es_th or propia):
+        raise HTTPException(status_code=404, detail={"mensaje": "Solicitud no encontrada."})
+    if sol["eliminada_en"] is not None:
+        raise HTTPException(status_code=409, detail={"mensaje": "Esa solicitud ya estaba eliminada."})
+    if not es_th and sol["estado"] in ("aprobado", "pendiente_anulacion"):
+        raise HTTPException(status_code=409, detail={
+            "mensaje": "Ya está aprobada: use «Pedir anulación». La revisa Talento Humano porque "
+                       "devuelve los días y deja sin efecto el código de salida."})
+
+    anterior = sol["estado"]
+    cancela = anterior in ("pendiente_jefe", "pendiente_rrhh", "aprobado", "pendiente_anulacion")
+    try:
+        async with transaccion():
+            if cancela:
+                await ejecutar(
+                    # MySQL asigna de izquierda a derecha: lo que mira el
+                    # estado anterior va ANTES de cambiarlo.
+                    """UPDATE requests SET anulacion_resuelta_por = IF(estado IN ('aprobado', 'pendiente_anulacion'),
+                                                                     %s, anulacion_resuelta_por),
+                              anulacion_motivo = COALESCE(anulacion_motivo, %s),
+                              estado = 'cancelado'
+                        WHERE id = %s""", (str(usuario["id"]), motivo, str(solicitud_id)))
+            await ejecutar(
+                """UPDATE requests SET eliminada_en = NOW(6), eliminada_por = %s, eliminacion_motivo = %s
+                    WHERE id = %s""", (str(usuario["id"]), motivo, str(solicitud_id)))
+    except Exception as exc:  # noqa: BLE001
+        raise traducir(exc) from exc
+
+    await registrar(request, "solicitud_eliminada", user_id=str(usuario["id"]), cedula=usuario["cedula"],
+                    entidad="requests", entidad_id=str(solicitud_id),
+                    detalle={"folio": sol["folio"], "estado_anterior": anterior, "motivo": motivo,
+                             "por": "talento_humano" if es_th and not propia else "solicitante"})
+
+    # Quien la tenía por decidir ya no tiene que hacerlo.
+    if anterior == "pendiente_jefe" and sol["jefe_id"] and str(sol["jefe_id"]) != str(usuario["id"]):
+        await ejecutar(
+            """INSERT INTO notifications (user_id, tipo, severidad, titulo, mensaje, entidad, entidad_id)
+               VALUES (%s, 'informativo', 'info', %s, %s, 'requests', %s)""",
+            (str(sol["jefe_id"]), f"Solicitud Nº {sol['folio']} eliminada",
+             f"La solicitud de {sol['empleado']} se eliminó: ya no requiere su decisión.", str(solicitud_id)))
+    # Si la eliminó Talento Humano, la persona tiene que saberlo y por qué.
+    if not propia:
+        await ejecutar(
+            """INSERT INTO notifications (user_id, tipo, severidad, titulo, mensaje, entidad, entidad_id,
+                                          accion_url)
+               VALUES (%s, 'informativo', 'advertencia', %s, %s, 'requests', %s, '/dashboard.html')""",
+            (str(sol["user_id"]), f"Talento Humano eliminó su solicitud Nº {sol['folio']}",
+             f"Motivo: {motivo}", str(solicitud_id)))
+        if sol["email"]:
+            tareas.add_task(notificaciones.avisar_solicitud_eliminada, sol["email"], sol["empleado"],
+                            sol["folio"], motivo, usuario["nombre"])
+
+    devueltos = anterior in ("aprobado", "pendiente_anulacion") and sol["descuenta"]
+    return {"mensaje": f"Solicitud Nº {sol['folio']} eliminada."
+                       + (f" Se devolvieron {float(sol['dias_solicitados']):g} día(s) al saldo." if devueltos else "")
+                       + (" El código de salida quedó sin efecto." if anterior in ("aprobado", "pendiente_anulacion")
+                          else "")}
+
+
+# ------------------------------------------------------ quitar un adjunto
+class QuitarAdjunto(BaseModel):
+    motivo: str = Field(..., max_length=300)
+
+
+@router.post("/solicitudes/{solicitud_id}/adjuntos/{adjunto_id}/quitar")
+async def quitar_adjunto(solicitud_id: uuid.UUID, adjunto_id: uuid.UUID, datos: QuitarAdjunto,
+                         request: Request, usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
+    """Quita un respaldo subido por error (otro documento, la foto
+    equivocada). Lo pueden quitar la persona dueña de la solicitud y Talento
+    Humano o administración. Se borra el archivo —si era un documento ajeno
+    no debe quedar guardado (LOPDP)— y la bitácora conserva quién, cuándo,
+    por qué, el nombre y la huella (SHA-256) del archivo."""
+    motivo = (datos.motivo or "").strip()
+    if len(motivo) < 5:
+        raise HTTPException(status_code=422, detail={"mensaje": "Indique por qué lo quita (mínimo 5 caracteres)."})
+    sol = await obtener_uno("SELECT id, folio, user_id, estado, respaldo_pedido_en FROM requests WHERE id = %s",
+                            (str(solicitud_id),))
+    es_th = usuario["rol"] in ES_TH
+    if sol is None or not (es_th or str(sol["user_id"]) == str(usuario["id"])):
+        raise HTTPException(status_code=404, detail={"mensaje": "Solicitud no encontrada."})
+    adj = await obtener_uno(
+        """SELECT id, storage_path, nombre_archivo, hash_sha256, tamano_bytes FROM request_attachments
+            WHERE id = %s AND request_id = %s""", (str(adjunto_id), str(solicitud_id)))
+    if adj is None:
+        raise HTTPException(status_code=404, detail={"mensaje": "Ese adjunto ya no está."})
+
+    await ejecutar("DELETE FROM request_attachments WHERE id = %s", (str(adjunto_id),))
+    quedan = (await obtener_uno("SELECT COUNT(*) AS n FROM request_attachments WHERE request_id = %s",
+                                (str(solicitud_id),)))["n"]
+    # Si era el respaldo que pidió Talento Humano, el pedido vuelve a quedar abierto.
+    if not quedan:
+        await ejecutar("UPDATE requests SET respaldo_entregado_en = NULL WHERE id = %s AND respaldo_pedido_en IS NOT NULL",
+                       (str(solicitud_id),))
+    try:
+        await borrar_adjunto(adj["storage_path"])
+    except HTTPException:
+        log.warning("No se pudo borrar del disco el adjunto %s", adjunto_id)
+    await registrar(request, "adjunto_quitado", user_id=str(usuario["id"]), cedula=usuario["cedula"],
+                    entidad="request_attachments", entidad_id=str(adjunto_id),
+                    detalle={"folio": sol["folio"], "archivo": adj["nombre_archivo"], "sha256": adj["hash_sha256"],
+                             "bytes": adj["tamano_bytes"], "motivo": motivo})
+    return {"mensaje": f"Se quitó «{adj['nombre_archivo']}».", "quedan": int(quedan)}
+
+
+# ------------------------------------------------------------ jefe alterno
+@router.get("/solicitudes/{solicitud_id}/jefe-alterno")
+async def opciones_jefe_alterno(solicitud_id: uuid.UUID,
+                                usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
+    """Si el jefe directo no puede atender esta solicitud (sin correo,
+    ausente o inexistente), por qué, y a quién se puede enviar."""
+    sol = await obtener_uno("SELECT id, user_id, jefe_id, estado FROM requests WHERE id = %s AND eliminada_en IS NULL",
+                            (str(solicitud_id),))
+    if sol is None or (str(sol["user_id"]) != str(usuario["id"]) and usuario["rol"] not in ES_TH):
+        raise HTTPException(status_code=404, detail={"mensaje": "Solicitud no encontrada."})
+    motivo = await jefe_alterno.situacion(sol)
+    return {"motivo": motivo, "candidatos": await jefe_alterno.candidatos(sol) if motivo else []}
+
+
+class JefeAlterno(BaseModel):
+    aprobador_id: uuid.UUID
+
+
+@router.post("/solicitudes/{solicitud_id}/jefe-alterno")
+async def elegir_jefe_alterno(solicitud_id: uuid.UUID, datos: JefeAlterno, request: Request,
+                              tareas: BackgroundTasks, usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
+    """El colaborador envía su solicitud a un jefe alterno, SOLO esta vez.
+    Su jefe de la ficha no cambia. Se permite únicamente cuando el jefe
+    directo no puede atenderla; si puede, el cambio lo hace Talento Humano
+    («Reasignar»)."""
+    from .aprobaciones import SQL_SOLICITUD, _avisar_aprobador  # evita una importación circular
+    sol = await obtener_uno("SELECT id, folio, user_id, jefe_id, estado FROM requests WHERE id = %s AND eliminada_en IS NULL",
+                            (str(solicitud_id),))
+    if sol is None or str(sol["user_id"]) != str(usuario["id"]):
+        raise HTTPException(status_code=404, detail={"mensaje": "Solicitud no encontrada."})
+    motivo = await jefe_alterno.situacion(sol)
+    if motivo is None:
+        raise HTTPException(status_code=409, detail={
+            "mensaje": "Su jefe directo está disponible y recibe los avisos. Si necesita que la decida otra "
+                       "persona, pídaselo a Talento Humano."})
+    validos = {c["id"]: c for c in await jefe_alterno.candidatos(sol)}
+    elegido = validos.get(str(datos.aprobador_id))
+    if elegido is None:
+        raise HTTPException(status_code=422, detail={
+            "mensaje": "Elija a una jefatura de la lista (activa, con correo y presente hoy)."})
+    await ejecutar(
+        """UPDATE requests SET jefe_original_id = COALESCE(jefe_original_id, jefe_id), jefe_id = %s,
+                  jefe_token = UUID(), jefe_alterno_motivo = %s
+            WHERE id = %s AND estado = 'pendiente_jefe'""", (elegido["id"], motivo["texto"], str(solicitud_id)))
+    actual = await obtener_uno(SQL_SOLICITUD, (str(solicitud_id),))
+    nuevo = await obtener_uno("SELECT id, nombre, email FROM users WHERE id = %s", (elegido["id"],))
+    await _avisar_aprobador(actual, nuevo, f"Solicitud Nº {actual['folio']}: usted la decide como jefe alterno",
+                            f"{actual['empleado']} la envió a usted porque {motivo['texto'][0].lower()}"
+                            f"{motivo['texto'][1:]} Decide solo esta solicitud.", tareas)
+    if sol["jefe_id"]:
+        await ejecutar(
+            """INSERT INTO notifications (user_id, tipo, severidad, titulo, mensaje, entidad, entidad_id)
+               VALUES (%s, 'informativo', 'info', %s, %s, 'requests', %s)""",
+            (str(sol["jefe_id"]), f"Solicitud Nº {sol['folio']} enviada a un jefe alterno",
+             f"{actual['empleado']} la envió a {elegido['nombre']} porque usted no estaba disponible. "
+             "Usted sigue siendo su jefe directo.", str(solicitud_id)))
+    await registrar(request, "jefe_alterno_elegido", user_id=str(usuario["id"]), cedula=usuario["cedula"],
+                    entidad="requests", entidad_id=str(solicitud_id),
+                    detalle={"folio": sol["folio"], "alterno": elegido["nombre"], "motivo": motivo["motivo"]})
+    return {"mensaje": f"Solicitud Nº {sol['folio']} enviada a {elegido['nombre']}, solo esta vez. "
+                       "Su jefe directo no cambia."}
 
 
 # --------------------------------------------------------- ver los respaldos

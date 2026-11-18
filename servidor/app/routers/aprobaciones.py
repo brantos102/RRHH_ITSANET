@@ -375,13 +375,15 @@ async def pendientes(usuario: Annotated[dict, Depends(usuario_actual)]) -> list[
                -- distinguirlo antes de firmar.
                r.jefe_id is null as sin_jefe,
                r.respaldo_pedido_en, r.respaldo_pedido_mensaje, r.respaldo_entregado_en,
+               jo.nombre as jefe_original, r.jefe_alterno_motivo,
                (select count(*) from request_attachments a where a.request_id = r.id) as adjuntos
         from requests r
         join users u on u.id = r.user_id
         left join users j on j.id = r.jefe_id
         left join permission_types pt on pt.id = r.permission_type_id
         left join users rp on rp.id = r.reemplazo_id
-        where {filtro}
+        left join users jo on jo.id = r.jefe_original_id and r.jefe_original_id <> r.jefe_id
+        where {filtro} and r.eliminada_en is null
         order by r.created_at
         """,
         (usuario["id"], *parametros),
@@ -473,7 +475,7 @@ async def rechazadas_recientes(usuario: Annotated[dict, Depends(usuario_actual)]
         f"""select r.id, r.rechazado_por, r.rechazado_en, r.rechazado_en_etapa, r.jefe_id,
                    q.nombre as rechazado_por_nombre
               from requests r left join users q on q.id = r.rechazado_por
-             where r.estado = 'rechazado'
+             where r.estado = 'rechazado' and r.eliminada_en is null
                and r.rechazado_en >= now(6) - interval {DIAS_PARA_CORREGIR} day
                and r.user_id <> %s
              order by r.rechazado_en desc limit 100""", (str(usuario["id"]),))
@@ -581,7 +583,12 @@ async def seguimiento(usuario: TH, sede: str = "todas", dias: int = 30) -> dict:
                    r.dias_solicitados, r.horas_solicitadas, r.created_at, r.user_id, r.jefe_id,
                    r.bloque_menor_justificado, r.es_adelanto, r.ruta_aprobacion, r.motivo_rechazo,
                    r.rechazado_en_etapa, COALESCE(r.region, 'sierra') AS region,
-                   r.respaldo_pedido_en, r.respaldo_entregado_en,
+                   r.respaldo_pedido_en, r.respaldo_entregado_en, r.jefe_alterno_motivo,
+                   jo.nombre AS jefe_original,
+                   (SELECT 1 FROM requests ra WHERE ra.user_id = r.jefe_id
+                      AND ra.estado IN ('aprobado', 'pendiente_anulacion') AND ra.eliminada_en IS NULL
+                      AND ra.hora_inicio IS NULL AND CURRENT_DATE() BETWEEN ra.fecha_inicio AND ra.fecha_fin
+                    LIMIT 1) AS jefe_ausente,
                    (SELECT COUNT(*) FROM request_attachments a WHERE a.request_id = r.id) AS adjuntos,
                    u.nombre AS empleado, u.cedula, u.departamento,
                    pt.nombre AS categoria,
@@ -606,7 +613,8 @@ async def seguimiento(usuario: TH, sede: str = "todas", dias: int = 30) -> dict:
               LEFT JOIN users q ON q.id = r.rechazado_por
               LEFT JOIN users ra ON ra.id = r.rrhh_aprobado_por
               LEFT JOIN users ja ON ja.id = r.jefe_aprobado_por
-             WHERE {filtro}
+              LEFT JOIN users jo ON jo.id = r.jefe_original_id AND r.jefe_original_id <> r.jefe_id
+             WHERE {filtro} AND r.eliminada_en IS NULL
                AND (r.estado IN ('pendiente_jefe', 'pendiente_rrhh', 'pendiente_anulacion')
                     OR r.updated_at >= NOW(6) - INTERVAL {dias} DAY)
              ORDER BY r.created_at
@@ -642,6 +650,8 @@ async def seguimiento(usuario: TH, sede: str = "todas", dias: int = 30) -> dict:
             "motivo_rechazo": f["motivo_rechazo"],
             "adjuntos": int(f["adjuntos"] or 0),
             "respaldo_pedido_en": f["respaldo_pedido_en"], "respaldo_entregado_en": f["respaldo_entregado_en"],
+            "jefe_original": f["jefe_original"], "jefe_alterno_motivo": f["jefe_alterno_motivo"],
+            "jefe_ausente": bool(f["jefe_ausente"]),
         })
     return {"sede": sede, "dias": dias, "sedes": sedes, "solicitudes": salida}
 
@@ -844,8 +854,11 @@ async def reasignar(solicitud_id: uuid.UUID, datos: Reasignacion, request: Reque
     if solicitud["jefe_id"] and str(nuevo["id"]) == str(solicitud["jefe_id"]):
         raise HTTPException(status_code=422, detail={"mensaje": "Ya la tiene esa persona."})
     anterior = solicitud["jefe_nombre"]
-    await ejecutar("UPDATE requests SET jefe_id = %s, jefe_token = UUID() WHERE id = %s AND estado = 'pendiente_jefe'",
-                   (str(nuevo["id"]), str(solicitud_id)))
+    await ejecutar(
+        """UPDATE requests SET jefe_original_id = COALESCE(jefe_original_id, jefe_id), jefe_id = %s,
+                  jefe_token = UUID(), jefe_alterno_motivo = %s
+            WHERE id = %s AND estado = 'pendiente_jefe'""",
+        (str(nuevo["id"]), f"Reasignada por Talento Humano: {datos.motivo.strip()}"[:300], str(solicitud_id)))
     actual = await obtener_uno(SQL_SOLICITUD, (str(solicitud_id),))
     await _avisar_aprobador(actual, nuevo, f"Solicitud Nº {actual['folio']} reasignada a usted",
                             f"Talento Humano le pidió decidir la solicitud de {actual['empleado']}. "
@@ -943,7 +956,7 @@ async def anulaciones_pendientes(
         from requests r
         join users u on u.id = r.user_id
         left join permission_types pt on pt.id = r.permission_type_id
-        where r.estado = 'pendiente_anulacion'
+        where r.estado = 'pendiente_anulacion' and r.eliminada_en is null
         order by r.anulacion_solicitada_en
         """
     )

@@ -135,6 +135,7 @@ export const api = {
   perfil: () => peticion("/auth/me"),
   saldo: () => peticion("/auth/mi-saldo"),
   notificaciones: () => peticion("/auth/mis-notificaciones"),
+  notificacionesNuevas: () => peticion("/auth/mis-notificaciones/nuevas"),
   marcarNotificacionesLeidas: () =>
     peticion("/auth/mis-notificaciones/leidas", { method: "POST" }),
   cerrarSesion: () => peticion("/auth/cerrar-sesion", { method: "POST" }),
@@ -562,6 +563,13 @@ export const api = {
     if (motivo) fd.append("motivo_reemplazo", motivo);
     return peticion(`/admin/papeles/${id}/escaneo`, { method: "POST", body: fd });
   },
+  eliminarSolicitud: (id, motivo) =>
+    peticion(`/solicitudes/${id}/eliminar`, { method: "POST", body: JSON.stringify({ motivo }) }),
+  quitarAdjunto: (id, adjuntoId, motivo) =>
+    peticion(`/solicitudes/${id}/adjuntos/${adjuntoId}/quitar`, { method: "POST", body: JSON.stringify({ motivo }) }),
+  opcionesJefeAlterno: (id) => peticion(`/solicitudes/${id}/jefe-alterno`),
+  elegirJefeAlterno: (id, aprobador_id) =>
+    peticion(`/solicitudes/${id}/jefe-alterno`, { method: "POST", body: JSON.stringify({ aprobador_id }) }),
   /* Los respaldos de una solicitud: certificados, turnos, actas. */
   adjuntosDe: (id) => peticion(`/solicitudes/${id}/adjuntos`),
   async abrirAdjunto(solicitudId, adjuntoId) {

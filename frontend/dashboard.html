@@ -352,6 +352,44 @@
   </form>
 </dialog>
 
+<!-- ================= Modal: eliminar una solicitud ================= -->
+<dialog id="modal-eliminar" class="w-[min(100vw-1.5rem,30rem)] rounded-2xl p-0 backdrop:backdrop-blur-sm">
+  <form id="form-eliminar" method="dialog" class="space-y-4 p-5">
+    <div>
+      <h2 class="font-semibold">Eliminar la solicitud</h2>
+      <p id="eliminar-que" class="mt-0.5 text-sm text-slate-600"></p>
+    </div>
+    <p id="eliminar-efecto" class="rounded-lg bg-amber-50 p-2.5 text-sm text-amber-900 ring-1 ring-amber-200"></p>
+    <label class="block text-sm font-medium">¿Por qué se elimina? <span class="font-normal text-slate-500">(queda en la bitácora)</span>
+      <textarea id="eliminar-motivo" required minlength="10" maxlength="500" rows="3"
+                placeholder="Ej.: La registré con la fecha equivocada"
+                class="mt-1 w-full resize-none rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm ring-1 ring-slate-300"></textarea></label>
+    <div class="flex gap-2">
+      <button type="button" data-cerrar class="flex-1 rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-medium hover:bg-slate-200">No eliminar</button>
+      <button class="flex-1 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-rose-700">Eliminar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ================= Modal: jefe alterno ================= -->
+<dialog id="modal-jefe-alterno" class="w-[min(100vw-1.5rem,30rem)] rounded-2xl p-0 backdrop:backdrop-blur-sm">
+  <form id="form-jefe-alterno" method="dialog" class="space-y-4 p-5">
+    <div>
+      <h2 class="font-semibold">Enviar a un jefe alterno</h2>
+      <p id="alterno-que" class="mt-0.5 text-sm text-slate-600"></p>
+    </div>
+    <p id="alterno-motivo" class="rounded-lg bg-amber-50 p-2.5 text-sm text-amber-900 ring-1 ring-amber-200"></p>
+    <label class="block text-sm font-medium">Quién la decide esta vez
+      <select id="alterno-a" required class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm ring-1 ring-slate-300"></select></label>
+    <p class="text-xs text-slate-500">Solo para esta solicitud: su jefe directo no cambia. La persona elegida recibe el aviso
+      por correo y en el sistema, y su jefe directo queda informado.</p>
+    <div class="flex gap-2">
+      <button type="button" data-cerrar class="flex-1 rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-medium hover:bg-slate-200">Ahora no</button>
+      <button class="flex-1 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800">Enviar</button>
+    </div>
+  </form>
+</dialog>
+
 <!-- ================= Modal: respaldos de una solicitud ================= -->
 <dialog id="modal-adjuntos" class="w-[min(100vw-1.5rem,28rem)] rounded-2xl p-0 backdrop:backdrop-blur-sm">
   <header class="flex items-center justify-between border-b border-slate-200 px-5 py-4">
