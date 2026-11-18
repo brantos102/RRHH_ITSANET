@@ -49,6 +49,46 @@ def _nota_diferencia(res: dict) -> str:
     return texto
 
 
+def _desglose(a: dict) -> str:
+    if a.get("total"):
+        return f"Base {a['base']} + adicionales {a['adicionales']} = {a['total']}"
+    return f"Acumulados: {_n(a.get('asignados_del_anio', a['asignados']))}"
+
+
+def _movimientos(a: dict) -> list[tuple[str, str, str, str, str, bool]]:
+    """(inicio, fin, detalle, días con signo, quedan, es_asignación) por movimiento."""
+    filas = []
+    for m in a.get("movimientos", []):
+        if m["tipo"] == "asignacion":
+            texto = (f"Cumplió su {m['periodo']}.º año de servicio" if m["devengado"]
+                     else f"Acumulado hasta hoy del {m['periodo']}.º año de servicio")
+            texto += f": {m['base']} base" + (f" + {m['adicionales']} adicionales" if m["adicionales"] else "")
+            texto += f" = {m['total']} días" + (f" · ⚠ {m['nota']}" if m.get("nota") else "")
+            filas.append((_f(m["fecha"]), "—", texto, f"+{_n(m['dias'])}", _n(m["quedan"]), True))
+        elif m["tipo"] == "caducidad":
+            filas.append((_f(m["fecha"]), "—", f"Caducaron días del {m['periodo']}.º año de servicio",
+                          _n(m["dias"]), _n(m["quedan"]), False))
+        else:
+            r = a["registros"][m["registro"]]
+            origen = _origen(r) + (f" · {REVISION[r['revision']['estado']]}" if r.get("revision") else "")
+            filas.append((_f(r["fecha_inicio"]), _f(r["fecha_fin"]), origen, f"−{_n(r['dias'])}", _n(m["quedan"]),
+                          False))
+    return filas
+
+
+def _derecho(res: dict) -> str:
+    d = res.get("derecho_actual")
+    if not d:
+        return ""
+    t = (f"En su {d['periodo']}.º año de servicio le corresponden {d['total']} días: {d['base']} base"
+         + (f" + {d['adicionales']} adicionales por antigüedad" if d["adicionales"] else "")
+         + (f" ({d['laborables']} laborables y {d['no_laborables']} no laborables incluidos)" if d.get("laborables") else "")
+         + ".")
+    if res.get("adicionales"):
+        t += f" Días adicionales recibidos en total: {res['adicionales']}."
+    return t
+
+
 # ---------------------------------------------------------------------- Excel
 def a_excel(datos: dict[str, Any], generado_por: str) -> Response:
     from openpyxl import Workbook
@@ -62,7 +102,7 @@ def a_excel(datos: dict[str, Any], generado_por: str) -> Response:
     gris = PatternFill("solid", fgColor="E2E8F0")
     suave = PatternFill("solid", fgColor="F1F5F9")
     borde = Border(bottom=Side(style="thin", color="DDE3EA"))
-    for col, ancho in zip("ABCDE", (16, 16, 14, 30, 30)):
+    for col, ancho in zip("ABCDE", (16, 14, 62, 12, 26)):
         hoja.column_dimensions[col].width = ancho
 
     if LOGO.exists():
@@ -98,36 +138,32 @@ def a_excel(datos: dict[str, Any], generado_por: str) -> Response:
         hoja.append([nota])
         hoja.cell(row=hoja.max_row, column=1).font = Font(italic=True, color="64748B")
 
+    if _derecho(res):
+        hoja.append([_derecho(res)])
+        hoja.cell(row=hoja.max_row, column=1).font = Font(bold=True, color="0C4A6E")
     for a in datos["anios"]:
         hoja.append([])
         titulo = f"Año {a['anio']}" + (" (en curso)" if a["en_curso"] else "")
-        hoja.append([titulo, f"Asignados: {_n(a['asignados'])}", f"Tomados: {_n(a['tomados'])}",
-                     etiqueta_balance(a["balance"])])
+        hoja.append([titulo, _desglose(a), f"Tomados: {_n(a['tomados'])}", etiqueta_balance(a["balance"]),
+                     f"Traía {_n(a['saldo_inicio'])} · quedan {_n(a['saldo_cierre'])}"])
         for c in hoja[hoja.max_row][:5]:
             c.fill, c.font = gris, Font(bold=True)
-        for per in a["periodos"]:
-            hoja.append([f"Año de servicio {per['periodo']}",
-                         f"{_f(per['desde'])} – {_f(per['hasta'])}",
-                         f"{per['base']} + {per['adicionales']}",
-                         "Acumulado hasta hoy" if not per["devengado"] else "Cumplido"
-                         + (" · caducado" if per["caducado"] else "")])
-            for c in hoja[hoja.max_row][:5]:
-                c.font = Font(size=9, color="64748B")
-        hoja.append(["Fecha de inicio", "Fecha de fin", "Días descontados", "Origen", "Revisión"])
+        hoja.append(["Fecha de inicio", "Fecha de fin", "Detalle", "Días", "Quedan"])
         for c in hoja[hoja.max_row][:5]:
             c.font, c.fill = Font(bold=True, color="FFFFFF"), azul
-        for r in a["registros"]:
-            hoja.append([_f(r["fecha_inicio"]), _f(r["fecha_fin"]), r["dias"], _origen(r),
-                         REVISION.get((r["revision"] or {}).get("estado"), "")])
+        for ini, fin, det, dias, quedan, es_asig in _movimientos(a):
+            hoja.append([ini, fin, det, dias, quedan])
             for c in hoja[hoja.max_row][:5]:
                 c.border = borde
-            hoja.cell(row=hoja.max_row, column=3).alignment = Alignment(horizontal="center")
-        if not a["registros"]:
-            hoja.append(["Sin días tomados este año"])
-        hoja.append(["", "Total días:", a["tomados"]])
+                if es_asig:
+                    c.fill = PatternFill("solid", fgColor="ECFDF5")
+            for col in (4, 5):
+                hoja.cell(row=hoja.max_row, column=col).alignment = Alignment(horizontal="center")
+        hoja.append(["", "", "Total días tomados:", a["tomados"], _n(a["saldo_cierre"])])
         for c in hoja[hoja.max_row][:5]:
             c.fill, c.font = suave, Font(bold=True)
-        hoja.cell(row=hoja.max_row, column=3).alignment = Alignment(horizontal="center")
+        for col in (4, 5):
+            hoja.cell(row=hoja.max_row, column=col).alignment = Alignment(horizontal="center")
 
     hoja.append([])
     hoja.append(["CONFIDENCIAL · Datos personales tratados conforme a la LOPDP del Ecuador."])
@@ -207,49 +243,52 @@ def a_pdf(datos: dict[str, Any], generado_por: str) -> Response:
     blanco_b = ParagraphStyle("bb", parent=normal, fontSize=8, textColor=colors.white,
                               fontName="Helvetica-Bold", alignment=1)
     cab_anio = ParagraphStyle("ca", parent=normal, fontSize=12, textColor=azul, fontName="Helvetica-Bold")
+    if _derecho(res):
+        piezas += [Paragraph(_derecho(res), ParagraphStyle("d", parent=normal, textColor=colors.HexColor("#0c4a6e"),
+                                                           backColor=colors.HexColor("#f0f9ff"), borderPadding=5)),
+                   Spacer(1, 5 * mm)]
+    celda = ParagraphStyle("cel", parent=normal, fontSize=8, leading=10)
     for a in datos["anios"]:
         signo = (a["balance"] > 0) - (a["balance"] < 0)
         encabezado = Table([[
             Paragraph(f"Año {a['anio']}" + (" <font size=8 color='#64748b'>(en curso)</font>" if a["en_curso"] else ""),
                       cab_anio),
-            Paragraph(f"Asignados: {_n(a['asignados'])} &nbsp;|&nbsp; Tomados: {_n(a['tomados'])}", normal),
+            Paragraph(f"{_desglose(a)} &nbsp;|&nbsp; Tomados: {_n(a['tomados'])}", normal),
             Paragraph(etiqueta_balance(a["balance"]), blanco_b)]],
-            colWidths=[ancho * 0.3, ancho * 0.4, ancho * 0.3])
+            colWidths=[ancho * 0.24, ancho * 0.5, ancho * 0.26])
         encabezado.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (1, 0), colors.HexColor("#f1f5f9")),
             ("BACKGROUND", (2, 0), (2, 0), color_badge[signo]),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
-        servicio = "; ".join(
-            f"año de servicio {per['periodo']} ({_f(per['desde'])} – {_f(per['hasta'])}): "
-            f"{per['base']} base + {per['adicionales']} adicionales"
-            + (" · acumulado hasta hoy" if not per["devengado"] else "")
-            + (" · caducado" if per["caducado"] else "")
-            for per in a["periodos"])
-        filas = [["FECHA DE INICIO", "FECHA DE FIN", "DÍAS DESCONTADOS", "ORIGEN"]]
-        for r in a["registros"]:
-            origen = _origen(r) + (f"\n{REVISION[r['revision']['estado']]}" if r["revision"] else "")
-            filas.append([_f(r["fecha_inicio"]), _f(r["fecha_fin"]), _n(r["dias"]), origen])
-        if not a["registros"]:
-            filas.append(["Sin días tomados este año", "", "", ""])
-        filas.append(["", "Total días:", _n(a["tomados"]), ""])
-        detalle = Table(filas, colWidths=[ancho * 0.22, ancho * 0.22, ancho * 0.2, ancho * 0.36], repeatRows=1)
-        detalle.setStyle(TableStyle([
+        filas = [["FECHA DE INICIO", "FECHA DE FIN", "DETALLE", "DÍAS", "QUEDAN"]]
+        verdes = []
+        for k, (ini, fin, det, dias, quedan, es_asig) in enumerate(_movimientos(a), start=1):
+            filas.append([ini, fin, Paragraph(det.replace("&", "&amp;").replace("<", "&lt;"), celda), dias, quedan])
+            if es_asig:
+                verdes.append(k)
+        if len(filas) == 1:
+            filas.append(["Sin movimientos este año", "", "", "", ""])
+        filas.append(["", "", "Total días tomados:", _n(a["tomados"]), _n(a["saldo_cierre"])])
+        detalle = Table(filas, colWidths=[ancho * 0.15, ancho * 0.14, ancho * 0.47, ancho * 0.1, ancho * 0.14],
+                        repeatRows=1)
+        estilo = [
             ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 7.5),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#475569")),
             ("FONT", (0, 1), (-1, -1), "Helvetica", 8.5),
-            ("ALIGN", (2, 0), (2, -1), "CENTER"),
+            ("ALIGN", (3, 0), (4, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("LINEBELOW", (0, 0), (-1, -2), 0.4, colors.HexColor("#e2e8f0")),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.white, colors.HexColor("#f8fafc")]),
             ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#e2e8f0")),
             ("FONT", (0, -1), (-1, -1), "Helvetica-Bold", 9),
-            ("ALIGN", (1, -1), (1, -1), "RIGHT"),
-            ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#cbd5e1"))]))
-        bloque = [encabezado]
-        if servicio:
-            bloque.append(Paragraph(servicio[0].upper() + servicio[1:], menor))
-        bloque += [detalle, Spacer(1, 5 * mm)]
-        piezas.append(KeepTogether(bloque))
+            ("ALIGN", (2, -1), (2, -1), "RIGHT"),
+            ("FONT", (4, 1), (4, -2), "Helvetica-Bold", 8.5),
+            ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#cbd5e1"))]
+        estilo += [("BACKGROUND", (0, k), (-1, k), colors.HexColor("#ecfdf5")) for k in verdes]
+        detalle.setStyle(TableStyle(estilo))
+        resumen_anio = Paragraph(f"Traía de años anteriores: <b>{_n(a['saldo_inicio'])}</b> día(s) · "
+                                 f"le quedaron al cierre: <b>{_n(a['saldo_cierre'])}</b>", menor)
+        piezas.append(KeepTogether([encabezado, resumen_anio, detalle, Spacer(1, 5 * mm)]))
 
     def pie(lienzo, d):
         lienzo.saveState()

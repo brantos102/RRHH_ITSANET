@@ -750,6 +750,20 @@
           <p class="mt-1 text-[11px] font-medium uppercase tracking-wide text-slate-500">Saldo actual</p></div>
       </section>
       <p id="hist-nota" class="hidden rounded-lg bg-white px-3 py-2 text-xs text-slate-600 ring-1 ring-slate-200"></p>
+      <div id="hist-derecho" class="hidden rounded-xl bg-sky-50 px-4 py-3 text-sm text-sky-950 ring-1 ring-sky-200"></div>
+      <details id="hist-tabla" class="rounded-xl bg-white ring-1 ring-slate-200">
+        <summary class="cursor-pointer select-none px-4 py-2.5 text-sm font-medium">¿Cuántos días me corresponden? Tabla por años de servicio (Art. 69)</summary>
+        <div class="overflow-x-auto border-t border-slate-100">
+          <table class="w-full min-w-[30rem] text-sm">
+            <thead><tr class="bg-[#1C58D7] text-left text-xs text-white">
+              <th class="px-3 py-2">Años laborando</th><th class="px-3 py-2 text-center">Días de vacaciones</th>
+              <th class="px-3 py-2 text-center">Días laborables</th><th class="px-3 py-2 text-center">Días no laborables incluidos</th></tr></thead>
+            <tbody id="hist-tabla-filas" class="divide-y divide-slate-100"></tbody>
+          </table>
+        </div>
+        <p class="px-4 py-2 text-xs text-slate-500">Los días son calendario: incluyen los fines de semana que caen dentro.
+          Desde el sexto año se suma un día por año, hasta 15 adicionales (30 en total).</p>
+      </details>
 
       <div class="flex flex-wrap items-center justify-between gap-2">
         <p class="text-xs text-slate-500">Pulse un año para ver el detalle. Si un registro no corresponde, use «Refutar».</p>

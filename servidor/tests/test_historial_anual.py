@@ -113,3 +113,34 @@ async def test_nadie_refuta_registros_ajenos(cliente, auth):
                            files={"archivos": ("c.pdf", PDF, "application/pdf")})
     assert r.status_code == 404
     assert ref
+
+
+async def test_adicionales_por_antiguedad_y_quedan_en_cada_movimiento(cliente, auth, empleado):
+    """La persona de prueba tiene 7 años: el 6.º y el 7.º año de servicio
+    traen 1 y 2 días adicionales (Art. 69), y está en el 8.º (15 + 3)."""
+    await _historicas(empleado["id"])
+    d = (await cliente.get("/mi-historial/anual", headers=auth)).json()
+    da = d["resumen"]["derecho_actual"]
+    assert da["periodo"] == 8 and da["base"] == 15 and da["adicionales"] == 3 and da["total"] == 18
+    assert da["laborables"] == 14 and da["no_laborables"] == 4          # tabla oficial
+    assert d["resumen"]["adicionales"] == 1 + 2
+    movs = [m for a in d["anios"] for m in a["movimientos"]]
+    sexto = next(m for m in movs if m["tipo"] == "asignacion" and m["periodo"] == 6)
+    assert sexto["base"] == 15 and sexto["adicionales"] == 1 and sexto["total"] == 16
+    # Cada movimiento deja el saldo anterior ± sus días.
+    previo = 0
+    for m in movs:
+        assert round(previo + m["dias"], 2) == m["quedan"]
+        previo = m["quedan"]
+    for a in d["anios"]:
+        assert a["saldo_cierre"] == a["movimientos"][-1]["quedan"]
+
+
+async def test_avisa_si_un_anio_no_tiene_sus_adicionales(cliente, auth, empleado):
+    await ejecutar("UPDATE vacation_periods SET dias_asignados = 15 WHERE user_id = %s AND periodo = 6",
+                   (empleado["id"],))
+    d = (await cliente.get("/mi-historial/anual", headers=auth)).json()
+    assert 6 in d["resumen"]["con_diferencias"]
+    sexto = next(m for a in d["anios"] for m in a["movimientos"]
+                 if m["tipo"] == "asignacion" and m["periodo"] == 6)
+    assert "faltan 1" in sexto["nota"]

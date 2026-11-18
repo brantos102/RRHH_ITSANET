@@ -1651,12 +1651,14 @@ function pintarHistorialAnual() {
   $("hist-saldo").textContent = num(r.saldo);
   // Si el saldo oficial no es generados − tomados, se dice cuánto y por qué.
   const calculado = Math.round((r.generados - r.tomados) * 100) / 100;
-  const hayNota = Boolean(r.caducados || r.diferencia);
+  const hayNota = Boolean(r.caducados || r.diferencia || r.con_diferencias?.length);
   $("hist-nota").textContent = hayNota
-    ? `Generados − tomados = ${num(calculado)} días; su saldo oficial es ${num(r.saldo)}.`
+    ? (r.caducados || r.diferencia ? `Generados − tomados = ${num(calculado)} días; su saldo oficial es ${num(r.saldo)}.` : "")
       + (r.caducados ? ` ${num(r.caducados)} día(s) caducaron.` : "")
       + (r.diferencia ? ` La diferencia de ${num(Math.abs(r.diferencia))} día(s) corresponde a ajustes de Talento Humano`
         + " o al saldo con que se cargó su ficha." : "")
+      + (r.con_diferencias?.length ? ` Revise los años de servicio ${r.con_diferencias.join(", ")}: los días registrados no `
+        + "coinciden con la tabla de antigüedad (marcados en ámbar)." : "")
       + " Si no está de acuerdo, refute el registro o escriba a Talento Humano."
     : "";
   $("hist-nota").classList.toggle("hidden", !hayNota);
@@ -1664,12 +1666,57 @@ function pintarHistorialAnual() {
     ? `ingreso ${fecha(d.persona.fecha_ingreso)} · ${d.persona.anios_servicio} año(s) de servicio` : ""]
     .filter(Boolean).join(" · ");
 
+  // Lo que le corresponde por su antigüedad en el año de servicio en curso.
+  const da = r.derecho_actual;
+  $("hist-derecho").classList.toggle("hidden", !da);
+  if (da) {
+    $("hist-derecho").innerHTML = `
+      <p>En su <b>${da.periodo}.º año de servicio</b> le corresponden <b>${da.total} días</b>:
+        <b>${da.base}</b> base${da.adicionales ? ` + <b>${da.adicionales}</b> adicional${da.adicionales === 1 ? "" : "es"} por antigüedad` : ""}
+        ${da.laborables ? `(${da.laborables} laborables y ${da.no_laborables} no laborables incluidos)` : ""}.</p>
+      <p class="mt-0.5 text-xs text-sky-800">${da.devengado ? "" : `Se van acumulando: lleva ${num(da.asignados)} y lo completa el ${dmy(da.hasta)}. `}
+        ${r.adicionales ? `En total ha recibido <b>${r.adicionales}</b> día(s) adicionales por antigüedad.` :
+          "Los días adicionales empiezan desde el sexto año de servicio."}</p>`;
+  }
+
   $("historial-anios").innerHTML = d.anios.length ? d.anios.map((a) => {
     const [texto, color] = badgeBalance(a.balance);
     const abierto = hist.todos || hist.abiertos.has(a.anio);
-    const servicio = a.periodos.map((p) =>
-      `Año de servicio ${p.periodo} (${dmy(p.desde)} – ${dmy(p.hasta)}): ${p.base} base + ${p.adicionales} adicionales`
-      + (p.devengado ? "" : " · se va acumulando hasta cumplirlo") + (p.caducado ? " · caducado" : "")).join(" · ");
+    const desglose = a.total
+      ? `Base: <b class="text-slate-800">${a.base}</b> · Adicionales: <b class="${a.adicionales ? "text-emerald-700" : "text-slate-800"}">${a.adicionales}</b> · Total: <b class="text-slate-800">${a.total}</b>`
+      : `Acumulados: <b class="text-slate-800">${num(a.asignados_del_anio)}</b>`;
+    const filas = a.movimientos.map((m) => {
+      if (m.tipo === "asignacion") {
+        return `<tr class="bg-emerald-50/70">
+          <td class="px-4 py-2.5 tabular-nums">${dmy(m.fecha)}</td>
+          <td class="px-4 py-2.5 text-xs text-emerald-900" colspan="2">
+            ${m.devengado ? `<b>Cumplió su ${m.periodo}.º año de servicio</b>` : `<b>Acumulado hasta hoy del ${m.periodo}.º año de servicio</b> (lo completa el ${dmy(m.hasta)})`}
+            · ${m.base} base${m.adicionales ? ` + ${m.adicionales} adicional${m.adicionales === 1 ? "" : "es"}` : ""} = ${m.total} días
+            ${m.nota ? `<span class="mt-0.5 block rounded bg-amber-100 px-1.5 py-0.5 text-amber-900">⚠ ${esc(m.nota)}</span>` : ""}</td>
+          <td class="px-4 py-2.5 text-center font-semibold tabular-nums text-emerald-700">+${num(m.dias)}</td>
+          <td class="px-4 py-2.5 text-center font-semibold tabular-nums">${num(m.quedan)}</td><td></td></tr>`;
+      }
+      if (m.tipo === "caducidad") {
+        return `<tr class="bg-slate-100/70"><td class="px-4 py-2.5 tabular-nums">${dmy(m.fecha)}</td>
+          <td class="px-4 py-2.5 text-xs text-slate-600" colspan="2">Caducaron los días no gozados del ${m.periodo}.º año de servicio</td>
+          <td class="px-4 py-2.5 text-center tabular-nums text-slate-600">${num(m.dias)}</td>
+          <td class="px-4 py-2.5 text-center font-semibold tabular-nums">${num(m.quedan)}</td><td></td></tr>`;
+      }
+      const reg = a.registros[m.registro];
+      const rv = reg.revision;
+      return `<tr>
+        <td class="px-4 py-2.5 tabular-nums">${dmy(reg.fecha_inicio)}</td>
+        <td class="px-4 py-2.5 tabular-nums">${dmy(reg.fecha_fin)}</td>
+        <td class="px-4 py-2.5 text-xs text-slate-600">${reg.folio ? `Solicitud Nº ${reg.folio}` : "Hoja de Talento Humano"}
+          ${rv ? `<span class="mt-1 block w-fit rounded-full px-2 py-0.5 text-[11px] font-medium ${REV[rv.estado][1]}">${REV[rv.estado][0]}</span>
+                 ${rv.respuesta ? `<span class="mt-0.5 block text-[11px] text-slate-500">«${esc(rv.respuesta)}»</span>` : ""}` : ""}</td>
+        <td class="px-4 py-2.5 text-center font-medium tabular-nums text-rose-700">−${num(reg.dias)}</td>
+        <td class="px-4 py-2.5 text-center font-semibold tabular-nums ${m.quedan < 0 ? "text-rose-700" : ""}">${num(m.quedan)}</td>
+        <td class="px-2 py-2.5 text-right">${!rv || rv.estado !== "pendiente"
+          ? `<button type="button" data-refutar="${a.anio}:${m.registro}"
+               class="rounded-lg px-2 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50">Refutar</button>` : ""}</td>
+      </tr>`;
+    }).join("");
     return `
     <section class="overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
       <button type="button" data-hist-anio="${a.anio}" aria-expanded="${abierto}"
@@ -1678,8 +1725,8 @@ function pintarHistorialAnual() {
           <span aria-hidden="true">📅</span> Año ${a.anio}
           ${a.en_curso ? '<span class="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-800">en curso</span>' : ""}
         </span>
-        <span class="flex flex-wrap items-center gap-3 text-sm text-slate-600">
-          <span>Asignados: <b class="text-slate-800">${num(a.asignados)}</b></span>
+        <span class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-600">
+          <span>${desglose}</span>
           <span class="text-slate-300">|</span>
           <span>Tomados: <b class="text-slate-800">${num(a.tomados)}</b></span>
           <span class="rounded-full px-3 py-1 text-xs font-semibold text-white ${color}">${texto}</span>
@@ -1688,31 +1735,19 @@ function pintarHistorialAnual() {
       </button>
       ${abierto ? `
       <div class="border-t border-slate-200">
-        ${servicio ? `<p class="bg-slate-50 px-4 py-2 text-[11px] text-slate-500">${esc(servicio)}</p>` : ""}
+        <p class="bg-slate-50 px-4 py-2 text-xs text-slate-600">Traía de años anteriores: <b>${num(a.saldo_inicio)}</b> día(s)
+          · Le quedaron al cierre${a.anio === new Date().getFullYear() ? " (hoy)" : ""}: <b>${num(a.saldo_cierre)}</b></p>
         <div class="overflow-x-auto">
-        <table class="w-full min-w-[34rem] text-sm">
+        <table class="w-full min-w-[40rem] text-sm">
           <thead><tr class="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-            <th class="px-4 py-2.5">Fecha de inicio</th><th class="px-4 py-2.5">Fecha de fin</th>
-            <th class="px-4 py-2.5 text-center">Días descontados</th><th class="px-4 py-2.5">Origen</th><th class="px-2 py-2.5"></th></tr></thead>
-          <tbody class="divide-y divide-slate-100">
-            ${a.registros.length ? a.registros.map((reg, k) => {
-              const rv = reg.revision;
-              return `<tr class="${k % 2 ? "bg-slate-50/60" : ""}">
-                <td class="px-4 py-2.5 tabular-nums">${dmy(reg.fecha_inicio)}</td>
-                <td class="px-4 py-2.5 tabular-nums">${dmy(reg.fecha_fin)}</td>
-                <td class="px-4 py-2.5 text-center font-medium tabular-nums">${num(reg.dias)}</td>
-                <td class="px-4 py-2.5 text-xs text-slate-600">${reg.folio ? `Solicitud Nº ${reg.folio}` : "Hoja de Talento Humano"}
-                  ${rv ? `<span class="mt-1 block w-fit rounded-full px-2 py-0.5 text-[11px] font-medium ${REV[rv.estado][1]}">${REV[rv.estado][0]}</span>
-                         ${rv.respuesta ? `<span class="mt-0.5 block text-[11px] text-slate-500">«${esc(rv.respuesta)}»</span>` : ""}` : ""}</td>
-                <td class="px-2 py-2.5 text-right">${!rv || rv.estado !== "pendiente"
-                  ? `<button type="button" data-refutar="${a.anio}:${k}"
-                       class="rounded-lg px-2 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50">Refutar</button>` : ""}</td>
-              </tr>`;
-            }).join("") : `<tr><td colspan="5" class="px-4 py-4 text-center text-sm text-slate-500">Sin días tomados este año.</td></tr>`}
-          </tbody>
+            <th class="px-4 py-2.5">Fecha de inicio</th><th class="px-4 py-2.5">Fecha de fin</th><th class="px-4 py-2.5">Origen</th>
+            <th class="px-4 py-2.5 text-center">Días</th><th class="px-4 py-2.5 text-center">Quedan</th><th class="px-2 py-2.5"></th></tr></thead>
+          <tbody class="divide-y divide-slate-100">${filas ||
+            `<tr><td colspan="6" class="px-4 py-4 text-center text-sm text-slate-500">Sin movimientos este año.</td></tr>`}</tbody>
           <tfoot><tr class="bg-slate-200/70 font-semibold">
-            <td></td><td class="px-4 py-2.5 text-right">Total días:</td>
-            <td class="px-4 py-2.5 text-center tabular-nums">${num(a.tomados)}</td><td colspan="2"></td></tr></tfoot>
+            <td colspan="3" class="px-4 py-2.5 text-right">Total días tomados:</td>
+            <td class="px-4 py-2.5 text-center tabular-nums">${num(a.tomados)}</td>
+            <td class="px-4 py-2.5 text-center tabular-nums">${num(a.saldo_cierre)}</td><td></td></tr></tfoot>
         </table></div>
       </div>` : ""}
     </section>`;
@@ -1725,7 +1760,17 @@ $("btn-detalle-saldo").addEventListener("click", async () => {
   $("historial-anios").innerHTML = "";
   abrir("modal-historial");
   try {
-    hist.datos = await api.historialAnual();
+    const [datosHist, tabla] = await Promise.all([api.historialAnual(), api.tablaAntiguedad().catch(() => null)]);
+    hist.datos = datosHist;
+    const actual = hist.datos.resumen.derecho_actual?.periodo;
+    $("hist-tabla-filas").innerHTML = (tabla?.tabla || []).map((t) => {
+      const suya = actual && actual >= t.anios_desde && (t.anios_hasta == null || actual <= t.anios_hasta);
+      return `<tr class="${suya ? "bg-amber-100 font-semibold" : ""}">
+        <td class="px-3 py-1.5">${esc(t.rango)}${suya ? " ← usted" : ""}</td>
+        <td class="px-3 py-1.5 text-center">${t.dias_gozar} días</td>
+        <td class="px-3 py-1.5 text-center">${t.dias_laborables} días</td>
+        <td class="px-3 py-1.5 text-center">${t.dias_no_laborables} días</td></tr>`;
+    }).join("");
     // El año en curso, abierto: es lo que la persona viene a mirar.
     const ultimo = hist.datos.anios.filter((a) => a.anio <= new Date().getFullYear()).at(-1);
     hist.abiertos = new Set(ultimo ? [ultimo.anio] : []);
