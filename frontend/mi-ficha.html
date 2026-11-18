@@ -59,7 +59,7 @@
     <!-- El cargo y el área los administra Talento Humano: aquí solo se
          confirma el jefe. -->
     <p class="mt-3 text-sm text-amber-900">Cargo y área: <b id="mf-cargo">—</b>
-      <span class="block text-xs text-amber-800">Los administra Talento Humano. Si no corresponden, escríbales por el chat.</span></p>
+      <span class="block text-xs text-amber-800">Si no corresponden, use «Mi cargo y área», más abajo.</span></p>
     <div class="mt-3 rounded-xl bg-white p-4 ring-1 ring-slate-200">
       <p class="text-xs text-slate-500">Jefe inmediato</p>
       <p id="mf-jefe" class="font-medium">—</p>
@@ -85,6 +85,33 @@
                    hover:bg-amber-800">
       Confirmar
     </button>
+  </section>
+
+  <!-- ===== Cargo y área: se proponen, los aprueba Talento Humano ===== -->
+  <section id="caja-cargo" class="mt-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <div class="flex flex-wrap items-start justify-between gap-2">
+      <div>
+        <h2 class="font-medium">Mi cargo y área</h2>
+        <p class="mt-0.5 text-sm text-slate-600"><b id="mf-cargo-actual">—</b></p>
+      </div>
+      <button type="button" id="mf-cargo-abrir"
+              class="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium hover:bg-slate-200">
+        Cambió o no corresponde</button>
+    </div>
+    <form id="form-cargo" class="mt-3 hidden space-y-3">
+      <p class="text-xs text-slate-500">Elíjalos de la lista. Si su cargo o su área no están, elija «No está en la lista»
+        y escríbalo. No rige hasta que Talento Humano lo apruebe; al aprobarlo, entra a la lista para todos.</p>
+      <label class="block text-sm font-medium">Área
+        <select id="mf-area-sel" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm ring-1 ring-slate-300"></select>
+        <input id="mf-area-otra" maxlength="120" placeholder="Escriba su área"
+               class="mt-2 hidden w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm ring-1 ring-slate-300"></label>
+      <label class="block text-sm font-medium">Cargo
+        <select id="mf-cargo-sel" class="mt-1 w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm ring-1 ring-slate-300"></select>
+        <input id="mf-cargo-otro" maxlength="120" placeholder="Escriba su cargo"
+               class="mt-2 hidden w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm ring-1 ring-slate-300"></label>
+      <button class="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800">
+        Enviar a Talento Humano</button>
+    </form>
   </section>
 
   <!-- ===== Contacto: lo que se corrige solo ===== -->

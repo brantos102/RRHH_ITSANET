@@ -36,6 +36,7 @@ const CARGADORES = {
   depuracion: cargarDepuracion, "ingreso-firmas": cargarIngresoFirmas,
   pendientes: cargarPendientes, asistente: cargarAsistente, sedes: cargarSedes,
   actualizaciones: cargarActualizaciones, catalogo: cargarCatalogoOficial, masivo: cargarMasivo,
+  correo: cargarCorreo,
 };
 
 // Lo que es solo del administrador no se le ofrece a Talento Humano.
@@ -1246,6 +1247,8 @@ function pintarCambiosFicha() {
           <strong>${esc(c.nuevo_legible)}</strong>
         </p>
         ${c.motivo ? `<p class="mt-1 text-xs text-slate-500">${esc(c.motivo)}</p>` : ""}
+        ${c.nuevo_en_catalogo ? `<p class="mt-1 text-xs font-medium text-sky-800">Nuevo: no está en el catálogo. Al aprobarlo
+          entra a la lista oficial y lo podrán elegir los compañeros.</p>` : ""}
         <div class="mt-3 flex flex-wrap gap-2">
           <button data-aprobar="${c.id}"
                   class="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800">
@@ -1951,7 +1954,108 @@ async function botonesSedePendientes() {
     .join("");
 }
 
+/* ---------------------------------------------------- correo del sistema */
+async function cargarCorreo() {
+  const d = await api.correoEstado($("co-buscar").value.trim(), $("co-fallidos").checked);
+  const c = d.configuracion;
+  $("co-config").innerHTML = [["Modo", c.modo], ["Servidor", c.servidor], ["Puertos", c.puertos.join(" y luego ")],
+    ["Cifrado", c.cifrado], ["Remitente", c.remitente], ["Usuario", c.usuario], ["Clave", c.clave]]
+    .map(([e, v]) => `<div class="flex gap-2"><dt class="w-24 shrink-0 text-slate-500">${e}</dt>
+      <dd class="font-medium ${/NO salen|FALTA/.test(v) ? "text-rose-700" : ""}">${esc(String(v ?? "—"))}</dd></div>`).join("");
+  const r = d.ultimos_7_dias;
+  $("co-resumen").innerHTML = [
+    ["Enviados (7 días)", r.enviados, "bg-emerald-50 text-emerald-900"],
+    ["Fallidos (7 días)", r.fallidos, r.fallidos ? "bg-rose-50 text-rose-900" : "bg-slate-50 text-slate-700"],
+    ["Último que salió", r.ultimo_ok ? fechaHora(r.ultimo_ok) : "—", "bg-slate-50 text-slate-700"],
+    ["Último que falló", r.ultimo_fallo ? fechaHora(r.ultimo_fallo) : "—", "bg-slate-50 text-slate-700"],
+  ].map(([t, v, tono]) => `<div class="rounded-xl p-3 ${tono}"><p class="text-xs">${t}</p>
+      <p class="text-lg font-semibold">${esc(String(v))}</p></div>`).join("");
+  const RES = { enviado: ["Salió", "bg-emerald-100 text-emerald-800"], fallido: ["Falló", "bg-rose-100 text-rose-800"],
+                consola: ["Modo prueba (no sale)", "bg-amber-100 text-amber-800"] };
+  $("co-lista").innerHTML = d.registros.length ? d.registros.map((x) => `
+    <tr><td class="whitespace-nowrap px-4 py-2 text-xs text-slate-500">${fechaHora(x.creado_en)}</td>
+      <td class="px-4 py-2 font-mono text-xs">${esc(x.destino)}</td>
+      <td class="px-4 py-2">${esc(x.asunto)}</td>
+      <td class="px-4 py-2"><span class="rounded-full px-2 py-0.5 text-xs font-medium ${RES[x.resultado][1]}">${RES[x.resultado][0]}</span>
+        ${x.puerto ? `<span class="text-xs text-slate-500">puerto ${x.puerto}${x.intentos > 1 ? ` · ${x.intentos} intentos` : ""}</span>` : ""}
+        ${x.error ? `<p class="mt-0.5 text-xs text-rose-700">${esc(x.error)}</p>` : ""}</td></tr>`).join("")
+    : `<tr><td colspan="4" class="px-4 py-6 text-center text-sm text-slate-500">Sin envíos ${$("co-buscar").value ? "a ese correo" : "registrados"}.</td></tr>`;
+}
+$("co-actualizar").addEventListener("click", () => cargarCorreo().catch((e) => avisar(e.message, true)));
+$("co-fallidos").addEventListener("change", () => cargarCorreo().catch((e) => avisar(e.message, true)));
+$("co-buscar").addEventListener("keydown", (e) => { if (e.key === "Enter") cargarCorreo().catch((x) => avisar(x.message, true)); });
+$("co-probar").addEventListener("click", async () => {
+  const b = $("co-probar"), caja = $("co-resultado");
+  b.disabled = true; b.textContent = "Enviando…";
+  try {
+    const r = await api.correoProbar();
+    caja.className = `mt-3 rounded-lg p-3 text-sm ${r.enviado ? "bg-emerald-50 text-emerald-900" : "bg-rose-50 text-rose-900"}`;
+    caja.innerHTML = esc(r.mensaje) + (r.que_revisar?.length
+      ? `<ul class="mt-2 list-disc space-y-0.5 pl-5 text-xs">${r.que_revisar.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : "");
+    caja.classList.remove("hidden");
+    await cargarCorreo();
+  } catch (err) { avisar(err.message, true); }
+  finally { b.disabled = false; b.textContent = "Enviarme un correo de prueba"; }
+});
+
+/* Revisiones del historial: la persona refuta un registro con evidencia. */
+async function cargarRevisiones() {
+  let lista = [];
+  try { lista = await api.revisionesHistorial("pendiente"); } catch { /* sin permiso o sin red */ }
+  $("rev-caja").classList.toggle("hidden", !lista.length);
+  const dmy = (v) => (v ? `${String(v).slice(8, 10)}/${String(v).slice(5, 7)}/${String(v).slice(0, 4)}` : "");
+  $("rev-lista").innerHTML = lista.map((r) => `
+    <li class="space-y-2 px-5 py-4 text-sm">
+      <div class="flex flex-wrap items-start justify-between gap-2">
+        <p><b>${esc(r.nombre)}</b> <span class="text-xs text-slate-500">${esc(r.cedula)}${r.departamento ? ` · ${esc(r.departamento)}` : ""}</span>
+          <span class="ml-1 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs">R-${r.id}</span></p>
+        <span class="text-xs text-slate-500">${fechaHora(r.created_at)}</span>
+      </div>
+      <p>Refuta <b>${dmy(r.fecha_inicio)} – ${dmy(r.fecha_fin)}</b> · ${r.dias} día(s) ·
+        ${r.folio ? `Solicitud Nº ${r.folio}` : "Hoja de Talento Humano"}</p>
+      <p class="rounded-lg bg-slate-50 p-2.5 text-slate-700">${esc(r.motivo)}</p>
+      <div class="flex flex-wrap items-center gap-2">
+        ${r.evidencias.map((e) => `<button type="button" data-rev-evidencia="${r.id}:${e.id}"
+            class="rounded-lg bg-white px-2.5 py-1 text-xs font-medium ring-1 ring-slate-300 hover:bg-slate-50">📎 ${esc(e.nombre_archivo)}</button>`).join("")}
+        <button type="button" data-rev-historial="${r.user_id}"
+            class="rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-sky-700 ring-1 ring-sky-200 hover:bg-sky-50">Historial (PDF)</button>
+        <a href="persona.html?id=${r.user_id}" class="rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-sky-700 ring-1 ring-sky-200 hover:bg-sky-50">Ficha</a>
+        <span class="ml-auto flex gap-2">
+          <button type="button" data-rev-resolver="${r.id}" data-accion="rechazar"
+            class="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-rose-700 ring-1 ring-rose-200 hover:bg-rose-50">No aceptar</button>
+          <button type="button" data-rev-resolver="${r.id}" data-accion="aceptar"
+            class="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">Aceptar</button>
+        </span>
+      </div>
+    </li>`).join("");
+}
+
+$("rev-lista").addEventListener("click", async (e) => {
+  const ev = e.target.closest("[data-rev-evidencia]");
+  const hi = e.target.closest("[data-rev-historial]");
+  const re = e.target.closest("[data-rev-resolver]");
+  try {
+    if (ev) {
+      const [rid, eid] = ev.dataset.revEvidencia.split(":");
+      await api.abrirEvidencia(rid, eid);
+    } else if (hi) {
+      await api.descargarHistorial("pdf", hi.dataset.revHistorial);
+    } else if (re) {
+      const acepta = re.dataset.accion === "aceptar";
+      const respuesta = prompt(acepta
+        ? "Respuesta para la persona (le llega por correo). Ej.: «Revisado: se corrige el registro y se le devuelven los días»."
+        : "¿Por qué no se acepta? (le llega por correo; mínimo 10 caracteres)");
+      if (respuesta === null) return;
+      avisar((await api.resolverRevision(re.dataset.revResolver, re.dataset.accion, respuesta.trim())).mensaje);
+      await cargarRevisiones();
+    }
+  } catch (err) {
+    avisar(err.message, true);
+  }
+});
+
 async function cargarPendientes() {
+  cargarRevisiones();
   await botonesSedePendientes();
   document.querySelectorAll("#pen-sedes [data-sede]").forEach((b) => {
     b.className = `rounded-lg px-3 py-1.5 font-medium ${b.dataset.sede === sedePendientes
@@ -2163,6 +2267,8 @@ async function atenderCambios(personaId, nombre = "") {
         <p class="mt-1"><span class="text-slate-500 line-through">${esc(c.anterior_legible || "—")}</span>
           → <b>${esc(c.nuevo_legible || c.valor_nuevo)}</b></p>
         ${c.motivo ? `<p class="mt-1 text-xs text-slate-500">${esc(c.motivo)}</p>` : ""}
+        ${c.nuevo_en_catalogo ? `<p class="mt-1 text-xs font-medium text-sky-800">Nuevo: no está en el catálogo. Al aprobarlo
+          entra a la lista oficial y lo podrán elegir los compañeros.</p>` : ""}
         ${c.campo === "jefe_por_registrar" ? `<p class="mt-1 text-xs text-amber-800">
           Primero nombre a esa persona en <a class="underline" href="#jefaturas" data-cerrar-y-ir>Jefaturas</a>
           y asígnela; luego márquelo como atendido.</p>` : ""}

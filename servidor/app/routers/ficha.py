@@ -147,6 +147,7 @@ class ConfirmacionDatos(BaseModel):
     cargo_correcto: bool
     jefe_correcto: bool
     cargo_propuesto: str | None = Field(None, max_length=120)
+    departamento_propuesto: str | None = Field(None, max_length=120)
     jefe_propuesto_id: str | None = Field(None, max_length=40)
 
 
@@ -348,6 +349,40 @@ async def cambiar_correo(
     }
 
 
+class CargoPropuesto(BaseModel):
+    cargo: str = Field(..., min_length=2, max_length=120)
+    departamento: str | None = Field(None, max_length=120)
+
+
+@router.post("/mi-ficha/cargo")
+async def proponer_cargo(datos: CargoPropuesto, request: Request, tareas: BackgroundTasks,
+                         usuario: Annotated[dict, Depends(usuario_actual)]) -> dict:
+    """«Mi cargo (o mi área) cambió o no corresponde.» Se puede elegir de la
+    lista o escribir uno que no está. No rige hasta que Talento Humano lo
+    apruebe; al aprobarlo, un cargo nuevo entra al catálogo oficial y desde
+    entonces lo encuentran los compañeros en la lista."""
+    actual = await obtener_uno("select cargo, departamento from users where id = %s", (usuario["id"],))
+    cargo = " ".join(datos.cargo.split())
+    area = " ".join((datos.departamento or "").split())
+    pedidos: list[tuple[str, str]] = []
+    try:
+        if area and area != (actual["departamento"] or ""):
+            await reglas_ficha.solicitar_cambio_ficha(usuario["id"], "departamento", area,
+                                                      "Área indicada por el colaborador", permitir_bloqueado=True)
+            pedidos.append(("Área que indica", area))
+        if cargo != (actual["cargo"] or ""):
+            await reglas_ficha.solicitar_cambio_ficha(usuario["id"], "cargo", cargo,
+                                                      "Cargo indicado por el colaborador", permitir_bloqueado=True)
+            pedidos.append(("Cargo que indica", cargo))
+    except Exception as exc:  # noqa: BLE001
+        raise traducir(exc) from exc
+    if not pedidos:
+        return {"mensaje": "Eso es lo que ya consta en su ficha: no hay nada que cambiar."}
+    await registrar(request, "cargo_propuesto", user_id=str(usuario["id"]), cedula=usuario["cedula"],
+                    detalle={"cargo": cargo, "area": area or None})
+    return {"mensaje": "Listo: Talento Humano lo revisa. Mientras tanto sigue lo que consta en su ficha."}
+
+
 @router.post("/mi-ficha/confirmar")
 async def confirmar_cargo_y_jefe(
     datos: ConfirmacionDatos, request: Request, tareas: BackgroundTasks,
@@ -367,11 +402,23 @@ async def confirmar_cargo_y_jefe(
         await ejecutar("update users set cargo_confirmado_en = NOW(6) where id = %s",
                        (usuario["id"],))
     elif datos.cargo_propuesto and datos.cargo_propuesto.strip():
+        # Un cargo (y su área) que no está en la lista también se puede
+        # señalar: Talento Humano lo revisa y, al aprobarlo, entra al
+        # catálogo para que lo encuentren los compañeros.
+        actual = await obtener_uno("select cargo, departamento from users where id = %s", (usuario["id"],))
+        cargo = " ".join(datos.cargo_propuesto.split())
+        area = " ".join((datos.departamento_propuesto or "").split())
         try:
-            await reglas_ficha.solicitar_cambio_ficha(
-                usuario["id"], "cargo", datos.cargo_propuesto.strip(),
-                "Corrección declarada al confirmar los datos")
-            pedidos.append(("Cargo que indica", datos.cargo_propuesto.strip()))
+            if area and area != (actual["departamento"] or ""):
+                await reglas_ficha.solicitar_cambio_ficha(
+                    usuario["id"], "departamento", area, "Área declarada al revisar sus datos",
+                    permitir_bloqueado=True)
+                pedidos.append(("Área que indica", area))
+            if cargo != (actual["cargo"] or ""):
+                await reglas_ficha.solicitar_cambio_ficha(
+                    usuario["id"], "cargo", cargo, "Cargo declarado al revisar sus datos",
+                    permitir_bloqueado=True)
+                pedidos.append(("Cargo que indica", cargo))
         except Exception as exc:  # noqa: BLE001
             errores.append(str(getattr(traducir(exc), "detail", exc)))
     else:
@@ -455,6 +502,14 @@ async def cambios_pendientes(usuario: RRHH) -> list[dict]:
               from v_cambios_ficha_pendientes where {filtro}""",
         parametros,
     )
+    for f in filas:
+        f["nuevo_en_catalogo"] = False
+        if f["campo"] == "cargo":
+            f["nuevo_en_catalogo"] = not await obtener_uno(
+                "select 1 as x from cargos where nombre = trim(%s) and activo", (f["valor_nuevo"],))
+        elif f["campo"] == "departamento":
+            f["nuevo_en_catalogo"] = not await obtener_uno(
+                "select 1 as x from areas where nombre = trim(%s) and activo", (f["valor_nuevo"],))
     return [{**f, "id": int(f["id"]), "user_id": str(f["user_id"])} for f in filas]
 
 

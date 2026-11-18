@@ -153,8 +153,58 @@ function pintarCambios() {
   }).join("");
 }
 
+/* ---- Mi cargo y área: se elige de la lista o se escribe; lo aprueba Talento Humano ---- */
+const OTRO = "__otro";
+const normal = (t) => (t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+let catalogo = null;
+function pintarCargosLista() {
+  const area = $("mf-area-sel").value === OTRO ? $("mf-area-otra").value : $("mf-area-sel").value;
+  const ordenar = (l) => [...new Set(l.map((c) => c.cargo))].sort((a, b) => a.localeCompare(b, "es"));
+  const delArea = ordenar(catalogo.cargos.filter((c) => area && (!c.area || normal(c.area) === normal(area))));
+  const otros = ordenar(catalogo.cargos).filter((n) => !delArea.some((d) => normal(d) === normal(n)));
+  const op = (l) => l.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
+  $("mf-cargo-sel").innerHTML = '<option value="">Elija su cargo…</option>'
+    + (delArea.length ? `<optgroup label="De esta área">${op(delArea)}</optgroup>` : "")
+    + (otros.length ? `<optgroup label="Otros cargos de la empresa">${op(otros)}</optgroup>` : "")
+    + `<option value="${OTRO}">Mi cargo no está en la lista…</option>`;
+}
+$("mf-cargo-abrir").addEventListener("click", async () => {
+  const form = $("form-cargo");
+  form.classList.toggle("hidden");
+  if (form.classList.contains("hidden") || catalogo) return;
+  try { catalogo = await api.catalogoCargos(); } catch { catalogo = { cargos: [], areas: [] }; }
+  const p = estado.ficha.persona;
+  $("mf-area-sel").innerHTML = '<option value="">Elija su área…</option>'
+    + catalogo.areas.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join("")
+    + `<option value="${OTRO}">Mi área no está en la lista…</option>`;
+  const igual = catalogo.areas.find((a) => normal(a) === normal(p.departamento));
+  if (igual) $("mf-area-sel").value = igual;
+  pintarCargosLista();
+});
+$("mf-area-sel").addEventListener("change", () => {
+  $("mf-area-otra").classList.toggle("hidden", $("mf-area-sel").value !== OTRO);
+  pintarCargosLista();
+});
+$("mf-cargo-sel").addEventListener("change", () =>
+  $("mf-cargo-otro").classList.toggle("hidden", $("mf-cargo-sel").value !== OTRO));
+$("form-cargo").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const area = $("mf-area-sel").value === OTRO ? $("mf-area-otra").value.trim() : $("mf-area-sel").value;
+  const cargo = $("mf-cargo-sel").value === OTRO ? $("mf-cargo-otro").value.trim() : $("mf-cargo-sel").value;
+  if (!cargo) return avisar("Elija su cargo o escríbalo si no está en la lista.", true);
+  try {
+    avisar((await api.proponerCargo(cargo, area || null)).mensaje);
+    $("form-cargo").classList.add("hidden");
+    await cargar();
+  } catch (err) {
+    avisar(err.message, true);
+  }
+});
+
 function pintarConfirmacion() {
   const p = estado.ficha.persona;
+  $("mf-cargo-actual").textContent =
+    [p.cargo, p.departamento].filter(Boolean).join(" · ") || "Sin cargo registrado";
   $("mf-cargo").textContent =
     [p.cargo, p.departamento].filter(Boolean).join(" · ") || "Sin cargo registrado";
   $("mf-jefe").textContent = p.jefe_nombre || "Sin jefe registrado";

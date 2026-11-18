@@ -235,6 +235,8 @@ sudo env MYSQL_URL="mysql://root@localhost/rrhh?unix_socket=/var/run/mysqld/mysq
 <span class="c"># 3. Correo y prueba</span>
 bash despliegue/configurar_correo.sh
 .venv/bin/python despliegue/probar_correo.py correo.de.prueba@itsanet.com
+<span class="c"># Después: Administración › Correo del sistema muestra la configuración, los envíos</span>
+<span class="c"># (salió / falló, puerto, motivo) y tiene «Enviarme un correo de prueba».</span>
 <span class="c"># 4. Servicio, tareas, web y sitio de Apache (muestra todo y pregunta antes)</span>
 bash despliegue/instalar.sh</code></pre>
   <div class="nota info"><b>Certificado.</b> La cámara de garita y el escaneo de cédulas exigen HTTPS. El instalador

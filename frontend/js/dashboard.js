@@ -1621,62 +1621,181 @@ async function ofrecerPapeles(solicitudId) {
    error a evitar: quien ve «15 días en marzo de 2019» tiene derecho a saber
    si eso lo tramitó por este sistema o si viene de la hoja del
    departamento. */
-let historial = [];
+/* Ahora el historial se ve por AÑO, como lo lleva Talento Humano en su hoja:
+   cuántos días se asignaron, cuántos se tomaron y si quedaron sobrantes o se
+   adelantaron, con el detalle de cada registro. Cada registro se puede
+   refutar con evidencia (va por correo al departamento) y todo se descarga
+   en Excel o PDF para revisarlo con Talento Humano. */
+const hist = { datos: null, abiertos: new Set(), todos: false, refutando: null };
+const num = (v) => Number(v).toLocaleString("es-EC", { maximumFractionDigits: 2 });
+// Como en la hoja de Talento Humano: 22/01/2024.
+const dmy = (v) => (v ? `${String(v).slice(8, 10)}/${String(v).slice(5, 7)}/${String(v).slice(0, 4)}` : "");
+const REV = {
+  pendiente: ["En revisión por Talento Humano", "bg-amber-100 text-amber-800"],
+  aceptada: ["Revisión aceptada", "bg-emerald-100 text-emerald-800"],
+  rechazada: ["Revisión no aceptada", "bg-slate-200 text-slate-700"],
+};
 
-function pintarHistorial(filtro = "") {
-  const aguja = filtro.trim().toLowerCase();
-  const visibles = aguja
-    ? historial.filter((v) =>
-        `${v.fecha_inicio} ${v.fecha_fin} ${v.folio || ""}`.toLowerCase().includes(aguja))
-    : historial;
+function badgeBalance(b) {
+  if (b < 0) return [`−${num(-b)} (${-b === 1 ? "Día adelantado" : "Días adelantados"})`, "bg-red-500"];
+  if (b > 0) return [`+${num(b)} (${b === 1 ? "Día sobrante" : "Días sobrantes"})`, "bg-emerald-500"];
+  return ["0 (Balance exacto)", "bg-slate-500"];
+}
 
-  $("historial-lista").innerHTML = visibles.length
-    ? visibles.map((v) => `
-      <article class="flex flex-wrap items-center gap-3 px-5 py-3">
-        <div class="min-w-0 flex-1">
-          <p class="font-medium">
-            ${v.fecha_inicio === v.fecha_fin
-              ? fecha(v.fecha_inicio)
-              : `${fecha(v.fecha_inicio, false)} al ${fecha(v.fecha_fin)}`}
-          </p>
-          <p class="mt-0.5 text-xs ${v.procedencia === "historico" ? "text-slate-500" : "text-emerald-700"}">
-            ${v.procedencia === "historico"
-              ? "Registro de Talento Humano"
-              : `Solicitud Nº ${v.folio} · tramitada en el sistema`}
-          </p>
-        </div>
-        <p class="shrink-0 text-right">
-          <span class="text-lg font-semibold tabular-nums">${diasExactos(v.dias)}</span>
-          <span class="text-xs text-slate-500">${Number(v.dias) === 1 ? "día" : "días"}</span>
-        </p>
-      </article>`).join("")
-    : `<p class="px-5 py-10 text-center text-sm text-slate-500">${
-         aguja ? "Nada coincide con esa búsqueda."
-               : "Todavía no hay vacaciones registradas a su nombre."}</p>`;
+function pintarHistorialAnual() {
+  const d = hist.datos;
+  if (!d) return;
+  const r = d.resumen;
+  $("hist-generados").textContent = num(r.generados);
+  $("hist-tomados").textContent = num(r.tomados);
+  $("hist-saldo").textContent = num(r.saldo);
+  // Si el saldo oficial no es generados − tomados, se dice cuánto y por qué.
+  const calculado = Math.round((r.generados - r.tomados) * 100) / 100;
+  const hayNota = Boolean(r.caducados || r.diferencia);
+  $("hist-nota").textContent = hayNota
+    ? `Generados − tomados = ${num(calculado)} días; su saldo oficial es ${num(r.saldo)}.`
+      + (r.caducados ? ` ${num(r.caducados)} día(s) caducaron.` : "")
+      + (r.diferencia ? ` La diferencia de ${num(Math.abs(r.diferencia))} día(s) corresponde a ajustes de Talento Humano`
+        + " o al saldo con que se cargó su ficha." : "")
+      + " Si no está de acuerdo, refute el registro o escriba a Talento Humano."
+    : "";
+  $("hist-nota").classList.toggle("hidden", !hayNota);
+  $("historial-persona").textContent = [d.persona.nombre, d.persona.fecha_ingreso
+    ? `ingreso ${fecha(d.persona.fecha_ingreso)} · ${d.persona.anios_servicio} año(s) de servicio` : ""]
+    .filter(Boolean).join(" · ");
+
+  $("historial-anios").innerHTML = d.anios.length ? d.anios.map((a) => {
+    const [texto, color] = badgeBalance(a.balance);
+    const abierto = hist.todos || hist.abiertos.has(a.anio);
+    const servicio = a.periodos.map((p) =>
+      `Año de servicio ${p.periodo} (${dmy(p.desde)} – ${dmy(p.hasta)}): ${p.base} base + ${p.adicionales} adicionales`
+      + (p.devengado ? "" : " · se va acumulando hasta cumplirlo") + (p.caducado ? " · caducado" : "")).join(" · ");
+    return `
+    <section class="overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
+      <button type="button" data-hist-anio="${a.anio}" aria-expanded="${abierto}"
+              class="flex w-full flex-wrap items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-slate-50 ${abierto ? "bg-slate-50" : ""}">
+        <span class="flex items-center gap-2 text-base font-semibold text-[#1C58D7]">
+          <span aria-hidden="true">📅</span> Año ${a.anio}
+          ${a.en_curso ? '<span class="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-800">en curso</span>' : ""}
+        </span>
+        <span class="flex flex-wrap items-center gap-3 text-sm text-slate-600">
+          <span>Asignados: <b class="text-slate-800">${num(a.asignados)}</b></span>
+          <span class="text-slate-300">|</span>
+          <span>Tomados: <b class="text-slate-800">${num(a.tomados)}</b></span>
+          <span class="rounded-full px-3 py-1 text-xs font-semibold text-white ${color}">${texto}</span>
+          <span class="text-slate-400">${abierto ? "▴" : "▾"}</span>
+        </span>
+      </button>
+      ${abierto ? `
+      <div class="border-t border-slate-200">
+        ${servicio ? `<p class="bg-slate-50 px-4 py-2 text-[11px] text-slate-500">${esc(servicio)}</p>` : ""}
+        <div class="overflow-x-auto">
+        <table class="w-full min-w-[34rem] text-sm">
+          <thead><tr class="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <th class="px-4 py-2.5">Fecha de inicio</th><th class="px-4 py-2.5">Fecha de fin</th>
+            <th class="px-4 py-2.5 text-center">Días descontados</th><th class="px-4 py-2.5">Origen</th><th class="px-2 py-2.5"></th></tr></thead>
+          <tbody class="divide-y divide-slate-100">
+            ${a.registros.length ? a.registros.map((reg, k) => {
+              const rv = reg.revision;
+              return `<tr class="${k % 2 ? "bg-slate-50/60" : ""}">
+                <td class="px-4 py-2.5 tabular-nums">${dmy(reg.fecha_inicio)}</td>
+                <td class="px-4 py-2.5 tabular-nums">${dmy(reg.fecha_fin)}</td>
+                <td class="px-4 py-2.5 text-center font-medium tabular-nums">${num(reg.dias)}</td>
+                <td class="px-4 py-2.5 text-xs text-slate-600">${reg.folio ? `Solicitud Nº ${reg.folio}` : "Hoja de Talento Humano"}
+                  ${rv ? `<span class="mt-1 block w-fit rounded-full px-2 py-0.5 text-[11px] font-medium ${REV[rv.estado][1]}">${REV[rv.estado][0]}</span>
+                         ${rv.respuesta ? `<span class="mt-0.5 block text-[11px] text-slate-500">«${esc(rv.respuesta)}»</span>` : ""}` : ""}</td>
+                <td class="px-2 py-2.5 text-right">${!rv || rv.estado !== "pendiente"
+                  ? `<button type="button" data-refutar="${a.anio}:${k}"
+                       class="rounded-lg px-2 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50">Refutar</button>` : ""}</td>
+              </tr>`;
+            }).join("") : `<tr><td colspan="5" class="px-4 py-4 text-center text-sm text-slate-500">Sin días tomados este año.</td></tr>`}
+          </tbody>
+          <tfoot><tr class="bg-slate-200/70 font-semibold">
+            <td></td><td class="px-4 py-2.5 text-right">Total días:</td>
+            <td class="px-4 py-2.5 text-center tabular-nums">${num(a.tomados)}</td><td colspan="2"></td></tr></tfoot>
+        </table></div>
+      </div>` : ""}
+    </section>`;
+  }).join("") : `<p class="rounded-xl bg-white px-4 py-8 text-center text-sm text-slate-500 ring-1 ring-slate-200">
+      Todavía no hay períodos ni vacaciones registradas a su nombre.</p>`;
 }
 
 $("btn-detalle-saldo").addEventListener("click", async () => {
-  $("historial-resumen").textContent = "Cargando…";
-  $("historial-lista").innerHTML = "";
-  $("buscar-historial").value = "";
+  $("historial-persona").textContent = "Cargando…";
+  $("historial-anios").innerHTML = "";
   abrir("modal-historial");
   try {
-    const r = await api.miHistorial();
-    historial = r.vacaciones;
-    $("historial-resumen").textContent = r.veces
-      ? `${r.veces} vez(ces) · ${diasExactos(r.total_dias)} días en total` +
-        (r.desde_la_hoja
-          ? ` · ${r.desde_la_hoja} de antes de este sistema` : "")
-      : "Todavía no hay vacaciones registradas a su nombre.";
-    pintarHistorial();
+    hist.datos = await api.historialAnual();
+    // El año en curso, abierto: es lo que la persona viene a mirar.
+    const ultimo = hist.datos.anios.filter((a) => a.anio <= new Date().getFullYear()).at(-1);
+    hist.abiertos = new Set(ultimo ? [ultimo.anio] : []);
+    hist.todos = false;
+    $("hist-expandir").textContent = "Ver todo el detalle";
+    pintarHistorialAnual();
   } catch (err) {
-    $("historial-resumen").textContent = "";
-    $("historial-lista").innerHTML =
-      `<p class="px-5 py-10 text-center text-sm text-rose-700">${esc(err.message)}</p>`;
+    $("historial-persona").textContent = "";
+    $("historial-anios").innerHTML =
+      `<p class="rounded-xl bg-white px-4 py-8 text-center text-sm text-rose-700">${esc(err.message)}</p>`;
   }
 });
 
-$("buscar-historial").addEventListener("input", (e) => pintarHistorial(e.target.value));
+$("historial-anios").addEventListener("click", (e) => {
+  const anio = e.target.closest("[data-hist-anio]");
+  const refutar = e.target.closest("[data-refutar]");
+  if (anio) {
+    const n = Number(anio.dataset.histAnio);
+    if (hist.todos) { hist.todos = false; hist.abiertos = new Set(hist.datos.anios.map((a) => a.anio)); }
+    hist.abiertos.has(n) ? hist.abiertos.delete(n) : hist.abiertos.add(n);
+    pintarHistorialAnual();
+  } else if (refutar) {
+    const [anioR, k] = refutar.dataset.refutar.split(":").map(Number);
+    const reg = hist.datos.anios.find((a) => a.anio === anioR).registros[k];
+    hist.refutando = reg;
+    $("form-refutar").reset();
+    $("refutar-error").classList.add("hidden");
+    $("refutar-que").textContent = `${dmy(reg.fecha_inicio)} – ${dmy(reg.fecha_fin)} · ${num(reg.dias)} día(s) · `
+      + (reg.folio ? `Solicitud Nº ${reg.folio}` : "Hoja de Talento Humano");
+    abrir("modal-refutar");
+  }
+});
+
+$("hist-expandir").addEventListener("click", () => {
+  hist.todos = !hist.todos;
+  if (!hist.todos) hist.abiertos = new Set();
+  $("hist-expandir").textContent = hist.todos ? "Plegar todo" : "Ver todo el detalle";
+  pintarHistorialAnual();
+});
+
+document.querySelectorAll("[data-descargar-historial]").forEach((b) => b.addEventListener("click", async () => {
+  b.disabled = true;
+  try { await api.descargarHistorial(b.dataset.descargarHistorial); }
+  catch (err) { avisar(err.message, "error"); }
+  finally { b.disabled = false; }
+}));
+
+$("form-refutar").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const error = $("refutar-error");
+  const motivo = $("refutar-motivo").value.trim();
+  const archivos = [...$("refutar-archivos").files];
+  error.classList.add("hidden");
+  if (motivo.length < 15) { error.textContent = "Explique qué no corresponde (mínimo 15 caracteres)."; return error.classList.remove("hidden"); }
+  if (!archivos.length) { error.textContent = "Adjunte la evidencia: es obligatoria."; return error.classList.remove("hidden"); }
+  const boton = $("refutar-enviar");
+  boton.disabled = true; boton.textContent = "Enviando…";
+  try {
+    const r = await api.refutarRegistro(hist.refutando.origen, hist.refutando.ref, motivo, archivos);
+    $("modal-refutar").close();
+    avisar(r.mensaje);
+    hist.datos = await api.historialAnual();
+    pintarHistorialAnual();
+  } catch (err) {
+    error.textContent = err.message;
+    error.classList.remove("hidden");
+  } finally {
+    boton.disabled = false; boton.textContent = "Enviar a Talento Humano";
+  }
+});
 
 
 /* -------------------------------------------------------- nueva solicitud */

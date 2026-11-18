@@ -95,10 +95,17 @@ function pintarCargos(preferido = "") {
     sel.disabled = true;
     return;
   }
-  const lista = area === OTRO ? [] : catalogo.cargos.filter((c) => !c.area || normal(c.area) === normal(area));
-  const nombres = [...new Set(lista.map((c) => c.cargo))].sort((a, b) => a.localeCompare(b, "es"));
+  /* Primero los cargos del área elegida; después TODOS los demás cargos
+     aprobados de la empresa. Antes solo se mostraban los del área, y un
+     cargo aprobado en otra área «no aparecía» aunque existiera. */
+  const ordenar = (l) => [...new Set(l.map((c) => c.cargo))].sort((a, b) => a.localeCompare(b, "es"));
+  const delArea = area === OTRO ? [] : ordenar(catalogo.cargos.filter((c) => !c.area || normal(c.area) === normal(area)));
+  const otros = ordenar(catalogo.cargos).filter((n) => !delArea.some((d) => normal(d) === normal(n)));
+  const nombres = [...delArea, ...otros];
+  const opciones = (l) => l.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
   sel.innerHTML = '<option value="">Elija su cargo…</option>'
-    + nombres.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("")
+    + (delArea.length ? `<optgroup label="De esta área">${opciones(delArea)}</optgroup>` : "")
+    + (otros.length ? `<optgroup label="Otros cargos de la empresa">${opciones(otros)}</optgroup>` : "")
     + `<option value="${OTRO}">Mi cargo no está en la lista…</option>`;
   sel.disabled = false;
   if (preferido && nombres.some((n) => normal(n) === normal(preferido))) {

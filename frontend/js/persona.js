@@ -18,6 +18,18 @@ const $ = (id) => document.getElementById(id);
 if (!sesion.vigente) location.replace("index.html");
 if (!["jefe", "rrhh", "admin"].includes(sesion.perfil?.rol)) location.replace("dashboard.html");
 
+if (["rrhh", "admin"].includes(sesion.perfil?.rol)) {
+  const caja = document.getElementById("p-historial");
+  caja.classList.remove("hidden");
+  caja.classList.add("flex");
+  caja.querySelectorAll("[data-p-historial]").forEach((b) => b.addEventListener("click", async () => {
+    b.disabled = true;
+    try { await api.descargarHistorial(b.dataset.pHistorial, ID); }
+    catch (err) { alert(err.message); }
+    finally { b.disabled = false; }
+  }));
+}
+
 montarNavegacion($("barra"), { activo: "panel" });
 
 const ID = new URLSearchParams(location.search).get("id");

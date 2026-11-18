@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import re
+import time
 from email.message import EmailMessage
+from email.utils import formatdate, make_msgid, parseaddr
 
 import aiosmtplib
 
@@ -181,6 +185,7 @@ async def enviar(
     desde su propia bandeja.
     """
     settings = get_settings()
+    inicio = time.monotonic()
 
     if settings.email_backend == "console":
         log.info("=== CORREO (modo consola) ===\nPara: %s%s%s\nAsunto: %s\n%s",
@@ -188,11 +193,21 @@ async def enviar(
                  f"\nCopia: {', '.join(copia)}" if copia else "",
                  f"\nResponder a: {responder_a}" if responder_a else "",
                  asunto, texto)
+        await _anotar(destinatario, asunto, "consola", None, None, None, inicio)
         return
 
     mensaje = EmailMessage()
     mensaje["From"] = settings.smtp_remitente
     mensaje["To"] = destinatario
+    # Date y Message-ID: sin ellos Gmail y otros rechazan el correo o lo
+    # mandan a spam («Messages missing a valid Message-ID header are not
+    # accepted»). Ni el sistema ni la librería de envío los ponían.
+    mensaje["Date"] = formatdate(localtime=True)
+    dominio = parseaddr(settings.smtp_remitente or "")[1].partition("@")[2] or None
+    mensaje["Message-ID"] = make_msgid(domain=dominio)
+    # Correo automático (RFC 3834): evita respuestas automáticas en bucle
+    # («fuera de la oficina») contra el buzón del sistema.
+    mensaje["Auto-Submitted"] = "auto-generated"
     if copia:
         mensaje["Cc"] = ", ".join(copia)
     if responder_a:
@@ -211,8 +226,35 @@ async def enviar(
         principal, _, secundario = mime.partition("/")
         mensaje.add_attachment(contenido, maintype=principal, subtype=secundario, filename=nombre)
 
-    await _enviar_con_reintentos(mensaje, [destinatario, *(copia or [])], settings,
-                                 intentos=intentos)
+    try:
+        puerto, intento = await _enviar_con_reintentos(mensaje, [destinatario, *(copia or [])], settings,
+                                                       intentos=intentos)
+    except Exception as exc:
+        await _anotar(destinatario, asunto, "fallido", None, intentos, f"{type(exc).__name__}: {exc}", inicio)
+        raise
+    await _anotar(destinatario, asunto, "enviado", puerto, intento, None, inicio)
+
+
+def enmascarar(email: str) -> str:
+    usuario, _, dominio = (email or "").partition("@")
+    return f"{usuario[:2]}***@{dominio}" if dominio else "***"
+
+
+async def _anotar(destino: str, asunto: str, resultado: str, puerto, intentos, error, inicio: float) -> None:
+    """Constancia de cada envío (sin contenido, destino enmascarado, sin
+    códigos de acceso). Nunca hace fallar el envío: si la base no responde,
+    solo queda en el registro del servidor."""
+    try:
+        from .db import ejecutar
+        await asyncio.wait_for(ejecutar(
+            """INSERT INTO correos_enviados (destino, destino_hash, asunto, resultado, puerto, intentos, error,
+                                             duracion_ms)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+            (enmascarar(destino), hashlib.sha256((destino or "").strip().lower().encode()).hexdigest(),
+             re.sub(r"\b\d{4,8}\b", "••••••", asunto or "")[:255], resultado, puerto, intentos,
+             (error or None) and error[:300], int((time.monotonic() - inicio) * 1000))), timeout=3)
+    except Exception:  # noqa: BLE001
+        log.debug("No se pudo anotar el envío en correos_enviados", exc_info=True)
 
 
 # Lo que conviene volver a intentar: el servidor cortó, tardó o pidió que se
@@ -258,7 +300,7 @@ _puerto_que_funciona: dict[tuple, int] = {}
 
 
 async def _enviar_con_reintentos(mensaje: EmailMessage, destinatarios: list[str], settings,
-                                 *, intentos: int) -> None:
+                                 *, intentos: int) -> tuple[int, int]:
     lista = puertos(settings)
     clave = (settings.smtp_host, tuple(lista))
     preferido = _puerto_que_funciona.get(clave)
@@ -270,7 +312,7 @@ async def _enviar_con_reintentos(mensaje: EmailMessage, destinatarios: list[str]
             if intento > 1 or puerto != settings.smtp_port:
                 log.info("Correo enviado en el intento %s de %s (puerto %s)", intento, intentos, puerto)
             _puerto_que_funciona[clave] = puerto
-            return
+            return puerto, intento
         except Exception as exc:  # noqa: BLE001
             if intento >= intentos or not es_transitorio(exc):
                 raise

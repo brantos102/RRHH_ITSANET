@@ -661,3 +661,59 @@ async def avisar_solicitud_eliminada(destino: str, nombre: str, folio, motivo: s
         await correo.enviar(destino, titulo, texto, _marco(titulo, cuerpo))
     except Exception:  # noqa: BLE001
         log.exception("No se pudo avisar la eliminación de la solicitud Nº %s", folio)
+
+
+# ------------------------------------------------- revisión del historial
+async def avisar_revision_historial(destinatarios: list[dict], region: str | None, persona: dict,
+                                    registro: dict, motivo: str, folio_revision: int,
+                                    adjuntos: list[tuple[str, bytes, str]], responder_a: str | None) -> None:
+    """A Talento Humano (buzón del departamento y su equipo de la sede): una
+    persona refuta un registro de su historial, con la evidencia adjunta.
+    Reply-To es la persona: la respuesta le llega directo."""
+    from html import escape
+    url = f"{get_settings().app_url.rstrip('/')}/administracion.html#pendientes"
+    titulo = f"Revisión del historial de vacaciones: {persona['nombre']} (Nº R-{folio_revision})"
+    filas = [("Colaborador", f"{persona['nombre']} · C.I. {persona['cedula']}"),
+             ("Registro refutado", f"{_rango(registro['fecha_inicio'], registro['fecha_fin'])} · "
+                                   f"{float(registro['dias']):g} día(s)"),
+             ("Origen", registro["origen_texto"]),
+             ("Evidencia", f"{len(adjuntos)} archivo(s) adjunto(s)" if adjuntos else "En el sistema")]
+    cuerpo = (
+        '<p style="margin:0 0 12px;font-size:14px;color:#475569">La persona indica que este registro de su '
+        "historial no es correcto y adjunta evidencia. Revísela y responda desde el sistema.</p>"
+        + _tabla([(e, escape(v)) for e, v in filas])
+        + '<p style="margin:14px 0 4px;font-size:13px;color:#64748b">Lo que dice:</p>'
+        + f'<p style="margin:0;padding:10px 12px;border-radius:10px;background:#f1f5f9;font-size:14px">{escape(motivo)}</p>'
+    )
+    texto = (f"{titulo}\n\n" + "\n".join(f"{e}: {v}" for e, v in filas) + f"\n\nLo que dice:\n{motivo}\n\n"
+             f"Responda desde el sistema:\n{url}\n")
+    html = _marco(titulo, cuerpo, ("Revisar en el sistema", url))
+    enviados: set[str] = set()
+    buzon = await _buzon_del_departamento(region)
+    for destino in ([buzon] if buzon else []) + [p["email"] for p in destinatarios if p.get("email")]:
+        if destino in enviados:
+            continue
+        enviados.add(destino)
+        try:
+            await correo.enviar(destino, titulo, texto, html, adjuntos=adjuntos or None, responder_a=responder_a)
+        except Exception:  # noqa: BLE001
+            log.exception("No se pudo enviar la revisión del historial a %s", destino)
+
+
+async def avisar_revision_resuelta(destino: str, nombre: str, registro: dict, aceptada: bool,
+                                   respuesta: str, quien: str) -> None:
+    from html import escape
+    titulo = ("Talento Humano aceptó la revisión de su historial" if aceptada
+              else "Talento Humano respondió la revisión de su historial")
+    filas = [("Registro", f"{_rango(registro['fecha_inicio'], registro['fecha_fin'])} · "
+                          f"{float(registro['dias']):g} día(s)"),
+             ("Resultado", "Aceptada" if aceptada else "No aceptada"), ("Respondió", quien)]
+    cuerpo = (f'<p style="margin:0 0 12px;font-size:14px;color:#475569">Hola {escape(nombre)}:</p>'
+              + _tabla([(e, escape(v)) for e, v in filas])
+              + f'<p style="margin:14px 0 0;padding:10px 12px;border-radius:10px;background:#f1f5f9;font-size:14px">'
+                f"{escape(respuesta)}</p>")
+    texto = f"{titulo}\n\n" + "\n".join(f"{e}: {v}" for e, v in filas) + f"\n\n{respuesta}\n"
+    try:
+        await correo.enviar(destino, titulo, texto, _marco(titulo, cuerpo))
+    except Exception:  # noqa: BLE001
+        log.exception("No se pudo avisar la respuesta de la revisión del historial")

@@ -434,6 +434,49 @@ export const api = {
   },
   expediente: (id) => peticion(`/personas/${id}`),
 
+  /* Historial de vacaciones por año. `userId` solo para Talento Humano. */
+  historialAnual: (userId = null) =>
+    peticion(userId ? `/rrhh/personas/${userId}/historial` : "/mi-historial/anual"),
+  async descargarHistorial(formato, userId = null) {
+    const ruta = userId ? `/rrhh/personas/${userId}/historial/${formato}` : `/mi-historial/${formato}`;
+    const r = await fetch(`${API}${ruta}`, { headers: { Authorization: `Bearer ${sesion.token}` } });
+    if (!r.ok) throw new ErrorApi("No se pudo generar el archivo.", r.status);
+    const nombre = (r.headers.get("content-disposition") || "").match(/filename="([^"]+)"/)?.[1]
+      || `historial.${formato === "excel" ? "xlsx" : "pdf"}`;
+    const url = URL.createObjectURL(await r.blob());
+    const a = Object.assign(document.createElement("a"), { href: url, download: nombre });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  },
+  /* Refutar un registro: motivo y evidencia (obligatoria). */
+  refutarRegistro(origen, ref, motivo, archivos) {
+    const fd = new FormData();
+    fd.append("origen", origen); fd.append("ref", ref); fd.append("motivo", motivo);
+    for (const f of archivos) fd.append("archivos", f);
+    return peticion("/mi-historial/revisar", { method: "POST", body: fd });
+  },
+  correoEstado: (buscar = "", soloFallidos = false) =>
+    peticion(`/admin/correo?buscar=${encodeURIComponent(buscar)}&solo_fallidos=${soloFallidos}`),
+  correoProbar: () => peticion("/admin/correo/probar", { method: "POST" }),
+  revisionesHistorial: (estado = "pendiente") => peticion(`/rrhh/revisiones-historial?estado=${estado}`),
+  resolverRevision: (id, accion, respuesta) =>
+    peticion(`/rrhh/revisiones-historial/${id}`, { method: "POST", body: JSON.stringify({ accion, respuesta }) }),
+  async abrirEvidencia(rid, eid) {
+    const r = await fetch(`${API}/revisiones-historial/${rid}/evidencias/${eid}`, {
+      headers: { Authorization: `Bearer ${sesion.token}` } });
+    if (!r.ok) throw new ErrorApi("No se pudo abrir la evidencia.", r.status);
+    const tipo = r.headers.get("content-type") || "application/octet-stream";
+    const nombre = (r.headers.get("content-disposition") || "").match(/filename="([^"]+)"/)?.[1] || "evidencia";
+    const url = URL.createObjectURL(new Blob([await r.arrayBuffer()], { type: tipo }));
+    if (/^(application\/pdf|image\/)/.test(tipo)) {
+      if (!window.open(url, "_blank")) throw new ErrorApi("El navegador bloqueó la ventana.", 0);
+    } else {
+      const a = Object.assign(document.createElement("a"), { href: url, download: nombre });
+      document.body.appendChild(a); a.click(); a.remove();
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
+  },
+
   // La pantalla principal: qué bloques se ven, en qué orden y para qué roles.
   misBloques: () => peticion("/panel/bloques"),
   /* ---------------------------------------------- papeles para firmar
@@ -480,6 +523,8 @@ export const api = {
   cerrarSesionesDe: (userId) =>
     peticion(`/auth/admin/usuarios/${userId}/cerrar-sesiones`, { method: "POST" }),
   catalogoCargos: () => peticion("/catalogos/cargos"),
+  proponerCargo: (cargo, departamento) =>
+    peticion("/mi-ficha/cargo", { method: "POST", body: JSON.stringify({ cargo, departamento }) }),
   misContactos: () => peticion("/mi-ficha/contactos"),
   misTelefonos: () => peticion("/mi-ficha/telefonos"),
   agregarMiTelefono: (d) => peticion("/mi-ficha/telefonos", { method: "POST", body: JSON.stringify(d) }),

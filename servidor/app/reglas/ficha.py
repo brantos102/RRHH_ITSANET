@@ -201,10 +201,20 @@ async def resolver_cambio_ficha(cambio_id: int, aprobar: bool, por, motivo: str 
                 await mover_pendientes_de_sede(cambio["user_id"])
             if cambio["campo"] in ("cargo", "departamento"):
                 # Aprobado por Talento Humano: entra al catálogo oficial.
+                # Si el área que pidió junto con el cargo todavía espera,
+                # el cargo se registra en ESA área, no en la anterior.
                 from .catalogo import asegurar
                 ficha = await obtener_uno("SELECT cargo, departamento FROM users WHERE id = %s",
                                           (cambio["user_id"],))
-                await asegurar(ficha["cargo"], ficha["departamento"])
+                # (Solo si esa área ya existe: un área nueva entra al
+                # catálogo cuando se apruebe ella misma.)
+                area_pedida = await obtener_uno(
+                    """SELECT c.valor_nuevo FROM cambios_ficha c JOIN areas a ON a.nombre = TRIM(c.valor_nuevo)
+                        WHERE c.user_id = %s AND c.campo = 'departamento' AND c.estado = 'pendiente'
+                        ORDER BY c.id DESC LIMIT 1""", (cambio["user_id"],))
+                await asegurar(ficha["cargo"],
+                               area_pedida["valor_nuevo"] if area_pedida and cambio["campo"] == "cargo"
+                               else ficha["departamento"])
         elif len(_limpio(motivo)) < 5:
             raise ReglaDeNegocio("Indique por qué se rechaza: la persona debe saber qué corregir")
         await ejecutar(

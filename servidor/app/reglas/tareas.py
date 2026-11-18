@@ -144,7 +144,10 @@ async def aplicar_retencion() -> list[dict[str, Any]]:
                                 (meses_access,))
         finally:
             await ejecutar("SET @retencion = NULL")
-    return [{"tabla": "audit_logs", "eliminados": n1}, {"tabla": "access_logs", "eliminados": n2}]
+    # Constancia de correos: 90 días alcanzan para «¿le llegó?» (LOPDP: lo mínimo).
+    n3 = await ejecutar("DELETE FROM correos_enviados WHERE creado_en < NOW(6) - INTERVAL 90 DAY")
+    return [{"tabla": "audit_logs", "eliminados": n1}, {"tabla": "access_logs", "eliminados": n2},
+            {"tabla": "correos_enviados", "eliminados": n3}]
 
 
 async def avisar_escaneos_pendientes() -> int:
